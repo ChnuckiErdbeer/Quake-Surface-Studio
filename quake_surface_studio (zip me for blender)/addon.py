@@ -24,7 +24,7 @@ from bpy_extras.io_utils import ImportHelper, ExportHelper
 from . import bsp, color, lighting as lighting_utils, material_utils
 
 
-ADDON_VERSION = (0, 11, 3)
+ADDON_VERSION = (0, 11, 4)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -176,31 +176,35 @@ def _set_texture_paint_target(context, obj, image, uv_name, material=None):
                     f"Image '{image.name}' is not an Image Texture slot in '{material.name}'."
                 )
 
-            # Material paint slots are indexed in the order Blender discovers
-            # Image Texture nodes. Keep the chosen node and paint_active_slot in
-            # sync even when a copied material also contains a lightmap node.
+            # Blender's paint-slot cache is not the same API collection as
+            # node_tree.nodes. Select the actual target node and let Blender
+            # rebuild its slot cache when Texture Paint mode is entered.
+            # A node-list index is not a safe paint_active_slot index.
             for node in nodes:
                 node.select = False
             target_node.select = True
             nodes.active = target_node
-            slot_index = image_nodes.index(target_node)
-            material.paint_active_slot = slot_index
+            try:
+                material.update_tag()
+                context.view_layer.update()
+            except Exception:
+                pass
 
-            # Material mode restricts the canvas to the active material slot.
-            # Clear the global image override so unrelated faces keep their
-            # own material textures instead of showing this face-local image.
+            # Material mode takes its canvas from the hit face's material slot.
+            # Never leave an image-wide canvas override set while painting
+            # per-material face textures.
             paint_mode.canvas_source = 'MATERIAL'
             paint_mode.canvas_image = None
             image_paint.mode = 'MATERIAL'
-            image_paint.canvas = image
+            image_paint.canvas = None
             if (
                 paint_mode.canvas_source != 'MATERIAL'
                 or paint_mode.canvas_image is not None
                 or image_paint.mode != 'MATERIAL'
-                or material.paint_active_slot != slot_index
+                or image_paint.canvas is not None
             ):
                 raise RuntimeError(
-                    "Blender did not retain the requested material paint slot."
+                    "Blender did not retain Material paint mode without a global canvas."
                 )
         else:
             # The BSP lightmap is one shared atlas referenced by every face
@@ -429,6 +433,20 @@ def _install_lightmap_nodes(mat, image):
         socket = bsdf.inputs.get(socket_name)
         if socket is not None:
             socket.default_value = value
+    # Adding the lightmap Image Texture node can make it Blender's active
+    # paint canvas by default. Keep albedo as the default Material paint slot;
+    # the dedicated lightmap-paint operator explicitly selects the atlas.
+    base_image_node = _find_image_node(mat, 'base_texture')
+    if base_image_node is not None:
+        for node in nodes:
+            node.select = False
+        base_image_node.select = True
+        nodes.active = base_image_node
+        try:
+            mat.update_tag()
+        except Exception:
+            pass
+
     # Keep one known surface connection.
     if not any(link.from_node == bsdf and link.to_node == output for link in links):
         for link in list(links):
@@ -2533,6 +2551,11 @@ class QSS_OT_detach_faces(Operator):
             # a direct Blender mode-toggle enter the same face-isolated paint
             # mode, even when the user does not invoke the QSS paint button.
             if last_new_index >= 0:
+                # Restrict Texture Paint to the selected detached face(s).
+                # Without the mesh face mask, a brush footprint crossing a
+                # boundary also paints neighbouring faces through their own
+                # materials, including shared source textures/lightmaps.
+                mesh.use_paint_mask = True
                 detached_mat = mesh.materials[last_new_index]
                 detached_image = _find_image(detached_mat, 'base_texture')
                 _set_texture_paint_target(
@@ -2682,6 +2705,10 @@ class QSS_OT_activate_paint(Operator):
             _report(self, 'ERROR', "The active material has no base texture image.")
             return {'CANCELLED'}
         _set_material_image(mat, image)
+        # Face masking is essential for detached painting: Texture Paint
+        # otherwise continues onto neighbouring polygons and writes through
+        # their respective (possibly shared) source materials.
+        obj.data.use_paint_mask = True
         try:
             _set_texture_paint_target(
                 context, obj, image, 'Quake_Texture_UV', material=mat
@@ -2691,10 +2718,51 @@ class QSS_OT_activate_paint(Operator):
             return {'CANCELLED'}
         try:
             bpy.ops.object.mode_set(mode='TEXTURE_PAINT')
-        except RuntimeError as exc:
-            _report(self, 'ERROR', f"Could not enter Texture Paint mode: {exc}")
+            slot_index = material_utils.find_image_slot_index(
+                list(mat.texture_paint_images), image
+            )
+            if slot_index < 0:
+                raise bsp.BSPError(
+                    f"Blender's Material paint slots do not contain '{image.name}'. "
+                    "The image was not made the active paint target; no painting started."
+                )
+            mat.paint_active_slot = slot_index
+            mat.update_tag()
+            context.view_layer.update()
+            active_slot = int(mat.paint_active_slot)
+            paint_images = list(mat.texture_paint_images)
+            paint_slots = list(mat.texture_paint_slots)
+            if active_slot >= len(paint_images) or paint_images[active_slot] != image:
+                raise bsp.BSPError(
+                    f"Blender selected paint slot {active_slot}, not '{image.name}'. "
+                    "The paint target was rejected to protect other textures."
+                )
+            if active_slot >= len(paint_slots):
+                raise bsp.BSPError("Blender did not provide paint-slot UV metadata.")
+            slot = paint_slots[active_slot]
+            slot_uv = str(getattr(slot, 'uv_layer', '') or '')
+            if not bool(getattr(slot, 'is_valid', True)):
+                raise bsp.BSPError(
+                    f"Paint slot for '{image.name}' has no valid UV mapping."
+                )
+            if slot_uv and slot_uv != 'Quake_Texture_UV':
+                raise bsp.BSPError(
+                    f"Paint slot for '{image.name}' uses UV map '{slot_uv}', "
+                    "not 'Quake_Texture_UV'."
+                )
+        except Exception as exc:
+            try:
+                if context.mode == 'TEXTURE_PAINT':
+                    bpy.ops.object.mode_set(mode='OBJECT')
+            except Exception:
+                pass
+            _report(self, 'ERROR', f"Could not validate the detached paint target: {exc}")
             return {'CANCELLED'}
-        _report(self, 'INFO', f"Painting image (active material slot): {image.name}")
+        _report(
+            self, 'INFO',
+            f"Painting image (material paint slot {active_slot}): {image.name}; "
+            "face selection mask enabled."
+        )
         return {'FINISHED'}
 
 
