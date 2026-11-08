@@ -29,16 +29,35 @@ jobs:
       - name: Run standalone tests
         working-directory: "quake_surface_studio (zip me for blender)"
         run: python -m unittest discover -s tests -v
+      - name: Read add-on version
+        id: version
+        working-directory: "quake_surface_studio (zip me for blender)"
+        run: |
+          VERSION=$(python - <<'PY'
+          import ast
+          tree = ast.parse(open("__init__.py", encoding="utf-8").read())
+          info = next(
+              ast.literal_eval(node.value)
+              for node in tree.body
+              if isinstance(node, ast.Assign)
+              and any(isinstance(target, ast.Name) and target.id == "bl_info"
+                      for target in node.targets)
+          )
+          print(".".join(str(part) for part in info["version"]))
+          PY
+          )
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Build versioned Blender install ZIP
         run: |
+          VERSION="${{ steps.version.outputs.value }}"
           mkdir -p dist/quake_surface_studio
           cp -a "quake_surface_studio (zip me for blender)/." dist/quake_surface_studio/
           rm -rf dist/quake_surface_studio/tests dist/quake_surface_studio/__pycache__
           cd dist
-          zip -qr "../Quake-Surface-Studio-v0.11.5.zip" quake_surface_studio
+          zip -qr "../Quake-Surface-Studio-v${VERSION}.zip" quake_surface_studio
       - name: Upload Blender install ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: Quake-Surface-Studio-v0.11.5
-          path: Quake-Surface-Studio-v0.11.5.zip
+          name: Quake-Surface-Studio-v${{ steps.version.outputs.value }}
+          path: Quake-Surface-Studio-v${{ steps.version.outputs.value }}.zip
           if-no-files-found: error
