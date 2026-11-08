@@ -21,7 +21,7 @@ from bpy.props import StringProperty, FloatProperty, BoolProperty, IntProperty
 from bpy.types import Operator, Panel
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
-from . import bsp, color, lighting as lighting_utils
+from . import bsp, color, lighting as lighting_utils, material_utils
 
 
 ADDON_VERSION = (0, 11, 1)
@@ -2485,8 +2485,9 @@ class QSS_OT_detach_faces(Operator):
             # slots, so users would remain non-zero and failed detaches leaked
             # QSS_Detached_* materials into the mesh.
             try:
-                while len(mesh.materials) > original_material_count:
-                    mesh.materials.pop(index=len(mesh.materials) - 1)
+                material_utils.trim_appended_material_slots(
+                    mesh.materials, original_material_count
+                )
                 obj.active_material_index = min(
                     original_active_material_index,
                     max(0, original_material_count - 1)
