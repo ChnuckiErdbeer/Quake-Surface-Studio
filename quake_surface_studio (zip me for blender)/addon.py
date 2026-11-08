@@ -21,7 +21,7 @@ from bpy.props import StringProperty, FloatProperty, BoolProperty, IntProperty, 
 from bpy.types import Operator, Panel
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
-from . import bsp, color, lighting as lighting_utils, material_utils
+from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils
 
 
 ADDON_VERSION = (0, 12, 0)
@@ -1249,7 +1249,167 @@ def _qss_safe_collection_item(collection, index, label):
         raise bsp.BSPError(f"Cannot access {label} index {index}; Blender reported: {exc}") from exc
 
 
-def _patch_lightmap_lump(obj, parsed):
+
+def _build_enhanced_lightmap_payload(
+    obj, parsed, image, pixels, lighting_source, source_lit_rgb,
+    face_attrs, resolution, base_pixel_scale, base_gutter,
+):
+    """Append high-density per-face samples and build LMSHIFT/LMOFFSET/LMSTYLE.
+
+    Classic samples are already patched into the leading LIGHTING/RGBLIGHTING
+    region. Enhanced samples are appended after that region so readers that
+    ignore BSPX retain their original face lightofs and classic luxel spacing.
+    """
+    unsupported = {
+        'LMSHIFT', 'LMOFFSET', 'LMSTYLE', 'LMSTYLE16', 'DECOUPLED_LM'
+    }.intersection(parsed.bspx_lumps)
+    if unsupported:
+        names = ', '.join(sorted(unsupported))
+        raise bsp.BSPError(
+            f"Enhanced export cannot rebase a source BSP that already contains "
+            f"lightmap override(s): {names}. Import support for existing per-face "
+            "lightmap extensions is not implemented yet."
+        )
+
+    mesh = obj.data
+    face_id_attr = face_attrs['qss_bsp_face_id']
+    has_attr = face_attrs['qss_lm_has_data']
+    x_attr = face_attrs['qss_lm_atlas_x']
+    y_attr = face_attrs['qss_lm_atlas_y']
+    w_attr = face_attrs['qss_lm_sample_w']
+    h_attr = face_attrs['qss_lm_sample_h']
+    polygons_by_face = {}
+    for poly_index, _poly in enumerate(mesh.polygons):
+        face_id = int(face_id_attr.data[poly_index].value)
+        if face_id in polygons_by_face:
+            raise bsp.BSPError(f"Duplicate mesh metadata found for BSP face {face_id}.")
+        polygons_by_face[face_id] = poly_index
+
+    faces = parsed.faces()
+    texinfos = parsed.texinfos()
+    vertices = parsed.vertices()
+    image_size = int(image.size[0])
+    image_pixels = pixels
+    face_records = {}
+
+    for face_id, face in enumerate(faces):
+        light_offset = int(face[9])
+        styles = tuple(int(value) for value in face[5:9])
+        if light_offset < 0 or styles[0] == 255:
+            continue
+        active_styles = [style for style in styles if style != 255]
+        if not active_styles:
+            raise bsp.BSPError(f"Face {face_id} has a light offset but no active styles.")
+        texinfo_id = int(face[4])
+        if texinfo_id < 0 or texinfo_id >= len(texinfos):
+            raise bsp.BSPError(f"Face {face_id} has an invalid texinfo index for enhanced lightmap export.")
+        vertex_ids = parsed.face_vertex_indices(face)
+        if len(vertex_ids) < 3 or any(index < 0 or index >= len(vertices) for index in vertex_ids):
+            raise bsp.BSPError(f"Face {face_id} has invalid vertex references for enhanced lightmap export.")
+
+        positions = [vertices[index] for index in vertex_ids]
+        ext = _calc_face_lightmap_extents(positions, texinfos[texinfo_id])
+        base_s_min, base_t_min, base_extent_s, base_extent_t, svec, tvec = ext
+        base_width = (base_extent_s >> 4) + 1
+        base_height = (base_extent_t >> 4) + 1
+        block_size = base_width * base_height
+        if light_offset + block_size * len(active_styles) > len(lighting_source):
+            raise bsp.BSPError(f"Face {face_id} source lightmap samples exceed the LIGHTING lump.")
+
+        record = None
+        poly_index = polygons_by_face.get(face_id)
+        if poly_index is not None and has_attr.data[poly_index].value:
+            stored_width = int(w_attr.data[poly_index].value)
+            stored_height = int(h_attr.data[poly_index].value)
+            if (stored_width, stored_height) != (base_width, base_height):
+                raise bsp.BSPError(
+                    f"Face {face_id} atlas dimensions {stored_width}x{stored_height} do not match "
+                    f"the source BSP's {base_width}x{base_height} classic luxel grid."
+                )
+            s_values = [
+                p[0] * svec[0] + p[1] * svec[1] + p[2] * svec[2] + svec[3]
+                for p in positions
+            ]
+            t_values = [
+                p[0] * tvec[0] + p[1] * tvec[1] + p[2] * tvec[2] + tvec[3]
+                for p in positions
+            ]
+            try:
+                shift, s_min, t_min, width, height = lightmap_export_utils.choose_luxel_grid(
+                    s_values, t_values, resolution
+                )
+                rgb_samples = lightmap_export_utils.sample_face_rgb_from_atlas(
+                    image_pixels, image_size, resolution,
+                    int(x_attr.data[poly_index].value),
+                    int(y_attr.data[poly_index].value),
+                    int(base_gutter), int(base_pixel_scale),
+                    int(base_s_min), int(base_t_min),
+                    int(s_min), int(t_min), int(width), int(height),
+                    1 << shift,
+                )
+            except ValueError as exc:
+                raise bsp.BSPError(f"Could not sample enhanced lightmap for face {face_id}: {exc}") from exc
+            record = {
+                'shift': shift,
+                'width': width,
+                'height': height,
+                'rgb': rgb_samples,
+            }
+
+        if record is None:
+            # A rare face can lack a paint-atlas island (for example, geometry
+            # skipped by the importer). Keep it valid at classic density using
+            # its original style-combined samples rather than dropping lighting.
+            try:
+                original_rgb = lighting_utils.combine_style_samples(
+                    lighting_source, source_lit_rgb, light_offset, block_size, active_styles
+                )
+            except (ValueError, IndexError) as exc:
+                raise bsp.BSPError(f"Could not recover source lightmap samples for face {face_id}: {exc}") from exc
+            rgb_samples = bytes(
+                channel
+                for sample in original_rgb
+                for channel in sample
+            )
+            record = {
+                'shift': 4,
+                'width': base_width,
+                'height': base_height,
+                'rgb': rgb_samples,
+            }
+        face_records[face_id] = record
+
+    try:
+        extension = lightmap_export_utils.build_lightmap_extension_data(
+            len(faces), face_records, len(lighting_source)
+        )
+    except ValueError as exc:
+        raise bsp.BSPError(f"Could not build enhanced BSPX lightmap data: {exc}") from exc
+
+    appended_mono = extension['LIGHTING_APPEND']
+    appended_rgb = extension['RGBLIGHTING_APPEND']
+    lighting = bytearray(lighting_source)
+    rgb = bytearray()
+    if source_lit_rgb is None:
+        rgb.extend(channel for sample in lighting_source for channel in (sample, sample, sample))
+    else:
+        rgb.extend(source_lit_rgb)
+    lighting.extend(appended_mono)
+    rgb.extend(appended_rgb)
+    if len(rgb) != len(lighting) * 3:
+        raise bsp.BSPError("Enhanced RGB and monochrome lightmap sample counts do not match.")
+
+    bspx = {
+        'LMSHIFT': extension['LMSHIFT'],
+        'LMOFFSET': extension['LMOFFSET'],
+        'LMSTYLE': extension['LMSTYLE'],
+        'RGBLIGHTING': bytes(rgb),
+    }
+    return bytes(lighting), bsp.build_lit_file(bytes(rgb)), bspx
+
+
+
+def _patch_lightmap_lump(obj, parsed, enhanced=False):
     """Return (monochrome BSP lighting lump, QLIT v1 sidecar or None)."""
     image_name = obj.get('qss_lightmap_image_name', '')
     lighting_source = parsed.lumps[bsp.LUMP_LIGHTING]
@@ -1262,8 +1422,10 @@ def _patch_lightmap_lump(obj, parsed):
     if not lighting_source and source_lit_rgb is not None:
         lighting_source = bsp.rgb_lighting_to_luminance(source_lit_rgb)
     if not image_name:
+        if enhanced:
+            raise bsp.BSPError('Enhanced lightmap export requires an imported working lightmap atlas.')
         original_lit = bsp.build_lit_file(source_lit_rgb) if source_lit_rgb is not None else None
-        return lighting_source, original_lit
+        return lighting_source, original_lit, {}
     image = bpy.data.images.get(image_name)
     if image is None:
         raise bsp.BSPError("The imported lightmap atlas image is missing from this .blend file.")
@@ -1349,7 +1511,14 @@ def _patch_lightmap_lump(obj, parsed):
             rgb_start, rgb_end = layer_start * 3, layer_end * 3
             if rgb_end <= len(lit_rgb):
                 lit_rgb[rgb_start:rgb_end] = bytes(block_size * 3)
-    return bytes(lighting), bsp.build_lit_file(bytes(lit_rgb))
+    if enhanced:
+        return _build_enhanced_lightmap_payload(
+            obj, parsed, image, px, lighting_source, source_lit_rgb,
+            face_attrs, resolution,
+            int(obj.get('qss_lightmap_scale', 1)),
+            int(obj.get('qss_lightmap_gutter', 2)),
+        )
+    return bytes(lighting), bsp.build_lit_file(bytes(lit_rgb)), {}
 
 
 
