@@ -3133,6 +3133,24 @@ def _qss_audit_map(context, entry, index, output_root, options):
     before_mesh_ids = {item.as_pointer() for item in bpy.data.meshes}
     before_material_ids = {item.as_pointer() for item in bpy.data.materials}
     before_image_ids = {item.as_pointer() for item in bpy.data.images}
+    viewport_states = []
+    if context.screen is not None:
+        for area in context.screen.areas:
+            if area.type != "VIEW_3D":
+                continue
+            space = next((item for item in area.spaces if item.type == "VIEW_3D"), None)
+            if space is None:
+                continue
+            region_3d = space.region_3d
+            viewport_states.append({
+                "space": space,
+                "clip_start": float(space.clip_start),
+                "clip_end": float(space.clip_end),
+                "view_location": region_3d.view_location.copy(),
+                "view_distance": float(region_3d.view_distance),
+                "view_rotation": region_3d.view_rotation.copy(),
+                "view_perspective": region_3d.view_perspective,
+            })
     imported_obj = None
     test_obj = None
     source_path = ""
@@ -3270,6 +3288,8 @@ def _qss_audit_map(context, entry, index, output_root, options):
         # real BSP luxel may require visibility rays against the imported mesh.
         if options.get("quake_bake"):
             if int(imported_obj.get("qss_light_entity_count", 0)) > 0:
+                source_before_direct_bake = bpy.data.images.get(imported_obj.get("qss_original_lightmap_backup", ""))
+                source_before_hash = _image_hash(source_before_direct_bake) if source_before_direct_bake else ""
                 op_result = _qss_audit_call(context, bpy.ops.qss.quake_direct_bake, imported_obj)
                 baked = ("FINISHED" in op_result
                          and imported_obj.get("qss_lightmap_source") == "quake_direct_cpu_bake")
@@ -3280,9 +3300,12 @@ def _qss_audit_map(context, entry, index, output_root, options):
                                      f"rays={imported_obj.get('qss_last_quake_bake_ray_tests', 'n/a')} · "
                                      f"error={imported_obj.get('qss_last_quake_bake_error', '')}")
                 restore_result = _qss_audit_call(context, bpy.ops.qss.restore_original_lightmap, imported_obj)
+                restored_working = bpy.data.images.get(imported_obj.get("qss_lightmap_image_name", ""))
+                restored_hash = _image_hash(restored_working) if restored_working else ""
+                restore_good = "FINISHED" in restore_result and restored_hash == source_before_hash
                 _qss_audit_add_check(record, "Restore original after Quake bake",
-                                     "PASS" if "FINISHED" in restore_result else "FAIL",
-                                     f"operator={restore_result}")
+                                     "PASS" if restore_good else "FAIL",
+                                     f"operator={restore_result} · exact_source_match={restored_hash == source_before_hash}")
             else:
                 _qss_audit_add_check(record, "Quake Direct Lightmap Solver", "SKIP",
                                      "No Quake light entities are present.")
@@ -3340,9 +3363,15 @@ def _qss_audit_map(context, entry, index, output_root, options):
                             poly.select = False
                         test_obj.data.polygons[0].select = True
                         frame_result = bpy.ops.qss.frame_selection("EXEC_DEFAULT")
-                        _qss_audit_add_check(record, "Focus selected face", 
+                        _qss_audit_add_check(record, "Focus selected face",
                                              "PASS" if "FINISHED" in frame_result else "FAIL",
                                              f"operator={frame_result}")
+                        clip_result = bpy.ops.qss.optimize_view_clipping("EXEC_DEFAULT")
+                        _qss_audit_add_check(record, "Optimize view clipping",
+                                             "PASS" if "FINISHED" in clip_result else "FAIL",
+                                             f"operator={clip_result}")
+                        _qss_audit_add_check(record, "FPS / Walk Navigation",
+                                             "SKIP", "The walk operator is modal and requires real keyboard/mouse input.")
                     else:
                         _qss_audit_add_check(record, "Focus selected face", "SKIP", "Mesh has no faces.")
                     if test_obj.get("qss_has_player_start"):
@@ -3564,6 +3593,18 @@ def _qss_audit_map(context, entry, index, output_root, options):
                     except Exception:
                         pass
         try:
+            for state in viewport_states:
+                try:
+                    space = state["space"]
+                    space.clip_start = state["clip_start"]
+                    space.clip_end = state["clip_end"]
+                    region_3d = space.region_3d
+                    region_3d.view_location = state["view_location"]
+                    region_3d.view_distance = state["view_distance"]
+                    region_3d.view_rotation = state["view_rotation"]
+                    region_3d.view_perspective = state["view_perspective"]
+                except Exception:
+                    pass
             context.scene.render.engine = original_engine
             context.scene.world = original_world
             for selected in list(context.selected_objects):
