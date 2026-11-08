@@ -1,0 +1,38 @@
+---- light / ericw-tools 2.0.0-alpha11 ----
+LoadBSPFile: '/mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.bsp'
+BSP is version Quake BSP bsp29
+INFO: using built-in palette.
+load: WARNING: filesystem error: cannot get file size: Is a directory [/mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/]
+ConvertTextures: WARNING: invalid size data for 
+Loading extended texinfo flags from /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.texinfo.json...
+Loading extended content flags from /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.content.json...
+12 entities read, 10 are lights.
+
+--- Options Summary ---
+    "bounce" was set to "2" (from map)
+    "bouncescale" was set to "1.000000" (from map)
+    "bouncecolorscale" was set to "1.000000" (from map)
+
+Embree_TraceInit: Embree version: 4.4.0
+Embree_TraceInit: 
+	0 sky faces
+	40 solid faces
+	0 filtered faces
+	0 shadow-casting skip faces
+SetupLights: 10 initial lights
+SetupLights: 10 after surface lights
+SetupLights: 10 after jittering
+Final count: 10 lights, 0 suns in use.
+0 surface light points in use.
+map uses color: true
+Colored light entities/settings detected: .lit output enabled.
+lightmap size (total): 15696
+Lighting Completed.
+
+Writing /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.lit
+0 switchable light styles (32 max)
+Writing /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.bsp as Quake BSP bsp29
+0.006s seconds elapsed
+0 empty lightmaps
+
+
