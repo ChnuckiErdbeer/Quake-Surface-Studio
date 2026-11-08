@@ -3593,14 +3593,14 @@ class QSS_OT_run_map_audit(Operator):
     def _begin(self, context):
         self._saved_active = context.view_layer.objects.active
         self._saved_mode = getattr(self._saved_active, "mode", "OBJECT") if self._saved_active else "OBJECT"
-        if self._saved_active is not None and self._saved_mode != "OBJECT":
-            with context.temp_override(**_qss_audit_context_override(context, self._saved_active)):
-                bpy.ops.object.mode_set(mode="OBJECT")
         game_dir = _qss_abspath(context.scene.qss_game_dir or "")
         self._entries = quake_paths.discover_maps(game_dir)
         if not self._entries:
             self.report({"WARNING"}, "No loose or PAK maps found in the active game folder.")
             return False
+        if self._saved_active is not None and self._saved_mode != "OBJECT":
+            with context.temp_override(**_qss_audit_context_override(context, self._saved_active)):
+                bpy.ops.object.mode_set(mode="OBJECT")
         root_dir = bpy.utils.user_resource("DATAFILES", path=os.path.join("qss", "audits"), create=True)
         stamp = time.strftime("%Y%m%d_%H%M%S")
         self._output_root = os.path.join(root_dir, "Map_Audit_" + stamp)
@@ -5971,6 +5971,8 @@ class QSS_PT_project(Panel):
         tests_box.label(text="TESTING & BSP VALIDATION", icon='EXPERIMENTAL')
         tests_box.operator(QSS_OT_validate_bsp_export.bl_idname, text="Validate Exported BSP…", icon='CHECKMARK')
         tests_box.operator(QSS_OT_run_python_tests.bl_idname, text="Run QSS Python Test Suite", icon='PLAY')
+        tests_box.operator(QSS_OT_run_map_audit.bl_idname, text="Run Full Game Map Audit", icon='EXPERIMENTAL')
+        tests_box.label(text="Full audit works without an imported map; it uses the active game folder.", icon='INFO')
         tests_box.label(text="Reports are written to Blender's Text Editor datablocks.", icon='INFO')
         if not _qss_is_map_object(obj):
             layout.label(text="No Quake BSP selected.", icon='INFO')
