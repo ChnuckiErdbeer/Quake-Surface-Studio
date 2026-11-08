@@ -1,4 +1,10 @@
-# Quake Surface Studio 0.15.0
+# Quake Surface Studio 0.15.1
+
+## 0.15.1 changes
+
+- Changes FPS / Walk Navigation into a keyboard-movement overlay: WASD follows the live viewport heading, Q/E moves vertically, and Shift accelerates. QSS no longer captures MMB or mouse movement, so Blender's regular viewport orbit remains in control.
+- Removes the legacy QSS MMB-to-FPS keymap from both add-on and user keyconfigs during registration cleanup.
+- Fixes movement to translate the current viewport while preserving its existing aim, projection mode and orbit distance.
 
 ## 0.15.0 changes
 
