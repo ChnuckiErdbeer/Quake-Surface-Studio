@@ -24,7 +24,7 @@ from bpy_extras.io_utils import ImportHelper, ExportHelper
 from . import bsp, color, lighting as lighting_utils, material_utils
 
 
-ADDON_VERSION = (0, 11, 1)
+ADDON_VERSION = (0, 11, 2)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -150,11 +150,25 @@ def _set_single_image_paint_target(context, obj, image, uv_name):
         raise bsp.BSPError(f"Could not activate paint UV map '{uv_name}': {exc}") from exc
 
     try:
-        image_paint = context.scene.tool_settings.image_paint
-        image_paint.mode = 'IMAGE'
+        tool_settings = context.scene.tool_settings
+        # Blender 5.x separates the canvas source selector from the legacy
+        # ImagePaint canvas pointer. Set both: the 3D viewport's paint display
+        # override reads PaintModeSettings, while the paint engine uses
+        # ImagePaint.canvas.
+        paint_mode = tool_settings.paint_mode
+        if paint_mode is None:
+            raise RuntimeError("Blender has no active PaintModeSettings.")
+        paint_mode.canvas_source = 'IMAGE'
+        paint_mode.canvas_image = image
+
+        image_paint = tool_settings.image_paint
         image_paint.canvas = image
         image_paint.interpolation = 'CLOSEST'
-        if image_paint.mode != 'IMAGE' or image_paint.canvas != image:
+        if (
+            paint_mode.canvas_source != 'IMAGE'
+            or paint_mode.canvas_image != image
+            or image_paint.canvas != image
+        ):
             raise RuntimeError("Blender did not retain the requested Single Image canvas.")
     except Exception as exc:
         raise bsp.BSPError(f"Could not set '{image.name}' as the Texture Paint canvas: {exc}") from exc
