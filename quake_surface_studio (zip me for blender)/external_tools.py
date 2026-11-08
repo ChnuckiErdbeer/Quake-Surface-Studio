@@ -46,6 +46,38 @@ def discover_tools(tool_directory: str) -> dict[str, str]:
     return {name: resolve_tool(tool_directory, name) for name in ERICW_TOOL_NAMES}
 
 
+def build_decoupled_light_command(
+    executable: str,
+    bsp_path: str,
+    *,
+    world_units_per_luxel: float = 16.0,
+    quake_root: str = "",
+    game_dir: str = "",
+) -> list[str]:
+    """Build an ericw light command that writes DECOUPLED_LM into a BSP copy."""
+    import math
+
+    exe = os.path.abspath(os.path.expandvars(os.path.expanduser(executable or "")))
+    source = os.path.abspath(os.path.expandvars(os.path.expanduser(bsp_path or "")))
+    scale = float(world_units_per_luxel)
+    if not exe:
+        raise ValueError("No ericw-tools light executable was configured.")
+    if not source or not source.lower().endswith(".bsp"):
+        raise ValueError("Select a source .bsp file.")
+    if not math.isfinite(scale) or not 1.0 <= scale <= 8192.0:
+        raise ValueError("World units per luxel must be between 1 and 8192.")
+
+    command = [exe, "-verbose", "-world_units_per_luxel", f"{scale:g}"]
+    root = os.path.abspath(os.path.expanduser(quake_root)) if quake_root else ""
+    game = os.path.abspath(os.path.expanduser(game_dir)) if game_dir else ""
+    if root and os.path.isdir(root):
+        command.extend(["-basedir", root])
+    if game and os.path.isdir(game):
+        command.extend(["-gamedir", game])
+    command.append(source)
+    return command
+
+
 def run_command(
     executable: str,
     arguments: Iterable[str] = (),

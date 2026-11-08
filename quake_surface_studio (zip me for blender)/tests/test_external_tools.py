@@ -75,6 +75,34 @@ class ExternalToolsTests(unittest.TestCase):
                 "/tools/ironwail", "", "", map_path="e1m1", demo_file="demo.dem"
             )
 
+    def test_builds_decoupled_light_command_without_shell_string(self):
+        with tempfile.TemporaryDirectory() as root:
+            game = os.path.join(root, "id1")
+            os.makedirs(game)
+            source = os.path.join(game, "maps", "test.bsp")
+            os.makedirs(os.path.dirname(source))
+            with open(source, "wb") as handle:
+                handle.write(b"BSP")
+            command = external_tools.build_decoupled_light_command(
+                os.path.join(root, "light.exe"),
+                source,
+                world_units_per_luxel=16,
+                quake_root=root,
+                game_dir=game,
+            )
+            self.assertEqual(command[1:4], [
+                "-verbose", "-world_units_per_luxel", "16"
+            ])
+            self.assertIn("-basedir", command)
+            self.assertIn("-gamedir", command)
+            self.assertEqual(command[-1], source)
+
+    def test_rejects_invalid_decoupled_luxel_scale(self):
+        with self.assertRaises(ValueError):
+            external_tools.build_decoupled_light_command(
+                "/tools/light", "/maps/test.bsp", world_units_per_luxel=0
+            )
+
     def test_external_command_captures_output_and_return_code(self):
         result = external_tools.run_command(
             sys.executable, ["-c", "print('qss-external-ok')"], timeout=10

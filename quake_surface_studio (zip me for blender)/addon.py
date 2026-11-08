@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils
 
 
-ADDON_VERSION = (0, 16, 0)
+ADDON_VERSION = (0, 16, 1)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -4463,6 +4463,143 @@ class QSS_OT_launch_ironwail(Operator):
 
 
 
+class QSS_OT_generate_decoupled_lightmaps(Operator, ImportHelper):
+    bl_idname = "qss.generate_decoupled_lightmaps"
+    bl_label = "Generate Decoupled Lightmaps"
+    bl_description = (
+        "Run ericw-tools light on a separate copy of a BSP and generate the "
+        "DECOUPLED_LM BSPX extension"
+    )
+    filename_ext = ".bsp"
+    filter_glob: StringProperty(default="*.bsp", options={'HIDDEN'})
+    world_units_per_luxel: FloatProperty(
+        name="World units per luxel",
+        description="Target spacing for the generated decoupled lightmaps",
+        default=16.0, min=1.0, max=8192.0, precision=2,
+    )
+
+    def invoke(self, context, event):
+        obj = context.object
+        source = obj.get("qss_source_path", "") if _qss_is_map_object(obj) else ""
+        if source and os.path.isfile(bpy.path.abspath(source)):
+            self.filepath = bpy.path.abspath(source)
+            return context.window_manager.invoke_props_dialog(self, width=560)
+        return ImportHelper.invoke(self, context, event)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "filepath", text="Source BSP")
+        layout.prop(self, "world_units_per_luxel")
+        layout.label(text="A new *_decoupled.bsp copy will be created beside the source.", icon="INFO")
+        layout.label(text="The source BSP is never modified; lighting is recalculated.", icon="INFO")
+
+    def execute(self, context):
+        import shutil
+
+        source_path = bpy.path.abspath(self.filepath)
+        output_path = ""
+        output_lit = ""
+        try:
+            if not source_path or not os.path.isfile(source_path):
+                raise FileNotFoundError(f"Source BSP does not exist: {source_path}")
+            if not source_path.lower().endswith(".bsp"):
+                raise ValueError("Select a .bsp file.")
+
+            scene = context.scene
+            tools_dir = _qss_abspath(getattr(scene, "qss_ericw_tools_dir", "") or "")
+            light = external_tools.resolve_tool(tools_dir, "light")
+            if not light:
+                raise FileNotFoundError(
+                    "ericw-tools light was not found. Set the ericw-tools folder in Project & Source."
+                )
+
+            source_root, extension = os.path.splitext(source_path)
+            candidate = source_root + "_decoupled" + extension
+            suffix = 1
+            while os.path.exists(candidate):
+                candidate = f"{source_root}_decoupled_{suffix:03d}{extension}"
+                suffix += 1
+            output_path = candidate
+            output_lit = os.path.splitext(output_path)[0] + ".lit"
+
+            command = external_tools.build_decoupled_light_command(
+                light,
+                output_path,
+                world_units_per_luxel=self.world_units_per_luxel,
+                quake_root=_qss_abspath(getattr(scene, "qss_quake_root", "") or ""),
+                game_dir=_qss_abspath(getattr(scene, "qss_game_dir", "") or ""),
+            )
+
+            shutil.copy2(source_path, output_path)
+            source_lit = source_root + ".lit"
+            if os.path.isfile(source_lit):
+                shutil.copy2(source_lit, output_lit)
+
+            result = external_tools.run_command(
+                light, command[1:], timeout=float(getattr(scene, "qss_audit_timeout", 300)),
+                cwd=os.path.dirname(output_path) or None,
+            )
+            lines = [
+                "QSS DECOUPLED LIGHTMAP GENERATION",
+                f"Source: {source_path}",
+                f"Output: {output_path}",
+                f"World units per luxel: {self.world_units_per_luxel:g}",
+                f"Command: {command!r}",
+                f"Process status: {result.get('status')}",
+                f"Return code: {result.get('returncode')}",
+                "",
+                result.get("stdout", ""),
+                result.get("stderr", ""),
+            ]
+
+            if result.get("status") != "PASS":
+                raise RuntimeError(
+                    f"ericw-tools light failed ({result.get('status')}): "
+                    f"{(result.get('stdout') or result.get('stderr') or '')[-1200:]}"
+                )
+            if not os.path.isfile(output_path):
+                raise RuntimeError("ericw-tools reported success but did not write the output BSP.")
+
+            generated = bsp.BSP29.from_file(output_path)
+            decoupled = generated.bspx_lumps.get("DECOUPLED_LM", b"")
+            if not decoupled:
+                raise RuntimeError(
+                    "ericw-tools completed, but the output BSP has no DECOUPLED_LM lump."
+                )
+            if len(decoupled) % 40:
+                raise RuntimeError(
+                    f"Generated DECOUPLED_LM has an invalid size ({len(decoupled)} bytes; expected multiples of 40)."
+                )
+
+            lines.extend([
+                "",
+                "VERIFICATION: PASS",
+                f"DECOUPLED_LM bytes: {len(decoupled)}",
+                f"Decoupled face records: {len(decoupled) // 40}",
+                f"Other BSPX lumps: {', '.join(sorted(generated.bspx_lumps))}",
+                f"Output .lit sidecar: {'present' if os.path.isfile(output_lit) else 'not present'}",
+            ])
+            _qss_write_text_report("QSS_Decoupled_Lightmap_Generation", "\n".join(lines))
+            self.report(
+                {"INFO"},
+                f"Generated {len(decoupled) // 40} decoupled lightmap records: {os.path.basename(output_path)}",
+            )
+            return {"FINISHED"}
+
+        except Exception as exc:
+            if output_path:
+                for path in (output_path, output_lit):
+                    try:
+                        if path and os.path.isfile(path):
+                            os.remove(path)
+                    except OSError:
+                        pass
+            detail = f"QSS DECOUPLED LIGHTMAP GENERATION FAILED\n{exc}"
+            _qss_write_text_report("QSS_Decoupled_Lightmap_Generation", detail)
+            self.report({"ERROR"}, str(exc)[:240])
+            return {"CANCELLED"}
+
+
 class QSS_OT_detach_faces(Operator):
     bl_idname = "qss.detach_selected_faces"
     bl_label = "Detach Selected Faces"
@@ -6688,6 +6825,13 @@ class QSS_PT_project(Panel):
         if scene.qss_ericw_tools_dir:
             found_tools = [name for name, path in external_tools.discover_tools(_qss_abspath(scene.qss_ericw_tools_dir)).items() if path]
             tools_box.label(text="Found: " + (", ".join(found_tools) if found_tools else "no ericw executables"), icon='INFO')
+            light_row = tools_box.row()
+            light_row.enabled = bool(external_tools.resolve_tool(_qss_abspath(scene.qss_ericw_tools_dir), "light"))
+            light_row.operator(
+                QSS_OT_generate_decoupled_lightmaps.bl_idname,
+                text="Generate Decoupled Lightmaps…",
+                icon="LIGHT",
+            )
         tests_box = layout.box()
         tests_box.label(text="TESTING & BSP VALIDATION", icon='EXPERIMENTAL')
         tests_box.operator(QSS_OT_validate_bsp_export.bl_idname, text="Validate Exported BSP…", icon='CHECKMARK')
@@ -7065,6 +7209,7 @@ CLASSES = (
     QSS_OT_run_python_tests,
     QSS_OT_run_map_audit,
     QSS_OT_launch_ironwail,
+    QSS_OT_generate_decoupled_lightmaps,
     QSS_OT_detach_faces,
     QSS_OT_activate_paint,
     QSS_OT_activate_lightmap_paint,

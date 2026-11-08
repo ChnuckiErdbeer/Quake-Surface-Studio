@@ -1,4 +1,10 @@
-# Quake Surface Studio 0.16.0
+# Quake Surface Studio 0.16.1
+
+## 0.16.1 changes
+
+- Adds a Blender UI action to generate real `DECOUPLED_LM` test BSPs with the configured ericw-tools `light` executable. The operation relights a separate copy, verifies the 40-byte-per-face BSPX records, and preserves the original BSP.
+
+## 0.16.0 changes
 
 ## 0.16.0 changes
 
