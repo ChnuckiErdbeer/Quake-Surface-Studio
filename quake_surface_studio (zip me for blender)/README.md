@@ -2,6 +2,8 @@
 
 ## 0.11.5 changes
 
+- CI validates the v0.11.5 package and publishes a matching install ZIP.
+
 - Texture Paint explicitly keeps **Occlude enabled** and **Backface Culling disabled**. In Blender 5.2 testing, enabling Backface Culling prevented visible BSP faces from receiving brush strokes; disabling it restored painting while keeping occlusion enabled.
 
 ## 0.11.3 changes
