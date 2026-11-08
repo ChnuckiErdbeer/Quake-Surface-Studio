@@ -135,7 +135,7 @@ class ExportValidationTests(unittest.TestCase):
 
     def test_invalid_face_texture_reference_is_rejected(self):
         original = make_test_bsp()
-        texinfo = struct.pack('<8fii', 1, 0, 0, 0, 0, 1, 0, 0, 0, 999)
+        texinfo = struct.pack('<8fii', 1, 0, 0, 0, 0, 1, 0, 0, 999, 0)
         lumps = list(original.lumps)
         lumps[bsp.LUMP_TEXINFO] = lumps[bsp.LUMP_TEXINFO] + texinfo
         lumps[bsp.LUMP_FACES] = bsp.replace_face_texinfo(
