@@ -19,6 +19,12 @@ class FakeIDMaterials:
         return self.values.pop(index)
 
 
+class FakeImagePaintSettings:
+    def __init__(self):
+        self.use_occlude = False
+        self.use_backface_culling = True
+
+
 class MaterialSlotRollbackTests(unittest.TestCase):
     def test_removes_only_slots_appended_after_snapshot(self):
         slots = FakeIDMaterials(["source-a", "source-b", "detached-a", "detached-b"])
@@ -46,6 +52,12 @@ class MaterialSlotRollbackTests(unittest.TestCase):
         slots = FakeIDMaterials([])
         with self.assertRaises(ValueError):
             material_utils.trim_appended_material_slots(slots, -1)
+
+    def test_configures_safe_texture_paint_visibility(self):
+        settings = FakeImagePaintSettings()
+        material_utils.configure_texture_paint_visibility(settings)
+        self.assertTrue(settings.use_occlude)
+        self.assertFalse(settings.use_backface_culling)
 
     def test_finds_image_by_datablock_identity_not_node_position(self):
         image_a = object()
