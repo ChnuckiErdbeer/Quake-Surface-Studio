@@ -22,7 +22,7 @@ from bpy.types import Operator, Panel
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
 from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils
-from . import export_validation, quake_paths, external_tools, texture_export
+from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils
 
 
 ADDON_VERSION = (0, 15, 0)
@@ -2699,8 +2699,10 @@ class QSS_OT_fps_walk(Operator):
     @classmethod
     def poll(cls, context):
         window = context.window
-        if window is not None and window.as_pointer() in _qss_fps_navigation_sessions:
-            return True
+        if window is not None:
+            session = _qss_fps_navigation_sessions.get(window.as_pointer())
+            if session is not None and not session.get("finished", False):
+                return True
         obj = context.object
         return bool(
             context.area and context.area.type == "VIEW_3D"
@@ -2709,25 +2711,31 @@ class QSS_OT_fps_walk(Operator):
         )
 
     def _finish(self, context):
-        try:
-            if self._timer is not None:
-                self._window_manager.event_timer_remove(self._timer)
-        except Exception:
-            pass
-        self._timer = None
-        if getattr(self, "_looking", False):
+        session = getattr(self, "_session", None)
+        if session is None or session.get("finished", False):
+            return {"FINISHED"}
+        session["finished"] = True
+        timer = session.get("timer")
+        window_manager = session.get("window_manager")
+        if timer is not None and window_manager is not None:
             try:
-                self._window.cursor_modal_restore()
+                window_manager.event_timer_remove(timer)
             except Exception:
                 pass
-        self._looking = False
+        session["timer"] = None
+        if session.get("looking", False):
+            try:
+                session["window"].cursor_modal_restore()
+            except Exception:
+                pass
+        session["looking"] = False
         try:
-            self._area.header_text_set(None)
-            self._area.tag_redraw()
+            session["area"].header_text_set(None)
+            session["area"].tag_redraw()
         except Exception:
             pass
         try:
-            if _qss_fps_navigation_sessions.get(self._session_key) is self:
+            if _qss_fps_navigation_sessions.get(self._session_key) is session:
                 del _qss_fps_navigation_sessions[self._session_key]
         except Exception:
             pass
@@ -2740,14 +2748,18 @@ class QSS_OT_fps_walk(Operator):
             return {"CANCELLED"}
         session_key = window.as_pointer()
         existing = _qss_fps_navigation_sessions.get(session_key)
-        if existing is not None:
-            existing._stop_requested = True
+        if existing is not None and not existing.get("finished", False):
+            # Store stop state in a plain Python dict, never on another
+            # bpy_struct operator instance that Blender may already have freed.
+            existing["stop_requested"] = True
             try:
-                existing._area.tag_redraw()
+                existing["area"].tag_redraw()
             except Exception:
                 pass
             self.report({"INFO"}, "FPS navigation stopping.")
             return {"FINISHED"}
+        if existing is not None:
+            _qss_fps_navigation_sessions.pop(session_key, None)
 
         area = context.area
         if area is None or area.type != "VIEW_3D":
@@ -2764,6 +2776,15 @@ class QSS_OT_fps_walk(Operator):
         rv3d = space.region_3d
         if rv3d.view_perspective in {"ORTHO", "CAMERA"}:
             rv3d.view_perspective = "PERSP"
+        session = {
+            "stop_requested": False,
+            "finished": False,
+            "looking": False,
+            "timer": None,
+            "window": window,
+            "window_manager": context.window_manager,
+            "area": area,
+        }
         self._area = area
         self._region = region
         self._rv3d = rv3d
@@ -2772,8 +2793,7 @@ class QSS_OT_fps_walk(Operator):
         self._scene = context.scene
         self._object = obj
         self._session_key = session_key
-        self._stop_requested = False
-        self._looking = False
+        self._session = session
         self._view_distance = max(0.001, float(rv3d.view_distance))
         self._rotation = rv3d.view_rotation.copy()
         forward = self._rotation @ Vector((0.0, 0.0, -1.0))
@@ -2789,17 +2809,25 @@ class QSS_OT_fps_walk(Operator):
         self._speed = max(0.0, float(context.scene.qss_nav_speed_quake)) * self._unit_scale
         self._fast_factor = max(1.0, float(context.scene.qss_nav_fast_factor))
         try:
-            self._timer = self._window_manager.event_timer_add(1.0 / 60.0, window=window)
+            timer = self._window_manager.event_timer_add(1.0 / 60.0, window=window)
+            session["timer"] = timer
+            _qss_fps_navigation_sessions[session_key] = session
+            self._window_manager.modal_handler_add(self)
         except Exception as exc:
-            self.report({"ERROR"}, f"Could not start FPS navigation timer: {exc}")
+            _qss_fps_navigation_sessions.pop(session_key, None)
+            session["finished"] = True
+            if session.get("timer") is not None:
+                try:
+                    self._window_manager.event_timer_remove(session["timer"])
+                except Exception:
+                    pass
+            self.report({"ERROR"}, f"Could not start FPS navigation: {exc}")
             return {"CANCELLED"}
-        _qss_fps_navigation_sessions[session_key] = self
         try:
             self._area.header_text_set("QSS FPS ACTIVE: WASD move | hold MMB to look | Q/E down/up | Shift fast | Esc or button to stop")
             self._area.tag_redraw()
         except Exception:
             pass
-        self._window_manager.modal_handler_add(self)
         self.report({"INFO"}, "FPS navigation active. WASD moves; hold MMB to look.")
         return {"RUNNING_MODAL"}
 
@@ -2836,40 +2864,57 @@ class QSS_OT_fps_walk(Operator):
         return safe_move + remaining
 
     def modal(self, context, event):
+        try:
+            return self._modal_event(context, event)
+        except Exception as exc:
+            # Never let a modal exception strand a session entry or viewport timer.
+            print("QSS FPS navigation failed: " + str(exc))
+            traceback.print_exc()
+            self._finish(context)
+            self.report({"ERROR"}, f"FPS navigation stopped safely: {exc}")
+            return {"CANCELLED"}
+
+    def _modal_event(self, context, event):
         from mathutils import Vector
-        if self._stop_requested:
+        session = getattr(self, "_session", None)
+        if session is None or session.get("finished", False):
+            return {"CANCELLED"}
+        if session.get("stop_requested", False):
             return self._finish(context)
         if event.type == "ESC" and event.value == "PRESS":
             return self._finish(context)
-        if event.type == "TIMER" and event.timer == self._timer:
-            try:
-                now = time.monotonic()
-                dt = max(0.0, min(0.05, now - self._last_time))
-                self._last_time = now
-                if self._keys_down:
-                    forward = Vector((math.cos(self._yaw), math.sin(self._yaw), 0.0))
-                    right = Vector((-math.sin(self._yaw), math.cos(self._yaw), 0.0))
-                    movement = Vector((0.0, 0.0, 0.0))
-                    if "W" in self._keys_down: movement += forward
-                    if "S" in self._keys_down: movement -= forward
-                    if "D" in self._keys_down: movement += right
-                    if "A" in self._keys_down: movement -= right
-                    if "E" in self._keys_down: movement.z += 1.0
-                    if "Q" in self._keys_down: movement.z -= 1.0
-                    if movement.length > 1e-8:
-                        movement.normalize()
-                        fast = bool({"LEFT_SHIFT", "RIGHT_SHIFT"} & self._keys_down)
-                        speed = self._speed * (self._fast_factor if fast else 1.0)
-                        displacement = self._move_with_wall_collision(
-                            context, movement * speed * dt, right
-                        )
-                        self._camera += displacement
-                        self._rv3d.view_location = (
-                            self._camera - self._rotation @ Vector((0.0, 0.0, self._view_distance))
-                        )
-                        self._area.tag_redraw()
-            except (ReferenceError, RuntimeError):
-                return self._finish(context)
+
+        # Blender 5.2 builds can expose TIMER events without Event.timer.
+        # In that API variant, process the TIMER event instead of dereferencing
+        # a missing RNA attribute; when available, still filter by our own timer.
+        if event.type == "TIMER" and navigation_utils.is_active_timer_event(
+            event.type, getattr(event, "timer", None), session.get("timer")
+        ):
+            now = time.monotonic()
+            dt = max(0.0, min(0.05, now - self._last_time))
+            self._last_time = now
+            if self._keys_down:
+                forward = Vector((math.cos(self._yaw), math.sin(self._yaw), 0.0))
+                right = Vector((-math.sin(self._yaw), math.cos(self._yaw), 0.0))
+                movement = Vector((0.0, 0.0, 0.0))
+                if "W" in self._keys_down: movement += forward
+                if "S" in self._keys_down: movement -= forward
+                if "D" in self._keys_down: movement += right
+                if "A" in self._keys_down: movement -= right
+                if "E" in self._keys_down: movement.z += 1.0
+                if "Q" in self._keys_down: movement.z -= 1.0
+                if movement.length > 1e-8:
+                    movement.normalize()
+                    fast = bool({"LEFT_SHIFT", "RIGHT_SHIFT"} & self._keys_down)
+                    speed = self._speed * (self._fast_factor if fast else 1.0)
+                    displacement = self._move_with_wall_collision(
+                        context, movement * speed * dt, right
+                    )
+                    self._camera += displacement
+                    self._rv3d.view_location = (
+                        self._camera - self._rotation @ Vector((0.0, 0.0, self._view_distance))
+                    )
+                    self._area.tag_redraw()
             return {"RUNNING_MODAL"}
 
         in_area = context.area == self._area
@@ -2877,33 +2922,35 @@ class QSS_OT_fps_walk(Operator):
             in_area and context.region and context.region.type == "WINDOW"
         )
 
-        # Keyboard movement is available anywhere inside the originating
-        # 3D View area, including immediately after clicking Start in the
-        # Sidebar. MMB look itself remains restricted to the viewport region.
+        # Release events are observed even when the pointer has crossed into
+        # the Sidebar so no held key/button becomes stuck.
         if event.type in self._move_keys and event.value == "RELEASE":
             self._keys_down.discard(event.type)
-            return {"RUNNING_MODAL"} if in_viewport else {"PASS_THROUGH"}
+            return {"RUNNING_MODAL"} if in_area else {"PASS_THROUGH"}
         if event.type == "MIDDLEMOUSE" and event.value == "RELEASE":
-            if self._looking:
-                self._looking = False
+            if session.get("looking", False):
+                session["looking"] = False
                 try:
                     self._window.cursor_modal_restore()
                 except Exception:
                     pass
-            return {"RUNNING_MODAL"} if in_viewport else {"PASS_THROUGH"}
+            return {"RUNNING_MODAL"} if in_area else {"PASS_THROUGH"}
 
-        if not in_viewport:
-            self._last_mouse = (event.mouse_x, event.mouse_y)
-            return {"PASS_THROUGH"}
-
+        # WASD works from anywhere inside this 3D View area, including the
+        # Sidebar immediately after clicking Start.
         if event.type in self._move_keys and event.value == "PRESS":
             if in_area:
                 self._keys_down.add(event.type)
                 return {"RUNNING_MODAL"}
             return {"PASS_THROUGH"}
 
+        if not in_viewport:
+            if event.type == "MOUSEMOVE":
+                self._last_mouse = (event.mouse_x, event.mouse_y)
+            return {"PASS_THROUGH"}
+
         if event.type == "MIDDLEMOUSE" and event.value == "PRESS":
-            self._looking = True
+            session["looking"] = True
             self._last_mouse = (event.mouse_x, event.mouse_y)
             try:
                 self._window.cursor_modal_set("NONE")
@@ -2912,13 +2959,12 @@ class QSS_OT_fps_walk(Operator):
             return {"RUNNING_MODAL"}
 
         if event.type == "MOUSEMOVE":
-            if not self._looking or not in_area:
+            if not session.get("looking", False):
                 return {"PASS_THROUGH"}
             dx = event.mouse_x - self._last_mouse[0]
             dy = event.mouse_y - self._last_mouse[1]
             self._last_mouse = (event.mouse_x, event.mouse_y)
-            # Keep the cursor inside the actual 3D window region (not the full
-            # Blender window, whose Sidebar/Timeline would otherwise stop look input).
+            # Keep the cursor inside the actual 3D window region, not the full Blender window.
             region_left = int(self._region.x)
             region_bottom = int(self._region.y)
             region_width = int(self._region.width)
@@ -6306,7 +6352,7 @@ class QSS_PT_main(Panel):
         layout = self.layout
         layout.label(text=f"Version {'.'.join(str(part) for part in ADDON_VERSION)}", icon='INFO')
         window = context.window
-        if window is not None and window.as_pointer() in _qss_fps_navigation_sessions:
+        if window is not None and (_qss_fps_navigation_sessions.get(window.as_pointer()) or {}).get("finished") is False:
             stop_row = layout.row()
             stop_row.alert = True
             stop_row.operator(
@@ -6861,18 +6907,33 @@ def _unregister_qss_classes():
 
 
 def _cleanup_previous_registration():
-    # Ask active modal sessions to terminate on their next event. The operator
-    # itself removes its timer/cursor state from modal()/cancel(), avoiding a
-    # manually-finished modal handler left attached to the window.
-    for operator in tuple(_qss_fps_navigation_sessions.values()):
+    # Remove resources held by any active FPS session without retaining or
+    # mutating an operator instance that Blender may already have destroyed.
+    for session in tuple(_qss_fps_navigation_sessions.values()):
+        timer = session.get("timer")
+        window_manager = session.get("window_manager")
+        if timer is not None and window_manager is not None:
+            try:
+                window_manager.event_timer_remove(timer)
+            except Exception:
+                pass
+        if session.get("looking", False):
+            try:
+                session["window"].cursor_modal_restore()
+            except Exception:
+                pass
         try:
-            operator._stop_requested = True
+            session["area"].header_text_set(None)
+            session["area"].tag_redraw()
         except Exception:
             pass
+        session["timer"] = None
+        session["looking"] = False
+        session["finished"] = True
+    _qss_fps_navigation_sessions.clear()
     _remove_qss_keymaps()
     _remove_scene_properties()
     _unregister_qss_classes()
-
 
 def register():
     """Register QSS safely, including upgrades from an already-enabled build."""
