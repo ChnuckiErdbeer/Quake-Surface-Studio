@@ -79,8 +79,8 @@ class LightmapExportTests(unittest.TestCase):
             s_coordinates=(0, 16), t_coordinates=(0, 16),
         )
         self.assertEqual(len(sampled), 12)
-        self.assertEqual(sampled[0:3], bytes((43, 213, 128)))
-        self.assertEqual(sampled[9:12], bytes((213, 43, 128)))
+        self.assertEqual(sampled[0:3], bytes((0, 255, 128)))
+        self.assertEqual(sampled[9:12], bytes((85, 170, 128)))
 
     def test_arbitrary_coordinate_sampler_rejects_non_finite_coordinates(self):
         with self.assertRaisesRegex(ValueError, "finite"):

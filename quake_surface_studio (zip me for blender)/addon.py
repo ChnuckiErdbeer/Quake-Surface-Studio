@@ -579,7 +579,10 @@ def _qss_create_detached_face_atlas(plans, atlas_size=512):
                 dest_x = int(tile["x"]) + x
                 src_offset = (source_y * target_w + source_x) * 4
                 dst_offset = (dest_y * atlas_size + dest_x) * 4
-                atlas_pixels[dst_offset:dst_offset + 4] = resized[src_offset:src_offset + 4]
+                atlas_pixels[dst_offset] = resized[src_offset]
+                atlas_pixels[dst_offset + 1] = resized[src_offset + 1]
+                atlas_pixels[dst_offset + 2] = resized[src_offset + 2]
+                atlas_pixels[dst_offset + 3] = resized[src_offset + 3]
         plan["uvs"] = texture_export.remap_uvs_to_atlas(
             plan["uvs"], tile, atlas_size
         )
@@ -1507,11 +1510,11 @@ def _build_enhanced_lightmap_payload(
     source_lighting, source_lit_rgb, face_attrs, resolution,
     base_pixel_scale, base_gutter,
 ):
-    """Append high-density per-face samples and build LMSHIFT/LMOFFSET/LMSTYLE.
+    """Append high-density per-face samples and build DECOUPLED_LM/LMSTYLE.
 
-    Classic samples are already patched into the leading LIGHTING/RGBLIGHTING
-    region. Enhanced samples are appended after that region so readers that
-    ignore BSPX retain their original face lightofs and classic luxel spacing.
+    Classic samples (including reprojected detached-face fallbacks) are already
+    in the leading LIGHTING/RGBLIGHTING region. Enhanced samples are appended
+    after that region and addressed independently from texture texinfo axes.
     """
     unsupported = {
         'LMSHIFT', 'LMOFFSET', 'LMSTYLE', 'LMSTYLE16', 'DECOUPLED_LM'
@@ -1846,7 +1849,8 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None):
                 px, size, resolution,
                 int(x_attr.data[poly_index].value),
                 int(y_attr.data[poly_index].value),
-                gutter, scale,
+                int(obj.get('qss_lightmap_gutter', 2)),
+                int(obj.get('qss_lightmap_scale', 1)),
                 base_s_min, base_t_min,
                 old_s_coordinates, old_t_coordinates,
             )
@@ -6753,6 +6757,11 @@ def _remove_scene_properties():
 
 def _unregister_qss_classes():
     """Unregister stale QSS classes by RNA name and current Python class.
+
+    Blender may retain registered classes after an interrupted add-on enable.
+    Resolve the registered RNA class first (it can belong to an older module
+    instance), then also try the current class object as a defensive fallback.
+    """
     # Removed in the persistent FPS-navigation redesign; clean up an older registration.
     legacy_fps = getattr(bpy.types, "QSS_OT_hold_mmb_fps", None)
     if legacy_fps is not None:
@@ -6760,11 +6769,6 @@ def _unregister_qss_classes():
             bpy.utils.unregister_class(legacy_fps)
         except (RuntimeError, TypeError, ValueError):
             pass
-
-    Blender may retain registered classes after an interrupted add-on enable.
-    Resolve the registered RNA class first (it can belong to an older module
-    instance), then also try the current class object as a defensive fallback.
-    """
     for cls in reversed(CLASSES):
         old_cls = getattr(bpy.types, cls.__name__, None)
         candidates = [old_cls] if old_cls is not None else []
