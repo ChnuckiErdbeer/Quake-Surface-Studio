@@ -555,52 +555,61 @@ def _qss_create_detached_face_atlas(plans, atlas_size=512):
         alpha=True, float_buffer=True,
     )
     try:
-        atlas.colorspace_settings.name = source_images[0].colorspace_settings.name
+        try:
+            atlas.colorspace_settings.name = source_images[0].colorspace_settings.name
+        except Exception:
+            pass
+        atlas_pixels = array.array("f", [0.0]) * (atlas_size * atlas_size * 4)
+        padding = int(layout["padding"])
+        for plan, source, tile in zip(plans, source_images, layout["tiles"]):
+            width, height = int(source.size[0]), int(source.size[1])
+            source_pixels = array.array("f", [0.0]) * (width * height * 4)
+            source.update()
+            source.pixels.foreach_get(source_pixels)
+            target_w, target_h = int(tile["width"]), int(tile["height"])
+            resized = texture_export.resample_rgba_nearest(
+                source_pixels, width, height, target_w, target_h
+            )
+            # Duplicate edge texels into a two-pixel border to prevent linear
+            # filtering/mipmap bleed between adjacent detached-face tiles.
+            for y in range(-padding, target_h + padding):
+                source_y = min(target_h - 1, max(0, y))
+                dest_y = int(tile["y"]) + y
+                for x in range(-padding, target_w + padding):
+                    source_x = min(target_w - 1, max(0, x))
+                    dest_x = int(tile["x"]) + x
+                    src_offset = (source_y * target_w + source_x) * 4
+                    dst_offset = (dest_y * atlas_size + dest_x) * 4
+                    atlas_pixels[dst_offset] = resized[src_offset]
+                    atlas_pixels[dst_offset + 1] = resized[src_offset + 1]
+                    atlas_pixels[dst_offset + 2] = resized[src_offset + 2]
+                    atlas_pixels[dst_offset + 3] = resized[src_offset + 3]
+            plan["uvs"] = texture_export.remap_uvs_to_atlas(
+                plan["uvs"], tile, atlas_size
+            )
+            plan["projection"] = texture_export.projection_for_atlas_tile(
+                plan["projection"], (width, height), tile, atlas_size
+            )
+            plan["local_image"] = source
+            plan["image"] = atlas
+        atlas.pixels.foreach_set(atlas_pixels)
+        atlas.update()
+        try:
+            atlas.pack()
+        except RuntimeError:
+            pass
+        atlas["qss_import_hash"] = ""
+        atlas["qss_face_local_baked"] = True
+        atlas["qss_detached_face_atlas"] = True
+        return atlas
     except Exception:
-        pass
-    atlas_pixels = array.array("f", [0.0]) * (atlas_size * atlas_size * 4)
-    padding = int(layout["padding"])
-    for plan, source, tile in zip(plans, source_images, layout["tiles"]):
-        width, height = int(source.size[0]), int(source.size[1])
-        source_pixels = array.array("f", [0.0]) * (width * height * 4)
-        source.update()
-        source.pixels.foreach_get(source_pixels)
-        target_w, target_h = int(tile["width"]), int(tile["height"])
-        resized = texture_export.resample_rgba_nearest(
-            source_pixels, width, height, target_w, target_h
-        )
-        # Duplicate edge texels into a two-pixel border to prevent linear
-        # filtering/mipmap bleed between adjacent detached-face tiles.
-        for y in range(-padding, target_h + padding):
-            source_y = min(target_h - 1, max(0, y))
-            dest_y = int(tile["y"]) + y
-            for x in range(-padding, target_w + padding):
-                source_x = min(target_w - 1, max(0, x))
-                dest_x = int(tile["x"]) + x
-                src_offset = (source_y * target_w + source_x) * 4
-                dst_offset = (dest_y * atlas_size + dest_x) * 4
-                atlas_pixels[dst_offset] = resized[src_offset]
-                atlas_pixels[dst_offset + 1] = resized[src_offset + 1]
-                atlas_pixels[dst_offset + 2] = resized[src_offset + 2]
-                atlas_pixels[dst_offset + 3] = resized[src_offset + 3]
-        plan["uvs"] = texture_export.remap_uvs_to_atlas(
-            plan["uvs"], tile, atlas_size
-        )
-        plan["projection"] = texture_export.projection_for_atlas_tile(
-            plan["projection"], (width, height), tile, atlas_size
-        )
-        plan["local_image"] = source
-        plan["image"] = atlas
-    atlas.pixels.foreach_set(atlas_pixels)
-    atlas.update()
-    try:
-        atlas.pack()
-    except RuntimeError:
-        pass
-    atlas["qss_import_hash"] = ""
-    atlas["qss_face_local_baked"] = True
-    atlas["qss_detached_face_atlas"] = True
-    return atlas
+        try:
+            if atlas.users == 0:
+                bpy.data.images.remove(atlas, do_unlink=True)
+        except Exception:
+            pass
+        raise
+
 
 
 def _install_lightmap_nodes(mat, image):
@@ -1714,6 +1723,7 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None):
     faces = parsed.faces()
     faces_lump = bytes(output_faces_lump or parsed.lumps[bsp.LUMP_FACES])
     texinfos = parsed.texinfos()
+    vertices = parsed.vertices()
     lighting = bytearray(lighting_source)
     if source_lit_rgb is None:
         lit_rgb = bytearray(channel for sample in lighting for channel in (sample, sample, sample))
@@ -1810,7 +1820,6 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None):
             raise bsp.BSPError(f"Detached face {face_id} has an invalid texture projection.")
         new_texinfo = projection + tuple(old_texinfo[8:10])
         vertex_ids = parsed.face_vertex_indices(face)
-        vertices = parsed.vertices()
         if len(vertex_ids) < 3 or any(index < 0 or index >= len(vertices) for index in vertex_ids):
             raise bsp.BSPError(f"Detached face {face_id} has invalid vertex references.")
         positions = [vertices[index] for index in vertex_ids]
@@ -2688,6 +2697,9 @@ class QSS_OT_fps_walk(Operator):
 
     @classmethod
     def poll(cls, context):
+        window = context.window
+        if window is not None and window.as_pointer() in _qss_fps_navigation_sessions:
+            return True
         obj = context.object
         return bool(
             context.area and context.area.type == "VIEW_3D"
@@ -2901,6 +2913,20 @@ class QSS_OT_fps_walk(Operator):
             dx = event.mouse_x - self._last_mouse[0]
             dy = event.mouse_y - self._last_mouse[1]
             self._last_mouse = (event.mouse_x, event.mouse_y)
+            # Keep the cursor inside the window for uninterrupted FPS turning.
+            window_width = int(getattr(self._window, "width", 0))
+            window_height = int(getattr(self._window, "height", 0))
+            if window_width > 8 and window_height > 8 and (
+                event.mouse_x <= 3 or event.mouse_y <= 3
+                or event.mouse_x >= window_width - 4
+                or event.mouse_y >= window_height - 4
+            ):
+                center = (window_width // 2, window_height // 2)
+                try:
+                    self._window.cursor_warp(*center)
+                    self._last_mouse = center
+                except Exception:
+                    pass
             sensitivity = 0.0022
             self._yaw += dx * sensitivity
             self._pitch = max(
@@ -4500,6 +4526,29 @@ class QSS_OT_activate_paint(Operator):
     def execute(self, context):
         obj = context.object
         if context.mode == 'EDIT_MESH':
+            import bmesh
+            bm = bmesh.from_edit_mesh(obj.data)
+            selected_material_indices = {
+                int(face.material_index) for face in bm.faces if face.select
+            }
+            selected_image_keys = set()
+            for material_index in selected_material_indices:
+                if material_index < 0 or material_index >= len(obj.data.materials):
+                    _report(self, 'ERROR', f"Selected face uses invalid material slot {material_index}.")
+                    return {'CANCELLED'}
+                selected_material = obj.data.materials[material_index]
+                selected_image = _find_image(selected_material, 'base_texture') if selected_material else None
+                if selected_image is None:
+                    _report(self, 'ERROR', "A selected face has no base texture image; paint selection was not changed.")
+                    return {'CANCELLED'}
+                selected_image_keys.add(selected_image.as_pointer())
+            if len(selected_image_keys) > 1:
+                _report(
+                    self, 'ERROR',
+                    "Selected faces use different paint images. Select one detached face at a time, "
+                    "or detach the faces together to create a shared paint atlas.",
+                )
+                return {'CANCELLED'}
             selected_material_index = _selected_edit_face_material(obj)
             if selected_material_index is None:
                 _report(self, 'WARNING', "Select a face in Edit Mode first.")
@@ -6236,6 +6285,16 @@ class QSS_PT_main(Panel):
     def draw(self, context):
         layout = self.layout
         layout.label(text=f"Version {'.'.join(str(part) for part in ADDON_VERSION)}", icon='INFO')
+        window = context.window
+        if window is not None and window.as_pointer() in _qss_fps_navigation_sessions:
+            stop_row = layout.row()
+            stop_row.alert = True
+            stop_row.operator(
+                QSS_OT_fps_walk.bl_idname,
+                text="Stop FPS Navigation",
+                icon='PAUSE',
+            )
+            layout.label(text="FPS mode active · WASD move · hold MMB to look", icon='VIEW_PAN')
         layout.use_property_split = True
         import_box = layout.box()
         import_box.label(text="START HERE · PROJECT", icon='FILE_3D')
