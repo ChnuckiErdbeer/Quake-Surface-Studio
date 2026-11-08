@@ -2872,13 +2872,14 @@ class QSS_OT_fps_walk(Operator):
                 return self._finish(context)
             return {"RUNNING_MODAL"}
 
+        in_area = context.area == self._area
         in_viewport = bool(
-            context.area == self._area and context.region
-            and context.region.type == "WINDOW"
+            in_area and context.region and context.region.type == "WINDOW"
         )
 
-        # Releases are always observed, even when the pointer crosses into the
-        # Sidebar, so a held key/button cannot keep moving or looking forever.
+        # Keyboard movement is available anywhere inside the originating
+        # 3D View area, including immediately after clicking Start in the
+        # Sidebar. MMB look itself remains restricted to the viewport region.
         if event.type in self._move_keys and event.value == "RELEASE":
             self._keys_down.discard(event.type)
             return {"RUNNING_MODAL"} if in_viewport else {"PASS_THROUGH"}
@@ -2896,8 +2897,10 @@ class QSS_OT_fps_walk(Operator):
             return {"PASS_THROUGH"}
 
         if event.type in self._move_keys and event.value == "PRESS":
-            self._keys_down.add(event.type)
-            return {"RUNNING_MODAL"}
+            if in_area:
+                self._keys_down.add(event.type)
+                return {"RUNNING_MODAL"}
+            return {"PASS_THROUGH"}
 
         if event.type == "MIDDLEMOUSE" and event.value == "PRESS":
             self._looking = True
@@ -2909,7 +2912,7 @@ class QSS_OT_fps_walk(Operator):
             return {"RUNNING_MODAL"}
 
         if event.type == "MOUSEMOVE":
-            if not self._looking:
+            if not self._looking or not in_area:
                 return {"PASS_THROUGH"}
             dx = event.mouse_x - self._last_mouse[0]
             dy = event.mouse_y - self._last_mouse[1]
