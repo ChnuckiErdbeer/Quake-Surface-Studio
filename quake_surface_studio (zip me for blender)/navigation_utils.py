@@ -63,10 +63,36 @@ def viewport_region_center(region_x, region_y, region_width, region_height):
     )
 
 
-def mouse_delta_from_center(mouse_x, mouse_y, center_x, center_y):
-    """Return relative movement from the locked pointer center.
+def mouse_delta_from_event(
+    mouse_x,
+    mouse_y,
+    mouse_prev_x,
+    mouse_prev_y,
+    center_x,
+    center_y,
+    max_event_delta=120,
+    center_deadzone=1,
+):
+    """Return bounded per-event motion while suppressing cursor-warp feedback.
 
-    Cursor-warp feedback events land at the center and therefore yield (0, 0),
-    independent of their delivery order.
+    Blender's mouse coordinates are window-relative. Use the event's own
+    previous coordinates rather than treating its absolute position as motion.
+    A cursor_warp() feedback event lands at (or within one pixel of) the
+    requested center; ignore it even though its previous coordinate may be far
+    away. Bound each physical event so a stale/outlier event cannot snap the
+    view to a pitch limit or cause a full yaw spin.
     """
-    return int(mouse_x) - int(center_x), int(mouse_y) - int(center_y)
+    x = int(mouse_x)
+    y = int(mouse_y)
+    cx = int(center_x)
+    cy = int(center_y)
+    deadzone = max(0, int(center_deadzone))
+    if abs(x - cx) <= deadzone and abs(y - cy) <= deadzone:
+        return 0, 0
+
+    dx = x - int(mouse_prev_x)
+    dy = y - int(mouse_prev_y)
+    limit = max(1, int(max_event_delta))
+    dx = max(-limit, min(limit, dx))
+    dy = max(-limit, min(limit, dy))
+    return dx, dy

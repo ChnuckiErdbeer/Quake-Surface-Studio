@@ -72,16 +72,32 @@ class NavigationEventTests(unittest.TestCase):
         center = navigation_utils.viewport_region_center(120, 80, 900, 700)
         self.assertEqual(center, (570, 430))
 
-    def test_mouse_delta_is_measured_from_center(self):
-        dx, dy = navigation_utils.mouse_delta_from_center(582, 421, 570, 430)
+    def test_mouse_delta_uses_current_minus_previous_event_position(self):
+        dx, dy = navigation_utils.mouse_delta_from_event(
+            582, 421, 570, 430, 570, 430
+        )
         self.assertEqual((dx, dy), (12, -9))
 
-    def test_center_warp_feedback_has_zero_mouse_delta(self):
+    def test_center_warp_feedback_is_ignored_even_with_large_previous_delta(self):
         center = navigation_utils.viewport_region_center(120, 80, 900, 700)
         self.assertEqual(
-            navigation_utils.mouse_delta_from_center(center[0], center[1], *center),
+            navigation_utils.mouse_delta_from_event(
+                center[0], center[1], 20, 900, *center
+            ),
             (0, 0),
         )
+
+    def test_large_single_event_delta_is_bounded(self):
+        dx, dy = navigation_utils.mouse_delta_from_event(
+            1000, -500, 0, 0, 570, 430, max_event_delta=120
+        )
+        self.assertEqual((dx, dy), (120, -120))
+
+    def test_one_pixel_center_warp_rounding_error_is_ignored(self):
+        dx, dy = navigation_utils.mouse_delta_from_event(
+            571, 429, 900, 100, 570, 430
+        )
+        self.assertEqual((dx, dy), (0, 0))
 
     def test_center_is_recalculated_after_region_resize(self):
         first = navigation_utils.viewport_region_center(120, 80, 900, 700)

@@ -1,9 +1,14 @@
-# Quake Surface Studio 0.15.3
+# Quake Surface Studio 0.15.4
 
-## 0.15.3 changes
+## 0.15.4 changes
 
-- Locks the mouse pointer to the center of the active 3D viewport while MMB-look is held. Mouse deltas are measured from that fixed center and the pointer is warped back after every movement event, rather than waiting until it reaches a viewport edge.
-- Ignores synthetic cursor-warp movement events through center-relative zero-delta handling and recalculates the anchor if the viewport region is resized.
+- Fixes the v0.15.3 mouse-look regression by deriving motion from Blender's per-event current/previous mouse coordinates instead of subtracting an absolute pointer position from the viewport center.
+- Filters cursor-warp feedback events at the viewport anchor and bounds any single-event delta to prevent a stale/outlier event from snapping pitch or spinning yaw.
+- Keeps the pointer centred while MMB-look is held and re-anchors after viewport-region resizing.
+
+## 0.15.3 changes (superseded)
+
+- Introduced per-event cursor-centre warping, but its absolute-coordinate delta handling could misinterpret stale or synthetic mouse coordinates as real movement. Replaced in v0.15.4.
 
 ## 0.15.2 changes
 

@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils
 
 
-ADDON_VERSION = (0, 15, 3)
+ADDON_VERSION = (0, 15, 4)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -2893,17 +2893,25 @@ class QSS_OT_fps_walk(Operator):
             self._warp_mouse_to_center()
             return
 
-        dx, dy = navigation_utils.mouse_delta_from_center(
-            event.mouse_x, event.mouse_y, center[0], center[1]
+        # Blender exposes both the current and previous window-relative
+        # pointer coordinates on each event. Their difference is the actual
+        # motion for this event; subtracting an absolute coordinate from the
+        # viewport center can turn stale/warped coordinates into a huge
+        # one-frame rotation.
+        dx, dy = navigation_utils.mouse_delta_from_event(
+            event.mouse_x,
+            event.mouse_y,
+            getattr(event, "mouse_prev_x", event.mouse_x),
+            getattr(event, "mouse_prev_y", event.mouse_y),
+            center[0],
+            center[1],
         )
 
-        # Warp on every movement event, not just at the edge. cursor_warp may
-        # enqueue a synthetic MOUSEMOVE later; its coordinates are at center,
-        # so it naturally produces a zero delta on the next modal callback.
-        self._warp_mouse_to_center()
-
+        # cursor_warp() can enqueue a synthetic MOUSEMOVE at the anchor.
+        # mouse_delta_from_event filters that event before we warp again.
         if dx == 0 and dy == 0:
             return
+        self._warp_mouse_to_center()
 
         rotation = self._rv3d.view_rotation.copy()
         forward = rotation @ Vector((0.0, 0.0, -1.0))
