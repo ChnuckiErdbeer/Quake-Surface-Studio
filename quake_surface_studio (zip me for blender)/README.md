@@ -6,7 +6,7 @@
 - Added an Ironwail launcher in Project & Source. It launches the active imported game map or a selected `.dem`, enables developer mode, uses `-condebug`, and records process output in QSS user data.
 - Added **Run Full Map Audit**. It discovers every effective loose/PAK map in the selected game folder and processes them one at a time, continuing after individual map failures.
 - Each map receives BSP structural/reference/lightmap validation, a real QSS import, face/material/UV metadata checks, Original/Working/Live preview checks, immutable source-atlas verification, lightmap-link repair, viewport selection/hide/reveal tests, texture detach and paint-mode tests on a disposable duplicate, and Classic BSP export plus source-to-export integrity validation.
-- Optional audit stages include the full Quake direct CPU lightmap bake with restore, Enhanced BSPX export, ericw `bspinfo`, verbose disposable-BSP `light` runs, and a `.map` → `qbsp` → `vis` → `light` compile pipeline when a sibling MAP source exists.
+- Optional audit stages include the full Quake direct CPU lightmap bake with restore, the experimental Cycles PBR bake with exact undo verification, Enhanced BSPX export, ericw `bspinfo`, verbose disposable-BSP `light` runs, and a `.map` → `qbsp` → `vis` → `light` compile pipeline when a sibling MAP source exists.
 - Audit reports are written after every map to a checkpoint JSON file and, at completion, to `report.json`, `report.txt`, plus Blender Text datablocks `QSS_Map_Audit_Report` and `QSS_Map_Audit_JSON`. External tool output is stored in per-map log files.
 - Destructive operations use a duplicate mesh/object and disposable export/compiler inputs; original game BSP files are not passed to ericw `light` because that tool overwrites its input.
 - Optional CPU lighting bakes and compiler runs are disabled by default. Viewport tests require a running Blender UI with a VIEW_3D area; unavailable viewport tests are reported as SKIP.
@@ -18,6 +18,28 @@
 - Fixed Blender 5.2 registration of the dynamic Game / Mod enum. During RNA registration Blender can evaluate enum items without a Scene context; QSS now resolves the item list from its saved installation configuration in that case.
 - Validates the saved game identifier against discovered game folders before assigning the enum default.
 - Hardened add-on cleanup after interrupted or failed registration so stale operator classes are unregistered before a retry.
+
+## Automated game-map audit and external tools (0.15.0)
+
+In **N → Quake → 01 · Project & Source**, configure:
+
+- **ericw-tools folder**: the directory containing \`qbsp\`, \`vis\`, \`light\`, and optionally \`bspinfo\`.
+- **Ironwail executable**: the full path to \`ironwail.exe\` or the Ironwail binary.
+- **Demo (.dem)**: optional. Select a demo and use **Launch Ironwail…**; leave it empty to launch the active imported map. Ironwail starts with \`developer 1\` and \`-condebug\`. Each launch gets a separate directory under Blender user data \`qss/ironwail_logs/\`, containing \`qconsole.log\` and \`process_output.log\`.
+
+Use **Run Full Game Map Audit** to process every effective map in the selected game/mod directory. The button is available even when no BSP is currently imported. The audit runs the standalone Python suite once, then imports and checks maps sequentially. It can be stopped with Esc after the current map completes.
+
+The optional tests are disabled by default:
+
+- **ericw light on disposable BSP copy** runs verbose relighting on a temporary copy. ericw \`light\` overwrites its BSP input, so QSS never gives it the original game file.
+- **Compile sibling MAP files** runs \`qbsp\`, \`vis\`, and \`light\` only when a loose sibling \`.map\` file exists. Maps stored only in PAK archives have no extracted source MAP and are skipped.
+- **Quake direct lightmap bake** runs the QSS CPU ray-traced solver and restores the imported lightmap.
+- **Cycles PBR bake** runs on a duplicate object and verifies that Undo restores the exact pre-bake atlas.
+- **Enhanced BSPX export** attempts LMSHIFT output; known unsupported source layouts are reported as skipped.
+
+The report directory is under Blender user data \`qss/audits/Map_Audit_<timestamp>/\`. It contains a checkpoint \`progress.json\`, aggregate \`report.json\` and \`report.txt\`, exported BSPs and external-tool logs. The same report is embedded in Blender Text datablocks \`QSS_Map_Audit_Report\` and \`QSS_Map_Audit_JSON\`. A map failure does not stop the remaining maps. The audit removes its temporary Blender objects and restores the original active object and interaction mode.
+
+Viewport-specific checks require a normal Blender UI session with a 3D View area. If run in background mode or without a 3D View, those checks are explicitly marked SKIP; structural parsing, external compiler checks, and file export/validation can still run.
 
 ## 0.14.0 changes
 

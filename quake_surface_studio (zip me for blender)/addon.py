@@ -3844,11 +3844,14 @@ class QSS_OT_launch_ironwail(Operator):
                     executable, quake_root, game_dir, map_path=virtual_path, developer_mode=True
                 )
                 label = os.path.basename(virtual_path)
-            log_dir = bpy.utils.user_resource("DATAFILES", path=os.path.join("qss", "ironwail_logs"), create=True)
+            log_root = bpy.utils.user_resource("DATAFILES", path=os.path.join("qss", "ironwail_logs"), create=True)
             stamp = time.strftime("%Y%m%d_%H%M%S")
-            log_path = os.path.join(log_dir, f"Ironwail_{stamp}.log")
+            log_dir = os.path.join(log_root, f"Ironwail_{stamp}")
+            os.makedirs(log_dir, exist_ok=True)
+            log_path = os.path.join(log_dir, "process_output.log")
+            console_log = os.path.join(log_dir, "qconsole.log")
             pid = external_tools.launch_process(command, cwd=log_dir, log_path=log_path)
-            self.report({"INFO"}, f"Ironwail launched for {label} (PID {pid}). Developer log: {log_path}")
+            self.report({"INFO"}, f"Ironwail launched for {label} (PID {pid}). Console log: {console_log}; process output: {log_path}")
             return {"FINISHED"}
         except Exception as exc:
             self.report({"ERROR"}, f"Could not launch Ironwail: {exc}")
