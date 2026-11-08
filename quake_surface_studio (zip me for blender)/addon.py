@@ -2529,6 +2529,17 @@ class QSS_OT_detach_faces(Operator):
                 obj.active_material_index = last_new_index
             mesh.update()
 
+            # Prepare the detached material slot immediately. This also makes
+            # a direct Blender mode-toggle enter the same face-isolated paint
+            # mode, even when the user does not invoke the QSS paint button.
+            if last_new_index >= 0:
+                detached_mat = mesh.materials[last_new_index]
+                detached_image = _find_image(detached_mat, 'base_texture')
+                _set_texture_paint_target(
+                    context, obj, detached_image, 'Quake_Texture_UV',
+                    material=detached_mat
+                )
+
             if was_edit_mode:
                 stage = 'restore Edit Mode selection'
                 bpy.ops.object.mode_set(mode='EDIT')
