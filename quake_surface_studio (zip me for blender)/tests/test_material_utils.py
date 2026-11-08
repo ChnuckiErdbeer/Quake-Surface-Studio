@@ -75,5 +75,37 @@ class MaterialSlotRollbackTests(unittest.TestCase):
         self.assertEqual(material_utils.find_image_slot_index([], None), -1)
 
 
+    def test_filters_selection_to_faces_with_lightmap_samples(self):
+        self.assertEqual(
+            material_utils.filter_lightmapped_face_indices(
+                [0, 1, 2, 3], [True, False, True, True]
+            ),
+            [0, 2, 3],
+        )
+
+    def test_preserves_order_and_removes_duplicate_face_indices(self):
+        self.assertEqual(
+            material_utils.filter_lightmapped_face_indices(
+                [3, 1, 3, 0, 1], [True, True, False, True]
+            ),
+            [3, 1, 0],
+        )
+
+    def test_ignores_negative_and_out_of_range_face_indices(self):
+        self.assertEqual(
+            material_utils.filter_lightmapped_face_indices(
+                [-1, 0, 4, 1], [True, True]
+            ),
+            [0, 1],
+        )
+
+    def test_returns_empty_when_selected_faces_have_no_lightmap_samples(self):
+        self.assertEqual(
+            material_utils.filter_lightmapped_face_indices(
+                [0, 1], [False, False]
+            ),
+            [],
+        )
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
