@@ -48,6 +48,11 @@ def _qss_config_path():
     directory = bpy.utils.user_resource('CONFIG', path='qss', create=True)
     return os.path.join(directory, 'config.json')
 
+def _qss_abspath(path):
+    """Resolve a non-empty Blender path without turning an empty path into the blend directory."""
+    return bpy.path.abspath(path) if path else ''
+
+
 
 def _qss_load_config():
     return quake_paths.load_config(_qss_config_path())
@@ -57,9 +62,9 @@ def _qss_save_config(scene=None, last_source_bsp=None):
     config = _qss_load_config()
     if scene is not None:
         root = quake_paths.normalize_quake_root(
-            bpy.path.abspath(getattr(scene, 'qss_quake_root', '') or '')
+            _qss_abspath(getattr(scene, 'qss_quake_root', '') or '')
         )
-        game_dir = bpy.path.abspath(getattr(scene, 'qss_game_dir', '') or '')
+        game_dir = _qss_abspath(getattr(scene, 'qss_game_dir', '') or '')
         config['quake_root'] = root
         config['active_game_dir'] = game_dir
         config['active_game_id'] = getattr(scene, 'qss_game_folder', '') or ''
@@ -70,7 +75,7 @@ def _qss_save_config(scene=None, last_source_bsp=None):
 
 def _qss_game_folder_items(self, context):
     scene = getattr(context, 'scene', None) if context else None
-    root = bpy.path.abspath(getattr(scene, 'qss_quake_root', '') or '') if scene else ''
+    root = _qss_abspath(getattr(scene, 'qss_quake_root', '') or '') if scene else ''
     items = quake_paths.discover_game_dirs(root)
     if not items:
         return [('NONE', 'No game folders found', 'Set the Quake installation folder first', 'ERROR', 0)]
@@ -87,8 +92,8 @@ def _on_quake_root_changed(self, context):
     scene = context.scene
     _qss_config_update_depth = True
     try:
-        root = quake_paths.normalize_quake_root(bpy.path.abspath(scene.qss_quake_root or ''))
-        if root != bpy.path.abspath(scene.qss_quake_root or ''):
+        root = quake_paths.normalize_quake_root(_qss_abspath(scene.qss_quake_root or ''))
+        if root != _qss_abspath(scene.qss_quake_root or ''):
             scene.qss_quake_root = root
         folders = quake_paths.discover_game_dirs(root)
         if folders:
@@ -113,7 +118,7 @@ def _on_game_folder_changed(self, context):
     if _qss_config_update_depth:
         return
     scene = context.scene
-    root = bpy.path.abspath(scene.qss_quake_root or '')
+    root = _qss_abspath(scene.qss_quake_root or '')
     game_dir = quake_paths.resolve_game_dir(root, scene.qss_game_folder)
     if game_dir:
         scene.qss_game_dir = game_dir
@@ -150,7 +155,7 @@ def _qss_format_export_report(report):
 def _qss_game_map_enum_items(self, context):
     global _qss_game_map_entries
     scene = getattr(context, 'scene', None) if context else None
-    game_dir = bpy.path.abspath(getattr(scene, 'qss_game_dir', '') or '') if scene else ''
+    game_dir = _qss_abspath(getattr(scene, 'qss_game_dir', '') or '') if scene else ''
     try:
         entries = quake_paths.discover_maps(game_dir)
     except Exception:
@@ -2858,7 +2863,7 @@ class QSS_OT_scan_game_maps(Operator):
     bl_description = "Run BSP29 structural/reference/lightmap validation on every discovered loose or PAK map"
 
     def execute(self, context):
-        game_dir = bpy.path.abspath(context.scene.qss_game_dir or '')
+        game_dir = _qss_abspath(context.scene.qss_game_dir or '')
         entries = quake_paths.discover_maps(game_dir)
         if not entries:
             self.report({'WARNING'}, "No loose or PAK BSP maps found in this game folder.")
@@ -5027,7 +5032,7 @@ class QSS_PT_project(Panel):
         project_box.operator(QSS_OT_scan_game_maps.bl_idname, text="Validate Maps in Active Game", icon='CHECKMARK')
         tests_box = layout.box()
         tests_box.label(text="TESTING & BSP VALIDATION", icon='EXPERIMENT')
-        tests_box.operator(QSS_OT_validate_bsp_export.bl_idname, text="Validate Exported BSP…", icon='FILE_TICK')
+        tests_box.operator(QSS_OT_validate_bsp_export.bl_idname, text="Validate Exported BSP…", icon='CHECKMARK')
         tests_box.operator(QSS_OT_run_python_tests.bl_idname, text="Run QSS Python Test Suite", icon='PLAY')
         tests_box.label(text="Reports are written to Blender's Text Editor datablocks.", icon='INFO')
         if not _qss_is_map_object(obj):
