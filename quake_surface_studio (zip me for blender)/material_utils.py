@@ -23,3 +23,35 @@ def trim_appended_material_slots(materials, original_count):
     while len(materials) > target:
         removed.append(materials.pop(index=len(materials) - 1))
     return removed
+
+
+
+def find_image_slot_index(paint_images, image):
+    """Return Blender's material paint-slot index for an exact image datablock.
+
+    Do not infer this index from node-tree order: Blender builds and orders
+    paint slots independently. Pointer identity is preferred because RNA
+    wrappers for the same datablock need not be the same Python object.
+    """
+    if image is None:
+        return -1
+    target_pointer = None
+    try:
+        target_pointer = image.as_pointer()
+    except Exception:
+        pass
+    for index, candidate in enumerate(paint_images):
+        if candidate is image:
+            return index
+        try:
+            if candidate == image:
+                return index
+        except Exception:
+            pass
+        if target_pointer is not None:
+            try:
+                if candidate.as_pointer() == target_pointer:
+                    return index
+            except Exception:
+                pass
+    return -1
