@@ -1,4 +1,12 @@
-# Quake Surface Studio 0.11.5
+# Quake Surface Studio 0.11.6
+
+## 0.11.6 changes
+
+- Added a visible **Enter Lightmap Paint** control to the Lighting Studio panel.
+- Lightmap painting can be started from Edit Mode after selecting one or more faces. QSS captures the selection, filters out faces without lightmap samples, and applies a Texture Paint face mask so brush strokes cannot spill onto unselected BSP surfaces.
+- The lightmap paint operator rebuilds the material-to-atlas hookups, explicitly activates the working atlas and `Quake_Lightmap_UV`, and validates the canvas, UV map, and mask after entering Texture Paint.
+- Added standalone tests for filtering selected faces against lightmap coverage.
+- CI derives the install ZIP and artifact version from `bl_info`, avoiding stale package names after future version bumps.
 
 ## 0.11.5 changes
 
