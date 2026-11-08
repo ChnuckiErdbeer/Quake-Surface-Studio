@@ -1,4 +1,14 @@
-# Quake Surface Studio 0.13.0
+# Quake Surface Studio 0.14.0
+
+## 0.14.0 changes
+
+- Added a persistent Quake installation setting stored in Blender's user configuration at \`CONFIG/qss/config.json\`. Choose the folder containing \`id1\`; QSS normalizes an \`id1\` selection to its parent and remembers the active game folder across Blender sessions.
+- Added an active **Game / Mod** selector that discovers \`id1\` and immediate mod folders containing \`maps/\` or \`pak*.pak\`.
+- Added a PAK-aware game map browser. It indexes loose BSP files and \`maps/*.bsp\` entries in Quake PACK archives, applies loose-file and higher-numbered-PAK override precedence, and extracts archived maps into a QSS cache before import.
+- Added **Validate Exported BSP** inside Blender. Select the exported BSP and the original/source BSP in the file browser; a sibling \`.lit\` file is auto-detected, or an explicit sidecar can be supplied. The integrity report is written to \`QSS_Export_Validation\`.
+- Added **Validate Maps in Active Game** to parse and validate each discovered BSP29 map, including face references and classic/enhanced lightmap bounds. Results are written to \`QSS_Game_Map_Validation\`.
+- Added **Run QSS Python Test Suite** inside Blender. The add-on install ZIP now includes its standalone \`tests/\` folder so the same pure-Python test suite can run from Blender; results are written to \`QSS_Python_Test_Report\`.
+- Quake materials now explicitly set Principled BSDF Roughness to \`1.0\` when created or reconnected, rather than inheriting Blender's default \`0.5\`.
 
 ## 0.13.0 changes
 

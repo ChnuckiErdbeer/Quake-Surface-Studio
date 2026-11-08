@@ -52,7 +52,7 @@ jobs:
           VERSION="${{ steps.version.outputs.value }}"
           mkdir -p dist/quake_surface_studio
           cp -a "quake_surface_studio (zip me for blender)/." dist/quake_surface_studio/
-          rm -rf dist/quake_surface_studio/tests dist/quake_surface_studio/__pycache__
+          find dist/quake_surface_studio -type d -name __pycache__ -prune -exec rm -rf {} +
           cd dist
           zip -qr "../Quake-Surface-Studio-v${VERSION}.zip" quake_surface_studio
       - name: Upload Blender install ZIP

@@ -22,9 +22,10 @@ from bpy.types import Operator, Panel
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
 from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils
+from . import export_validation, quake_paths
 
 
-ADDON_VERSION = (0, 13, 0)
+ADDON_VERSION = (0, 14, 0)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -36,6 +37,148 @@ _addon_keymaps = []
 
 def _report(op, level, message):
     op.report({level}, message)
+
+
+# QSS per-user installation settings are kept outside .blend files in config.json.
+_qss_config_update_depth = False
+_qss_game_map_entries = []
+
+
+def _qss_config_path():
+    directory = bpy.utils.user_resource('CONFIG', path='qss', create=True)
+    return os.path.join(directory, 'config.json')
+
+
+def _qss_load_config():
+    return quake_paths.load_config(_qss_config_path())
+
+
+def _qss_save_config(scene=None, last_source_bsp=None):
+    config = _qss_load_config()
+    if scene is not None:
+        root = quake_paths.normalize_quake_root(
+            bpy.path.abspath(getattr(scene, 'qss_quake_root', '') or '')
+        )
+        game_dir = bpy.path.abspath(getattr(scene, 'qss_game_dir', '') or '')
+        config['quake_root'] = root
+        config['active_game_dir'] = game_dir
+        config['active_game_id'] = getattr(scene, 'qss_game_folder', '') or ''
+    if last_source_bsp:
+        config['last_source_bsp'] = os.path.abspath(bpy.path.abspath(last_source_bsp))
+    quake_paths.save_config(config, _qss_config_path())
+
+
+def _qss_game_folder_items(self, context):
+    scene = getattr(context, 'scene', None) if context else None
+    root = bpy.path.abspath(getattr(scene, 'qss_quake_root', '') or '') if scene else ''
+    items = quake_paths.discover_game_dirs(root)
+    if not items:
+        return [('NONE', 'No game folders found', 'Set the Quake installation folder first', 'ERROR', 0)]
+    return [
+        (item['id'], item['label'], item['path'], 'FILE_FOLDER', index)
+        for index, item in enumerate(items)
+    ]
+
+
+def _on_quake_root_changed(self, context):
+    global _qss_config_update_depth
+    if _qss_config_update_depth:
+        return
+    scene = context.scene
+    _qss_config_update_depth = True
+    try:
+        root = quake_paths.normalize_quake_root(bpy.path.abspath(scene.qss_quake_root or ''))
+        if root != bpy.path.abspath(scene.qss_quake_root or ''):
+            scene.qss_quake_root = root
+        folders = quake_paths.discover_game_dirs(root)
+        if folders:
+            current = getattr(scene, 'qss_game_folder', '')
+            ids = [item['id'] for item in folders]
+            if current not in ids:
+                current = next((item['id'] for item in folders if item['id'] == 'id1'), folders[0]['id'])
+            scene.qss_game_folder = current
+            scene.qss_game_dir = quake_paths.resolve_game_dir(root, current)
+        else:
+            scene.qss_game_folder = 'NONE'
+            scene.qss_game_dir = root
+        _qss_save_config(scene)
+    except Exception as exc:
+        print(f"QSS: could not save Quake installation settings: {exc}")
+    finally:
+        _qss_config_update_depth = False
+
+
+def _on_game_folder_changed(self, context):
+    global _qss_config_update_depth
+    if _qss_config_update_depth:
+        return
+    scene = context.scene
+    root = bpy.path.abspath(scene.qss_quake_root or '')
+    game_dir = quake_paths.resolve_game_dir(root, scene.qss_game_folder)
+    if game_dir:
+        scene.qss_game_dir = game_dir
+    _qss_save_config(scene)
+
+
+def _qss_write_text_report(name, contents):
+    report = bpy.data.texts.get(name)
+    if report is None:
+        report = bpy.data.texts.new(name)
+    else:
+        report.clear()
+    report.write(contents)
+    return report
+
+
+def _qss_format_export_report(report):
+    lines = [
+        "PASS: QSS BSP export integrity checks",
+        f"Faces: {report['faces']}",
+        f"Textures: {report['textures']}",
+        f"Texinfo records: {report['texinfos']}",
+        f"Classic lighting: {report['classic_lighting_bytes']} bytes "
+        f"({report['classic_required_samples']} required samples)",
+        "Enhanced BSPX lighting: "
+        + (f"{report['enhanced_lighting_samples']} RGB samples"
+           if report['enhanced_lighting_samples'] is not None else "not present"),
+        "BSPX lumps: " + (", ".join(report['bspx_lumps']) or "(none)"),
+        "External .lit sidecar: " + ("validated" if report['external_lit'] else "not present"),
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _qss_game_map_enum_items(self, context):
+    global _qss_game_map_entries
+    scene = getattr(context, 'scene', None) if context else None
+    game_dir = bpy.path.abspath(getattr(scene, 'qss_game_dir', '') or '') if scene else ''
+    try:
+        entries = quake_paths.discover_maps(game_dir)
+    except Exception:
+        entries = []
+    _qss_game_map_entries = entries
+    if not entries:
+        return [('__NO_MAPS__', 'No BSP maps found', 'This game folder has no loose or PAK maps', 'ERROR', 0)]
+    return [
+        (
+            entry['id'],
+            os.path.basename(entry['path'])[:63],
+            f"{entry['path']} · {entry['source_label']}"[:255],
+            'FILE',
+            index,
+        )
+        for index, entry in enumerate(entries)
+    ]
+
+
+def _qss_choose_initial_game_settings(config):
+    root = quake_paths.normalize_quake_root(config.get('quake_root', ''))
+    folders = quake_paths.discover_game_dirs(root)
+    saved_dir = config.get('active_game_dir', '')
+    active_id = quake_paths.game_id_for_path(root, saved_dir)
+    if not active_id:
+        active_id = next((item['id'] for item in folders if item['id'] == 'id1'), folders[0]['id'] if folders else 'NONE')
+    active_dir = quake_paths.resolve_game_dir(root, active_id) if folders else root
+    return root, active_id, active_dir
 
 
 def _image_hash(image):
@@ -74,6 +217,20 @@ def _find_image_node(mat, role="base_texture"):
             if node.get('qss_role', '') != 'lightmap':
                 return node
     return None
+
+
+
+def _set_principled_roughness(mat, value=1.0):
+    """Set every Principled BSDF in a QSS Quake material to the requested roughness."""
+    if mat is None:
+        return
+    mat.use_nodes = True
+    for node in mat.node_tree.nodes:
+        if node.type != 'BSDF_PRINCIPLED':
+            continue
+        socket = node.inputs.get('Roughness')
+        if socket is not None:
+            socket.default_value = float(value)
 
 
 def _set_material_image(mat, image):
@@ -126,6 +283,7 @@ def _set_material_image(mat, image):
         mat.node_tree.links.new(tex.outputs['Color'], bsdf.inputs['Base Color'])
     if not any(link.from_node == bsdf and link.to_node == output for link in mat.node_tree.links):
         mat.node_tree.links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
+    _set_principled_roughness(mat, 1.0)
 
 
 
@@ -886,6 +1044,7 @@ def _load_wad_texture_index(wad_paths):
 def _make_material(name, texture_id, texture_name, image):
     mat = bpy.data.materials.new(name=name)
     mat.use_nodes = True
+    _set_principled_roughness(mat, 1.0)
     mat['qss_texture_index'] = int(texture_id)
     mat['qss_texture_name'] = texture_name or name
     mat['qss_export_name'] = (texture_name or name)[:15]
@@ -2577,6 +2736,7 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
             )
             context.scene.qss_game_dir = game_dir
             context.scene.qss_quake_unit_scale = float(self.unit_scale)
+            _qss_save_config(context.scene, last_source_bsp=source_path)
             # Fit the view's depth buffer and start at info_player_start when available.
             _apply_map_view_clipping(context, obj)
             _frame_player_start(context, obj)
@@ -2591,6 +2751,178 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
             return {'FINISHED'}
         except Exception as exc:
             _report(self, 'ERROR', str(exc))
+            return {'CANCELLED'}
+
+
+class QSS_OT_browse_game_maps(Operator):
+    bl_idname = "qss.browse_game_maps"
+    bl_label = "Browse Game Maps"
+    bl_description = "Choose a BSP from loose maps or PAK archives in the selected Quake game folder"
+
+    map_id: EnumProperty(name="BSP map", items=_qss_game_map_enum_items)
+
+    def invoke(self, context, event):
+        entries = quake_paths.discover_maps(context.scene.qss_game_dir)
+        if not entries:
+            self.report({'WARNING'}, "No BSP maps found in the selected game folder.")
+            return {'CANCELLED'}
+        global _qss_game_map_entries
+        _qss_game_map_entries = entries
+        self.map_id = entries[0]['id']
+        return context.window_manager.invoke_props_dialog(self, width=560)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text=f"Maps found: {len(_qss_game_map_entries)}")
+        layout.prop(self, "map_id", text="Map")
+
+    def execute(self, context):
+        entry = next(
+            (item for item in quake_paths.discover_maps(context.scene.qss_game_dir)
+             if item['id'] == self.map_id),
+            None,
+        )
+        if entry is None:
+            self.report({'ERROR'}, "That game map is no longer available.")
+            return {'CANCELLED'}
+        try:
+            cache_dir = bpy.utils.user_resource('DATAFILES', path=os.path.join('qss', 'maps'), create=True)
+            map_path = quake_paths.extract_map(entry, cache_dir)
+            result = bpy.ops.qss.import_bsp(
+                'EXEC_DEFAULT',
+                filepath=map_path,
+                game_dir=context.scene.qss_game_dir,
+                unit_scale=context.scene.qss_quake_unit_scale,
+            )
+            if 'CANCELLED' in result:
+                raise RuntimeError("The QSS BSP importer cancelled the map import.")
+            self.report({'INFO'}, f"Imported {entry['path']} from {entry['source_label']}.")
+            return {'FINISHED'}
+        except Exception as exc:
+            self.report({'ERROR'}, f"Could not import {entry['path']}: {exc}")
+            return {'CANCELLED'}
+
+
+class QSS_OT_validate_bsp_export(Operator, ImportHelper):
+    bl_idname = "qss.validate_bsp_export"
+    bl_label = "Validate BSP Export"
+    bl_description = "Compare an exported BSP with its original source and validate its lightmaps and optional .lit sidecar"
+    filename_ext = ".bsp"
+    filter_glob: StringProperty(default="*.bsp", options={'HIDDEN'})
+    source_bsp: StringProperty(name="Original / source BSP", subtype='FILE_PATH', default="")
+    lit_file: StringProperty(name="Optional .lit sidecar", subtype='FILE_PATH', default="")
+
+    def invoke(self, context, event):
+        obj = context.object
+        source = obj.get('qss_source_path', '') if _qss_is_map_object(obj) else ''
+        if not source:
+            source = _qss_load_config().get('last_source_bsp', '')
+        self.source_bsp = source
+        return ImportHelper.invoke(self, context, event)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="Choose the exported BSP in the file browser.")
+        layout.prop(self, "source_bsp")
+        layout.prop(self, "lit_file")
+
+    def execute(self, context):
+        source = bpy.path.abspath(self.source_bsp) if self.source_bsp else ''
+        exported = bpy.path.abspath(self.filepath) if self.filepath else ''
+        lit_path = bpy.path.abspath(self.lit_file) if self.lit_file else None
+        try:
+            if not source or not os.path.isfile(source):
+                raise FileNotFoundError("Choose a valid original/source BSP in the operator options.")
+            if not exported or not os.path.isfile(exported):
+                raise FileNotFoundError("Choose a valid exported BSP.")
+            report = export_validation.validate_export_pair(source, exported, lit_path)
+            body = _qss_format_export_report(report)
+            body = f"Original: {source}\nExported: {exported}\n\n" + body
+            _qss_write_text_report("QSS_Export_Validation", body)
+            _qss_save_config(context.scene, last_source_bsp=source)
+            self.report({'INFO'}, "PASS: BSP export integrity checks. See Text datablock QSS_Export_Validation.")
+            return {'FINISHED'}
+        except (OSError, bsp.BSPError, ValueError) as exc:
+            message = f"FAIL: {exc}"
+            _qss_write_text_report(
+                "QSS_Export_Validation",
+                f"Original: {source}\nExported: {exported}\n\n{message}\n",
+            )
+            self.report({'ERROR'}, message[:240])
+            return {'CANCELLED'}
+
+
+class QSS_OT_scan_game_maps(Operator):
+    bl_idname = "qss.scan_game_maps"
+    bl_label = "Validate Maps in Game Folder"
+    bl_description = "Run BSP29 structural/reference/lightmap validation on every discovered loose or PAK map"
+
+    def execute(self, context):
+        game_dir = bpy.path.abspath(context.scene.qss_game_dir or '')
+        entries = quake_paths.discover_maps(game_dir)
+        if not entries:
+            self.report({'WARNING'}, "No loose or PAK BSP maps found in this game folder.")
+            return {'CANCELLED'}
+        lines = [f"QSS game-map validation: {game_dir}", f"Discovered maps: {len(entries)}", ""]
+        passed = failed = 0
+        for entry in entries:
+            try:
+                data = quake_paths.read_map_entry(entry)
+                report = export_validation.validate_export_bytes(data, data)
+                lines.append(
+                    f"PASS  {entry['path']} [{entry['source_label']}] "
+                    f"faces={report['faces']} textures={report['textures']}"
+                )
+                passed += 1
+            except Exception as exc:
+                lines.append(f"FAIL  {entry['path']} [{entry['source_label']}] :: {exc}")
+                failed += 1
+        lines.extend(["", f"Result: {passed} passed, {failed} failed"])
+        _qss_write_text_report("QSS_Game_Map_Validation", "\n".join(lines) + "\n")
+        if failed:
+            self.report({'ERROR'}, f"Map scan finished: {passed} passed, {failed} failed. See QSS_Game_Map_Validation.")
+        else:
+            self.report({'INFO'}, f"Map scan passed: {passed} maps. See QSS_Game_Map_Validation.")
+        return {'FINISHED'}
+
+
+class QSS_OT_run_python_tests(Operator):
+    bl_idname = "qss.run_python_tests"
+    bl_label = "Run QSS Python Test Suite"
+    bl_description = "Run the add-on's standalone unittest suite inside Blender and write its results to a Text datablock"
+
+    def execute(self, context):
+        import io
+        import unittest
+
+        tests_dir = os.path.join(os.path.dirname(__file__), "tests")
+        if not os.path.isdir(tests_dir):
+            self.report({'ERROR'}, "The installed QSS package does not contain its tests folder.")
+            return {'CANCELLED'}
+        stream = io.StringIO()
+        try:
+            suite = unittest.defaultTestLoader.discover(tests_dir, pattern="test_*.py")
+            result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
+            output = stream.getvalue()
+            failures = len(result.failures)
+            errors = len(result.errors)
+            skipped = len(getattr(result, "skipped", []))
+            passed = result.testsRun - failures - errors - skipped
+            summary = (
+                f"QSS test suite: {passed} passed, {failures} failed, "
+                f"{errors} errors, {skipped} skipped ({result.testsRun} total)"
+            )
+            body = summary + "\n\n" + output
+            _qss_write_text_report("QSS_Python_Test_Report", body)
+            if result.wasSuccessful():
+                self.report({'INFO'}, summary + ". See QSS_Python_Test_Report.")
+            else:
+                self.report({'ERROR'}, summary + ". See QSS_Python_Test_Report.")
+            return {'FINISHED'}
+        except Exception as exc:
+            body = stream.getvalue() + f"\nTest runner error: {exc}\n"
+            _qss_write_text_report("QSS_Python_Test_Report", body)
+            self.report({'ERROR'}, f"QSS test runner failed: {exc}")
             return {'CANCELLED'}
 
 
@@ -4686,7 +5018,18 @@ class QSS_PT_project(Panel):
     def draw(self, context):
         layout = self.layout
         obj = context.object
-        layout.prop(context.scene, 'qss_game_dir', text="Game folder")
+        scene = context.scene
+        project_box = layout.box()
+        project_box.label(text="QUAKE INSTALLATION & MOD", icon='FILE_FOLDER')
+        project_box.prop(scene, 'qss_quake_root', text="Installation folder")
+        project_box.prop(scene, 'qss_game_folder', text="Game / Mod")
+        project_box.operator(QSS_OT_browse_game_maps.bl_idname, text="Browse Game Maps…", icon='FILEBROWSER')
+        project_box.operator(QSS_OT_scan_game_maps.bl_idname, text="Validate Maps in Active Game", icon='CHECKMARK')
+        tests_box = layout.box()
+        tests_box.label(text="TESTING & BSP VALIDATION", icon='EXPERIMENT')
+        tests_box.operator(QSS_OT_validate_bsp_export.bl_idname, text="Validate Exported BSP…", icon='FILE_TICK')
+        tests_box.operator(QSS_OT_run_python_tests.bl_idname, text="Run QSS Python Test Suite", icon='PLAY')
+        tests_box.label(text="Reports are written to Blender's Text Editor datablocks.", icon='INFO')
         if not _qss_is_map_object(obj):
             layout.label(text="No Quake BSP selected.", icon='INFO')
             return
@@ -5038,6 +5381,10 @@ class QSS_PT_export(Panel):
 
 CLASSES = (
     QSS_OT_import_bsp,
+    QSS_OT_browse_game_maps,
+    QSS_OT_validate_bsp_export,
+    QSS_OT_scan_game_maps,
+    QSS_OT_run_python_tests,
     QSS_OT_detach_faces,
     QSS_OT_activate_paint,
     QSS_OT_activate_lightmap_paint,
@@ -5105,7 +5452,7 @@ def _remove_qss_keymaps():
 def _remove_scene_properties():
     """Remove QSS Scene properties, including properties from an older module."""
     for name in (
-        'qss_game_dir', 'qss_quake_unit_scale', 'qss_nav_speed_quake',
+        'qss_quake_root', 'qss_game_folder', 'qss_game_dir', 'qss_quake_unit_scale', 'qss_nav_speed_quake',
         'qss_nav_fast_factor', 'qss_light_energy_scale',
         'qss_bake_output_scale', 'qss_bake_bounces', 'qss_bake_match_source', 'qss_mmb_fps_walk',
         'qss_quake_bake_shadows', 'qss_quake_bake_gate',
@@ -5176,11 +5523,27 @@ def register():
             bpy.utils.register_class(cls)
             registered.append(cls)
 
-        bpy.types.Scene.qss_game_dir = StringProperty(
-            name="Quake game directory",
-            description="Game root or id1 folder; used to locate gfx/palette.lmp or read it from a PAK",
+        initial_config = _qss_load_config()
+        initial_root, initial_game_id, initial_game_dir = _qss_choose_initial_game_settings(initial_config)
+        bpy.types.Scene.qss_quake_root = StringProperty(
+            name="Quake installation folder",
+            description="The folder containing id1 and any installed mod folders; selecting id1 itself is also accepted",
             subtype='DIR_PATH',
-            default="",
+            default=initial_root,
+            update=_on_quake_root_changed,
+        )
+        bpy.types.Scene.qss_game_folder = EnumProperty(
+            name="Game / Mod",
+            description="Select id1 or another detected Quake game/mod folder",
+            items=_qss_game_folder_items,
+            default=initial_game_id,
+            update=_on_game_folder_changed,
+        )
+        bpy.types.Scene.qss_game_dir = StringProperty(
+            name="Active Quake game directory",
+            description="Resolved active game folder used by the importer and texture/WAD lookup",
+            subtype='DIR_PATH',
+            default=initial_game_dir,
         )
         bpy.types.Scene.qss_quake_unit_scale = FloatProperty(
             name="Quake unit scale", description="Blender metres per Quake unit", default=DEFAULT_QUAKE_UNIT_SCALE,
