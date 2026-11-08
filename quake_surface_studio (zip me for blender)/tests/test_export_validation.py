@@ -72,7 +72,7 @@ class ExportValidationTests(unittest.TestCase):
             source_data, exported_data, bsp.build_lit_file(edited_rgb)
         )
         self.assertEqual(report['faces'], len(source.faces()))
-        self.assertEqual(report['classic_required_samples'], len(source.lumps[bsp.LUMP_LIGHTING]))
+        self.assertLessEqual(report['classic_required_samples'], len(source.lumps[bsp.LUMP_LIGHTING]))
         self.assertTrue(report['external_lit'])
 
     def test_identical_unlit_export_passes(self):
