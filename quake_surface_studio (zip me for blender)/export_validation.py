@@ -113,7 +113,7 @@ def _validate_classic_lightmaps(parsed: bsp.BSP29, label: str) -> int:
     return required_samples
 
 
-def _validate_enhanced_lightmaps(parsed: bsp.BSP29) -> Optional[int]:
+def _validate_enhanced_lightmaps(parsed: bsp.BSP29, classic_required: int) -> Optional[int]:
     extensions = parsed.bspx_lumps
     if not any(name in extensions for name in ("LMSHIFT", "LMOFFSET", "LMSTYLE")):
         return None
@@ -133,6 +133,12 @@ def _validate_enhanced_lightmaps(parsed: bsp.BSP29) -> Optional[int]:
     rgb = extensions.get("RGBLIGHTING")
     if rgb is None or len(rgb) % 3:
         _fail("enhanced lightmaps require a valid RGBLIGHTING BSPX lump")
+    lighting = parsed.lumps[bsp.LUMP_LIGHTING]
+    if len(rgb) != len(lighting) * 3:
+        _fail(
+            "enhanced BSPX RGBLIGHTING must contain exactly three bytes per "
+            "standard LIGHTING byte so QSS/FTE readers accept the light data"
+        )
     rgb_samples = len(rgb) // 3
     spans = []
     for face_index, face in enumerate(faces):
@@ -145,6 +151,11 @@ def _validate_enhanced_lightmaps(parsed: bsp.BSP29) -> Optional[int]:
             if offset != _NO_LIGHT_OFFSET or style != 255:
                 _fail(f"face {face_index} has inconsistent no-light metadata")
             continue
+        if offset < classic_required:
+            _fail(
+                f"face {face_index} enhanced lightmap offset {offset} overlaps "
+                f"the classic sample range ending at {classic_required}"
+            )
         width, height = _face_lightmap_dimensions(parsed, face, 1 << shift)
         if width > 256 or height > 256:
             _fail(
@@ -159,14 +170,17 @@ def _validate_enhanced_lightmaps(parsed: bsp.BSP29) -> Optional[int]:
             )
         spans.append((offset, end, face_index))
 
-    cursor = 0
+    cursor = None
     for start, end, face_index in sorted(spans):
+        if cursor is None:
+            cursor = start
         if start != cursor:
             _fail(
                 f"face {face_index} enhanced lightmap starts at sample {start}; "
                 f"expected contiguous sample offset {cursor} (overlap or gap)"
             )
         cursor = end
+    cursor = classic_required if cursor is None else cursor
     if cursor != rgb_samples:
         _fail(
             f"enhanced RGBLIGHTING has {rgb_samples} samples but face ranges "
@@ -217,7 +231,7 @@ def validate_export_bytes(
             _fail(f"unrelated BSPX lump {name} was not preserved")
 
     classic_required = _validate_classic_lightmaps(exported, "exported")
-    enhanced_samples = _validate_enhanced_lightmaps(exported)
+    enhanced_samples = _validate_enhanced_lightmaps(exported, classic_required)
     rgb_payload = exported.bspx_lumps.get("RGBLIGHTING")
     if rgb_payload is not None and enhanced_samples is None:
         if len(rgb_payload) % 3:
