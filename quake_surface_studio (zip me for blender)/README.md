@@ -1,4 +1,15 @@
-# Quake Surface Studio 0.12.0
+# Quake Surface Studio 0.13.0
+
+## 0.13.0 changes
+
+- Added a standalone **BSP export integrity checker**: `qss_export_check.py source.bsp exported.bsp`. It compares the source and exported files, checks that topology-related standard lumps and unknown BSPX payloads survive, validates face/texture/texinfo references and classic lightmap sample bounds, and verifies a sibling QLIT v1 `.lit` sidecar.
+- Added an opt-in **Enhanced BSPX (LMSHIFT)** lightmap export mode alongside the unchanged default **Classic BSP29** mode.
+- Enhanced export retains the original classic LIGHTING samples at the front of the standard lump, then appends per-face higher-density monochrome and RGB samples. `LMOFFSET` points into the appended region; `LMSHIFT` selects per-face luxel spacing; `LMSTYLE` declares the flattened static style 0. The resulting BSPX `RGBLIGHTING` and QLIT v1 `.lit` contain matching sample counts.
+- The enhanced sampling pitch follows the imported working atlas: 1× = 16-unit luxels, 2× = 8, 4× = 4, and 8× = 2. Oversized faces are coarsened to stay within the 256×256 per-surface limit. The high-density samples are bilinearly sampled from the working atlas; Classic BSP29 remains the broad-compatibility option and keeps original luxel dimensions.
+- Enhanced output targets engines implementing the QuakeSpasm-Spiked/FTE `LMSHIFT`, `LMOFFSET` and `LMSTYLE` BSPX extensions. BSPX extensions are not universal. QSS currently refuses enhanced export when the source already contains lightmap override extensions or when detached face-local texinfo projections are active; it does not yet import/rebase those layouts or emit `DECOUPLED_LM`.
+- Object Mode is required for export so the mesh face attributes and polygons are synchronized before the exporter checks face identity.
+
+## 0.12.0 changes
 
 ## 0.12.0 changes
 
@@ -199,6 +210,8 @@ python qss_inspect.py path/to/map.bsp --lit path/to/map.lit
 python qss_export_check.py path/to/original.bsp path/to/exported.bsp
 ```
 
+`qss_export_check.py` also accepts `--lit path/to/file.lit` when the QLIT v1 sidecar does not share the exported BSP's basename. It is read-only and works with ordinary Python; it does not require Blender.
+
 `qss_export_check.py` compares an exported BSP against the exact original file used for import. It checks face/geometry identity, retained source lumps and unknown BSPX data, texture/texinfo references, classic lightmap bounds, optional enhanced BSPX lightmap offsets, and the sibling QLIT v1 `.lit` file. A sibling `.lit` file is detected automatically; use `--lit path/to/file.lit` to select another one. This validator is read-only and does not replace loading the output in the target engine.
 
 The inspector reports standard lump counts, BSPX extension names, RGBLIGHTING sample counts, optional QLIT validity, and face/texinfo/miptex references. It is a structural check, not a replacement for testing in the engine.
@@ -210,7 +223,9 @@ Classic BSP29 has a 124-byte header and 15 standard lumps. Each face references 
 - `bsp.py`: BSP29/BSPX reader-writer, miptex/texinfo helpers, WAD2, palette/PAK, entities, QLIT and RGBLIGHTING helpers.
 - `addon.py`: Blender geometry import, entity light import, painting UI, Quake direct-light solver integration, experimental Cycles bake and BSP export.
 - `color.py`: Quake palette / Blender colour-space conversion.
-- `qss_inspect.py`: standalone BSP29 and BSPX validation tool, including per-face RGB luxel/style inspection.
+- `qss_inspect.py`: standalone BSP29 and BSPX inspection tool, including per-face RGB luxel/style inspection.
+- `qss_export_check.py` and `export_validation.py`: standalone source-to-export integrity checks, classic sample bounds, optional enhanced BSPX lightmap checks and QLIT sidecar validation.
+- `lightmap_export.py`: Blender-independent higher-density per-face lightmap sampling and BSPX payload helpers.
 - `tests/`: standalone parser, RGB lighting and colour-conversion regression tests.
 
 
