@@ -183,7 +183,7 @@ def _validate_enhanced_lightmaps(parsed: bsp.BSP29, classic_required: int, base_
             f"enhanced RGBLIGHTING has {rgb_samples} samples but face ranges "
             f"consume {cursor}"
         )
-    return rgb_samples
+    return rgb_samples - base_sample_count
 
 
 def validate_export_bytes(
