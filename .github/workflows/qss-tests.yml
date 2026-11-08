@@ -47,17 +47,20 @@ jobs:
           PY
           )
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
-      - name: Build versioned Blender install ZIP
+      - name: Assemble Blender add-on package folder
         run: |
           VERSION="${{ steps.version.outputs.value }}"
           mkdir -p dist/quake_surface_studio
           cp -a "quake_surface_studio (zip me for blender)/." dist/quake_surface_studio/
           find dist/quake_surface_studio -type d -name __pycache__ -prune -exec rm -rf {} +
-          cd dist
-          zip -qr "../Quake-Surface-Studio-v${VERSION}.zip" quake_surface_studio
-      - name: Upload Blender install ZIP
+          test -f dist/quake_surface_studio/__init__.py
+          test ! -e "dist/Quake-Surface-Studio-v${VERSION}.zip"
+      - name: Upload Blender-ready install artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Quake-Surface-Studio-v${{ steps.version.outputs.value }}
-          path: Quake-Surface-Studio-v${{ steps.version.outputs.value }}.zip
+          name: Quake-Surface-Studio-v${{ steps.version.outputs.value }}-Blender-Install
+          # Upload the package directory itself. The artifact download is one ZIP
+          # with quake_surface_studio/__init__.py at its root level, not a ZIP
+          # containing another ZIP.
+          path: dist/
           if-no-files-found: error

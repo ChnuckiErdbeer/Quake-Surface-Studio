@@ -1,4 +1,11 @@
-# Quake Surface Studio 0.15.1
+# Quake Surface Studio 0.15.2
+
+## 0.15.2 changes
+
+- Changes the install artifact to a single Blender-ready package archive: the downloaded GitHub artifact contains the `quake_surface_studio/` add-on folder directly, with no nested ZIP.
+- Makes FPS MMB-look and WASD/QE movement run in the same QSS modal session, so movement continues while looking.
+- Replaces the previous independent yaw/pitch camera reconstruction with incremental quaternion yaw/pitch, keeping the view orientation stable and clamping only the vertical pitch.
+- Corrects the horizontal right vector so W follows the view heading and D moves to the view's right.
 
 ## 0.15.1 changes
 
