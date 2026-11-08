@@ -971,7 +971,8 @@ def _pack_lightmap_rectangles(records, gutter=2, max_atlas_size=2048):
     # Prefer 2x sample blocks for easier painting; fall back to 1:1 if needed.
     ordered = sorted(records, key=lambda r: (-(r['height']), -(r['width']), r['face_id']))
     for scale in (2, 1):
-        for atlas_size in (512, 1024, 2048):
+        atlas_sizes = (512, 1024, 2048) if int(max_atlas_size) >= 512 else (256, 128)
+        for atlas_size in atlas_sizes:
             if atlas_size > int(max_atlas_size):
                 continue
             x = y = row_h = 0
@@ -2354,7 +2355,7 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
         items=(('1', '1× · Original', 'Original packed atlas resolution'),
                ('2', '2×', 'Twice the pixels per axis'),
                ('4', '4×', 'Four times the pixels per axis'),
-               ('8', '8×', 'Eight times the pixels per axis; atlas packing is limited to 512²')),
+               ('8', '8×', 'Eight times the pixels per axis; atlas packing is limited to 256²')),
         default='1'
     )
 
@@ -4635,7 +4636,7 @@ class QSS_PT_lighting(Panel):
             layout.label(text=f"RGB source: {obj.get('qss_source_lighting_source', 'Monochrome')}")
             layout.label(text=f"Lightmapped faces: {obj.get('qss_lightmap_faces', 0)} / {obj.get('qss_total_bsp_faces', len(obj.data.polygons))}")
             layout.label(text=f"RGB chromatic faces: {obj.get('qss_lit_chromatic_faces', 0)} / {obj.get('qss_lit_rgb_faces', 0)}")
-            layout.label(text=f"Working atlas: {tuple(bpy.data.images.get(obj.get('qss_lightmap_image_name', '')).size)} px · {obj.get('qss_lightmap_resolution', 1)}×")
+            layout.label(text=f"Working atlas: {obj.get('qss_lightmap_atlas_size', 0) * obj.get('qss_lightmap_resolution', 1)} px · {obj.get('qss_lightmap_resolution', 1)}×")
             paint_box = layout.box()
             paint_box.label(text="LIGHTMAP PAINT", icon='BRUSH_DATA')
             paint_box.operator(QSS_OT_activate_lightmap_paint.bl_idname, icon='TPAINT_HLT')
