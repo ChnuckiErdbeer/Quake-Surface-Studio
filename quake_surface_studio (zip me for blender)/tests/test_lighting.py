@@ -53,6 +53,16 @@ class LightingHelpersTests(unittest.TestCase):
         combined = lighting.combine_style_samples(mono, rgb, 0, 2, [0, 2, 255])
         self.assertEqual(combined, [(10, 0, 30), (20, 0, 40)])
 
+    def test_combine_style_samples_respects_face_style_slot_order(self):
+        # For a face with styles [2, 0], the first sample plane is style 2,
+        # even though style 0 is numerically lower. Weights expose slot swaps.
+        mono = bytes((0, 0, 0, 0))
+        rgb = bytes((10, 0, 0, 20, 0, 0, 0, 0, 30, 0, 0, 40))
+        combined = lighting.combine_style_samples(
+            mono, rgb, 0, 2, [2, 0, 255, 255], {2: 0.5, 0: 1.0}
+        )
+        self.assertEqual(combined, [(5, 0, 30), (10, 0, 40)])
+
     def test_combine_style_samples_weights_and_clamps(self):
         rgb = bytes((200, 10, 10, 100, 20, 20))
         combined = lighting.combine_style_samples(b'\x00\x00', rgb, 0, 1, [0, 2], {0: 1.0, 2: 0.5})
