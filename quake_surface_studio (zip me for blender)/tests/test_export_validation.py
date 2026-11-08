@@ -83,14 +83,14 @@ class ExportValidationTests(unittest.TestCase):
     def test_enhanced_lightmap_rejects_truncated_rgb_data(self):
         original = make_test_bsp(lightmapped=True)
         lumps = list(original.lumps)
-        lumps[bsp.LUMP_LIGHTING] += bytes(81)
+        lumps[bsp.LUMP_LIGHTING] += bytes(80)
         encoded = original.write(lumps, bspx_lumps={
             'RGBLIGHTING': bytes(3 * 25) + bytes(3 * 80),
             'LMSHIFT': bytes([3]),
             'LMOFFSET': struct.pack('<I', 25),
             'LMSTYLE': bytes([0]),
         })
-        with self.assertRaisesRegex(bsp.BSPError, 'ends at sample 81'):
+        with self.assertRaisesRegex(bsp.BSPError, 'ends at sample 106'):
             export_validation.validate_export_bytes(original.write(), encoded)
 
     def test_enhanced_lmoffset_cannot_overlap_classic_samples(self):
