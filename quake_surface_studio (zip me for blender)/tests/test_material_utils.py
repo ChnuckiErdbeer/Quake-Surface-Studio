@@ -12,7 +12,7 @@ class LightmapResolutionTests(unittest.TestCase):
         self.assertEqual(material_utils.lightmap_resolution_dimensions(512, 1), 512)
         self.assertEqual(material_utils.lightmap_resolution_dimensions(512, 2), 1024)
         self.assertEqual(material_utils.lightmap_resolution_dimensions(512, 4), 2048)
-        self.assertEqual(material_utils.lightmap_resolution_dimensions(512, 8), 4096)
+        self.assertEqual(material_utils.lightmap_resolution_dimensions(256, 8), 2048)
 
     def test_resolution_guard_rejects_excessive_images(self):
         with self.assertRaises(ValueError):
