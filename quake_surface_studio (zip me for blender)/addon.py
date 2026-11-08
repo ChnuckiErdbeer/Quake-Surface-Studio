@@ -128,6 +128,37 @@ def _set_material_image(mat, image):
         mat.node_tree.links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
 
 
+
+def _set_single_image_paint_target(context, obj, image, uv_name):
+    """Bind Texture Paint to one explicit image and the intended UV map.
+
+    Material-slot discovery is renderer/material dependent. QSS face-local
+    textures and the shared lightmap atlas are deterministic image targets,
+    so use Blender's Single Image paint mode rather than relying only on an
+    active Image Texture node.
+    """
+    if image is None:
+        raise bsp.BSPError("The requested QSS paint image is missing.")
+    uv_layers = obj.data.uv_layers
+    uv_layer = uv_layers.get(uv_name)
+    if uv_layer is None:
+        raise bsp.BSPError(f"Required paint UV map '{uv_name}' is missing.")
+    try:
+        uv_layer.active_render = True
+        uv_layers.active = uv_layer
+    except (AttributeError, IndexError, RuntimeError, ReferenceError) as exc:
+        raise bsp.BSPError(f"Could not activate paint UV map '{uv_name}': {exc}") from exc
+
+    try:
+        image_paint = context.scene.tool_settings.image_paint
+        image_paint.mode = 'IMAGE'
+        image_paint.canvas = image
+        image_paint.interpolation = 'CLOSEST'
+        if image_paint.mode != 'IMAGE' or image_paint.canvas != image:
+            raise RuntimeError("Blender did not retain the requested Single Image canvas.")
+    except Exception as exc:
+        raise bsp.BSPError(f"Could not set '{image.name}' as the Texture Paint canvas: {exc}") from exc
+
 def _next_pow2_clamped(value, minimum=16, maximum=512):
     """Choose a supported Quake miptex dimension for a face-local texture."""
     value = max(1, int(math.ceil(float(value))))
@@ -2576,21 +2607,18 @@ class QSS_OT_activate_paint(Operator):
             return {'CANCELLED'}
         _set_material_image(mat, image)
         try:
-            uv_layers = obj.data.uv_layers
-            texture_uv = uv_layers.get("Quake_Texture_UV")
-            if texture_uv is None and len(uv_layers) > 0:
-                texture_uv = uv_layers[0]
-            if texture_uv is not None:
-                uv_layers.active = texture_uv
-        except (IndexError, RuntimeError, ReferenceError) as exc:
-            _report(self, 'ERROR', f"Texture UV layers are unavailable ({exc}). Return to Object Mode and re-import the BSP.")
+            _set_single_image_paint_target(
+                context, obj, image, 'Quake_Texture_UV'
+            )
+        except bsp.BSPError as exc:
+            _report(self, 'ERROR', str(exc))
             return {'CANCELLED'}
         try:
             bpy.ops.object.mode_set(mode='TEXTURE_PAINT')
         except RuntimeError as exc:
             _report(self, 'ERROR', f"Could not enter Texture Paint mode: {exc}")
             return {'CANCELLED'}
-        _report(self, 'INFO', f"Painting image: {image.name}")
+        _report(self, 'INFO', f"Painting image (Single Image canvas): {image.name}")
         return {'FINISHED'}
 
 
@@ -2629,15 +2657,19 @@ class QSS_OT_activate_lightmap_paint(Operator):
             n.select = False
         node.select = True
         mat.node_tree.nodes.active = node
-        uv_layer = obj.data.uv_layers.get('Quake_Lightmap_UV')
-        if uv_layer:
-            obj.data.uv_layers.active = uv_layer
+        try:
+            _set_single_image_paint_target(
+                context, obj, image, 'Quake_Lightmap_UV'
+            )
+        except bsp.BSPError as exc:
+            _report(self, 'ERROR', str(exc))
+            return {'CANCELLED'}
         try:
             bpy.ops.object.mode_set(mode='TEXTURE_PAINT')
         except RuntimeError as exc:
             _report(self, 'ERROR', f"Could not enter Lightmap Paint mode: {exc}")
             return {'CANCELLED'}
-        _report(self, 'INFO', f"Painting RGB lightmap atlas: {image.name}")
+        _report(self, 'INFO', f"Painting RGB lightmap atlas (Single Image canvas): {image.name}")
         return {'FINISHED'}
 
 
