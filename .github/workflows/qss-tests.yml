@@ -29,3 +29,16 @@ jobs:
       - name: Run standalone tests
         working-directory: "quake_surface_studio (zip me for blender)"
         run: python -m unittest discover -s tests -v
+      - name: Build versioned Blender install ZIP
+        run: |
+          mkdir -p dist/quake_surface_studio
+          cp -a "quake_surface_studio (zip me for blender)/." dist/quake_surface_studio/
+          rm -rf dist/quake_surface_studio/tests dist/quake_surface_studio/__pycache__
+          cd dist
+          zip -qr "../Quake-Surface-Studio-v0.11.2.zip" quake_surface_studio
+      - name: Upload Blender install ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quake-Surface-Studio-v0.11.2
+          path: Quake-Surface-Studio-v0.11.2.zip
+          if-no-files-found: error
