@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths
 
 
-ADDON_VERSION = (0, 14, 2)
+ADDON_VERSION = (0, 14, 3)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -5345,7 +5345,7 @@ class QSS_PT_diagnostics(Panel):
         diagnostics = layout.box()
         diagnostics.label(text="REPORTS & AUTOMATED TESTS", icon='TEXT')
         diagnostics.operator(QSS_OT_write_diagnostics.bl_idname, text="Save Lighting Diagnostics…", icon='FILE_TEXT')
-        diagnostics.operator(QSS_OT_run_blender_selftest.bl_idname, text="Run Full Self-Test + Delay Benchmark", icon='EXPERIMENT')
+        diagnostics.operator(QSS_OT_run_blender_selftest.bl_idname, text="Run Full Self-Test + Delay Benchmark", icon='EXPERIMENTAL')
         diagnostics.label(text="Object Mode required. Tests every BSP luxel in seven passes.", icon='TIME')
         diagnostics.label(text="Progress appears in Blender's status bar; report is saved to Desktop and a Text datablock.", icon='INFO')
         diagnostics.label(text="Dry run only: does not change the BSP or lightmap atlas.", icon='CHECKMARK')
