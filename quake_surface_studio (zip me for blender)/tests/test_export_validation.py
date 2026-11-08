@@ -1,3 +1,4 @@
+import math
 import os
 import struct
 import sys
@@ -9,6 +10,7 @@ import bsp
 import export_validation
 import lightmap_export
 import lighting as lighting_utils
+import qss_export_check
 
 
 def make_test_bsp(lightmapped=False):
@@ -109,7 +111,7 @@ class ExportValidationTests(unittest.TestCase):
                 p[0] * texinfo[4] + p[1] * texinfo[5] + p[2] * texinfo[6] + texinfo[7]
                 for p in positions
             ]
-            base_s_min = int(__import__('math').floor(min(s_values) / 16.0 + 1e-7)) * 16
+            base_s_min = int(math.floor(min(s_values) / 16.0 + 1e-7)) * 16
             base_t_min = int(__import__('math').floor(min(t_values) / 16.0 + 1e-7)) * 16
             base_width, base_height = export_validation._face_lightmap_dimensions(parsed, face, 16)
             block_size = base_width * base_height
@@ -161,6 +163,20 @@ class ExportValidationTests(unittest.TestCase):
         )
         self.assertEqual(report['enhanced_lighting_samples'], extension['enhanced_sample_count'])
         self.assertGreater(report['enhanced_lighting_samples'], 0)
+
+    def test_export_checker_cli_reads_bsp_and_auto_detects_lit(self):
+        original = make_test_bsp(lightmapped=True)
+        rgb = bytes((30, 60, 90)) * 25
+        with tempfile.TemporaryDirectory() as td:
+            source_path = os.path.join(td, 'source.bsp')
+            export_path = os.path.join(td, 'edited.bsp')
+            with open(source_path, 'wb') as handle:
+                handle.write(original.write())
+            with open(export_path, 'wb') as handle:
+                handle.write(original.write())
+            with open(os.path.splitext(export_path)[0] + '.lit', 'wb') as handle:
+                handle.write(bsp.build_lit_file(rgb))
+            self.assertEqual(qss_export_check.main([source_path, export_path]), 0)
 
     def test_identical_unlit_export_passes(self):
         original = make_test_bsp()
