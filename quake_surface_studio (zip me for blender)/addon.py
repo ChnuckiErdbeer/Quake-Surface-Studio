@@ -2285,6 +2285,10 @@ class QSS_OT_detach_faces(Operator):
         obj = context.object
         mesh = obj.data
         was_edit_mode = (context.mode == 'EDIT_MESH')
+        # Detach is transactional: remember the material-slot boundary and
+        # active slot so an exception cannot leave orphaned QSS material slots.
+        original_material_count = len(mesh.materials)
+        original_active_material_index = int(obj.active_material_index)
         stage = 'read selection'
         created_images = []
         created_materials = []
@@ -2454,6 +2458,15 @@ class QSS_OT_detach_faces(Operator):
             obj['qss_last_detach_error'] = f"{stage}: {exc}"
             obj['qss_last_detach_traceback'] = trace[-12000:]
             print(trace)
+            # Material/UV Mesh collections are not safe to edit while a failed
+            # Edit Mode restore has left the object in BMesh mode. Return to
+            # Object Mode before rolling back the original Mesh data.
+            try:
+                if context.mode == 'EDIT_MESH':
+                    bpy.ops.object.mode_set(mode='OBJECT')
+                    mesh = obj.data
+            except Exception:
+                pass
             # Roll back any material-slot/UV changes already committed.
             for plan in reversed(plans):
                 try:
@@ -2466,6 +2479,20 @@ class QSS_OT_detach_faces(Operator):
                                 uv_layer.data[loop_index].uv = uv_value
                 except Exception:
                     pass
+            # Remove every appended mesh slot before deleting the copied
+            # materials. Merely resetting polygon indices does not remove the
+            # slots, so users would remain non-zero and failed detaches leaked
+            # QSS_Detached_* materials into the mesh.
+            try:
+                while len(mesh.materials) > original_material_count:
+                    mesh.materials.pop(index=len(mesh.materials) - 1)
+                obj.active_material_index = min(
+                    original_active_material_index,
+                    max(0, original_material_count - 1)
+                )
+                mesh.update()
+            except Exception as rollback_exc:
+                print(f"QSS detach material-slot rollback warning: {rollback_exc}")
             for material in created_materials:
                 try:
                     if material.users == 0:
