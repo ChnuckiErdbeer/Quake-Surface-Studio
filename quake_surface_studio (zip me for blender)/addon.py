@@ -1251,8 +1251,9 @@ def _qss_safe_collection_item(collection, index, label):
 
 
 def _build_enhanced_lightmap_payload(
-    obj, parsed, image, pixels, lighting_source, source_lit_rgb,
-    face_attrs, resolution, base_pixel_scale, base_gutter,
+    obj, parsed, image, pixels, classic_lighting, classic_rgb,
+    source_lighting, source_lit_rgb, face_attrs, resolution,
+    base_pixel_scale, base_gutter,
 ):
     """Append high-density per-face samples and build LMSHIFT/LMOFFSET/LMSTYLE.
 
@@ -1313,7 +1314,7 @@ def _build_enhanced_lightmap_payload(
         base_width = (base_extent_s >> 4) + 1
         base_height = (base_extent_t >> 4) + 1
         block_size = base_width * base_height
-        if light_offset + block_size * len(active_styles) > len(lighting_source):
+        if light_offset + block_size * len(active_styles) > len(source_lighting):
             raise bsp.BSPError(f"Face {face_id} source lightmap samples exceed the LIGHTING lump.")
 
         record = None
@@ -1362,7 +1363,7 @@ def _build_enhanced_lightmap_payload(
             # its original style-combined samples rather than dropping lighting.
             try:
                 original_rgb = lighting_utils.combine_style_samples(
-                    lighting_source, source_lit_rgb, light_offset, block_size, active_styles
+                    source_lighting, source_lit_rgb, light_offset, block_size, active_styles
                 )
             except (ValueError, IndexError) as exc:
                 raise bsp.BSPError(f"Could not recover source lightmap samples for face {face_id}: {exc}") from exc
@@ -1381,19 +1382,15 @@ def _build_enhanced_lightmap_payload(
 
     try:
         extension = lightmap_export_utils.build_lightmap_extension_data(
-            len(faces), face_records, len(lighting_source)
+            len(faces), face_records, len(classic_lighting)
         )
     except ValueError as exc:
         raise bsp.BSPError(f"Could not build enhanced BSPX lightmap data: {exc}") from exc
 
     appended_mono = extension['LIGHTING_APPEND']
     appended_rgb = extension['RGBLIGHTING_APPEND']
-    lighting = bytearray(lighting_source)
-    rgb = bytearray()
-    if source_lit_rgb is None:
-        rgb.extend(channel for sample in lighting_source for channel in (sample, sample, sample))
-    else:
-        rgb.extend(source_lit_rgb)
+    lighting = bytearray(classic_lighting)
+    rgb = bytearray(classic_rgb)
     lighting.extend(appended_mono)
     rgb.extend(appended_rgb)
     if len(rgb) != len(lighting) * 3:
@@ -1513,8 +1510,8 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False):
                 lit_rgb[rgb_start:rgb_end] = bytes(block_size * 3)
     if enhanced:
         return _build_enhanced_lightmap_payload(
-            obj, parsed, image, px, lighting_source, source_lit_rgb,
-            face_attrs, resolution,
+            obj, parsed, image, px, lighting, lit_rgb,
+            lighting_source, source_lit_rgb, face_attrs, resolution,
             int(obj.get('qss_lightmap_scale', 1)),
             int(obj.get('qss_lightmap_gutter', 2)),
         )
@@ -2068,7 +2065,11 @@ def _safe_texture_name(value, fallback):
     return value[:15]
 
 
-def _export_object(obj, output_path):
+def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
+    if getattr(obj, 'mode', 'OBJECT') != 'OBJECT':
+        raise bsp.BSPError("Switch to Object Mode before exporting the BSP. Edit Mode changes may not be synchronized to mesh face attributes.")
+    if lightmap_export_mode not in {'CLASSIC', 'ENHANCED'}:
+        raise bsp.BSPError(f"Unknown lightmap export mode: {lightmap_export_mode}")
     if obj.get('qss_object_role') != 'quake_bsp29':
         raise bsp.BSPError("Active object is not a Quake Surface Studio BSP29 import.")
     source_path = obj.get('qss_source_path', '')
@@ -2207,9 +2208,12 @@ def _export_object(obj, output_path):
     new_lumps[bsp.LUMP_TEXTURES] = bsp.build_texture_lump(entries)
     new_lumps[bsp.LUMP_TEXINFO] = new_texinfo_lump
     new_lumps[bsp.LUMP_FACES] = new_faces_lump
-    lighting_lump, lit_file_data = _patch_lightmap_lump(obj, parsed)
+    lighting_lump, lit_file_data, lightmap_bspx_updates = _patch_lightmap_lump(
+        obj, parsed, enhanced=(lightmap_export_mode == 'ENHANCED')
+    )
     new_lumps[bsp.LUMP_LIGHTING] = lighting_lump
     new_bspx_lumps = dict(parsed.bspx_lumps)
+    new_bspx_lumps.update(lightmap_bspx_updates)
     if lit_file_data is not None:
         # BSPX RGBLIGHTING is QLIT v1's RGB payload without the 8-byte header.
         # Keep the .lit sidecar too for ports which prefer the external format.
@@ -4303,6 +4307,15 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
     bl_description = "Write texture and face-material changes back to a BSP29 file"
     filename_ext = ".bsp"
     filter_glob: StringProperty(default="*.bsp", options={'HIDDEN'})
+    lightmap_export_mode: EnumProperty(
+        name="Lightmap export",
+        description="Classic preserves original BSP29 luxel density; Enhanced adds QuakeSpasm-Spiked/FTE BSPX per-face lightmap resolution",
+        items=(
+            ('CLASSIC', "Classic BSP29", "Keep the original per-face luxel dimensions for broad engine compatibility"),
+            ('ENHANCED', "Enhanced BSPX (LMSHIFT)", "Append higher-density face lightmaps with LMSHIFT/LMOFFSET/LMSTYLE; requires a supporting engine"),
+        ),
+        default='CLASSIC',
+    )
 
     def invoke(self, context, event):
         obj = context.object
@@ -4314,13 +4327,15 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
 
     def execute(self, context):
         try:
-            result = _export_object(context.object, self.filepath)
+            result = _export_object(context.object, self.filepath, self.lightmap_export_mode)
             path, texture_count, changed_faces, replacements, palette_origin, lit_path = result
             detail = f" | {os.path.basename(lit_path)} written" if lit_path else ""
+            mode_detail = " | Enhanced BSPX lightmaps" if self.lightmap_export_mode == 'ENHANCED' else " | Classic lightmaps"
             _report(
                 self, 'INFO',
                 f"Exported {os.path.basename(path)} | {texture_count} textures | "
-                f"{changed_faces} face reassignment(s) | {replacements} edited shared texture(s){detail}."
+                f"{changed_faces} face reassignment(s) | {replacements} edited shared texture(s)"
+                f"{mode_detail}{detail}."
             )
             return {'FINISHED'}
         except Exception as exc:
