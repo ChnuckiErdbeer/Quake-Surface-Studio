@@ -13,7 +13,7 @@ def make_test_bsp(lightmapped=False):
     mip_levels = [bytes([10]) * 256, bytes([10]) * 64, bytes([10]) * 16, bytes([10]) * 4]
     mip_blob = bsp.build_miptex_blob('TEST', 16, 16, mip_levels)
     lumps = [b''] * 15
-    lumps[bsp.LUMP_ENTITIES] = b'{"classname" "worldspawn"}\\0'
+    lumps[bsp.LUMP_ENTITIES] = b'{"classname" "worldspawn"}\0'
     lumps[bsp.LUMP_PLANES] = struct.pack('<4fi', 0.0, 0.0, 1.0, 0.0, 2)
     lumps[bsp.LUMP_TEXTURES] = bsp.build_texture_lump([bsp.MipTexture(mip_blob, 'TEST', 16, 16)])
     lumps[bsp.LUMP_VERTEXES] = b''.join([
@@ -41,7 +41,7 @@ def make_test_bsp(lightmapped=False):
     lumps[bsp.LUMP_MODELS] = struct.pack(
         '<9f7i', 0, 0, 0, 64, 64, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
     )
-    header = bsp.BSP_VERSION.to_bytes(4, 'little', signed=True) + b'\\0' * 120
+    header = bsp.BSP_VERSION.to_bytes(4, 'little', signed=True) + b'\0' * 120
     return bsp.BSP29(bsp.BSP29(header).write(lumps))
 
 
@@ -60,7 +60,7 @@ class ExportValidationTests(unittest.TestCase):
         self.assertEqual(report['classic_required_samples'], 25)
         self.assertTrue(report['external_lit'])
 
-    def test_enhanced_lms_hift_offset_and_style_arrays_pass(self):
+    def test_enhanced_lmshift_offset_and_style_arrays_pass(self):
         original = make_test_bsp(lightmapped=True)
         # 64-qu triangle extents sampled every 8 units produce a 9x9 luxel grid.
         enhanced_rgb = bytes((20, 40, 60)) * 81
@@ -107,7 +107,7 @@ class ExportValidationTests(unittest.TestCase):
     def test_entity_changes_are_rejected(self):
         original = make_test_bsp()
         lumps = list(original.lumps)
-        lumps[bsp.LUMP_ENTITIES] = b'{"classname" "worldspawn" "message" "changed"}\\0'
+        lumps[bsp.LUMP_ENTITIES] = b'{"classname" "worldspawn" "message" "changed"}\0'
         changed = original.write(lumps)
         with self.assertRaisesRegex(bsp.BSPError, 'lump 0 changed'):
             export_validation.validate_export_bytes(original.write(), changed)
