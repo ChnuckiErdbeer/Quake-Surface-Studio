@@ -5036,7 +5036,7 @@ class QSS_PT_project(Panel):
         project_box.operator(QSS_OT_browse_game_maps.bl_idname, text="Browse Game Maps…", icon='FILEBROWSER')
         project_box.operator(QSS_OT_scan_game_maps.bl_idname, text="Validate Maps in Active Game", icon='CHECKMARK')
         tests_box = layout.box()
-        tests_box.label(text="TESTING & BSP VALIDATION", icon='EXPERIMENT')
+        tests_box.label(text="TESTING & BSP VALIDATION", icon='EXPERIMENTAL')
         tests_box.operator(QSS_OT_validate_bsp_export.bl_idname, text="Validate Exported BSP…", icon='CHECKMARK')
         tests_box.operator(QSS_OT_run_python_tests.bl_idname, text="Run QSS Python Test Suite", icon='PLAY')
         tests_box.label(text="Reports are written to Blender's Text Editor datablocks.", icon='INFO')
