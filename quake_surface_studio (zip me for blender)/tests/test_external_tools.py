@@ -98,10 +98,20 @@ class ExternalToolsTests(unittest.TestCase):
             self.assertEqual(command[-1], source)
 
     def test_rejects_invalid_decoupled_luxel_scale(self):
-        with self.assertRaises(ValueError):
-            external_tools.build_decoupled_light_command(
-                "/tools/light", "/maps/test.bsp", world_units_per_luxel=0
-            )
+        for scale in (0, -1, 1024.01, 8192):
+            with self.subTest(scale=scale):
+                with self.assertRaises(ValueError):
+                    external_tools.build_decoupled_light_command(
+                        "/tools/light", "/maps/test.bsp", world_units_per_luxel=scale
+                    )
+
+    def test_accepts_one_world_unit_per_luxel(self):
+        command = external_tools.build_decoupled_light_command(
+            "/tools/light", "/maps/test.bsp", world_units_per_luxel=1
+        )
+        self.assertEqual(command[1:4], [
+            "-verbose", "-world_units_per_luxel", "1"
+        ])
 
     def test_external_command_captures_output_and_return_code(self):
         result = external_tools.run_command(

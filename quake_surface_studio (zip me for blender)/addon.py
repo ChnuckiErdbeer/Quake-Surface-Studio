@@ -4475,7 +4475,7 @@ class QSS_OT_generate_decoupled_lightmaps(Operator, ImportHelper):
     world_units_per_luxel: FloatProperty(
         name="World units per luxel",
         description="Target spacing for the generated decoupled lightmaps",
-        default=16.0, min=1.0, max=8192.0, precision=2,
+        default=16.0, min=0.01, max=1024.0, precision=2,
     )
 
     def invoke(self, context, event):

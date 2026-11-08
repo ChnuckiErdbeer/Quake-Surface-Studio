@@ -64,8 +64,8 @@ def build_decoupled_light_command(
         raise ValueError("No ericw-tools light executable was configured.")
     if not source or not source.lower().endswith(".bsp"):
         raise ValueError("Select a source .bsp file.")
-    if not math.isfinite(scale) or not 1.0 <= scale <= 8192.0:
-        raise ValueError("World units per luxel must be between 1 and 8192.")
+    if not math.isfinite(scale) or not 0.0 < scale <= 1024.0:
+        raise ValueError("World units per luxel must be greater than 0 and at most 1024.")
 
     command = [exe, "-verbose", "-world_units_per_luxel", f"{scale:g}"]
     root = os.path.abspath(os.path.expanduser(quake_root)) if quake_root else ""
