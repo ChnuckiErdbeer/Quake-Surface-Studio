@@ -1,4 +1,16 @@
-"""Blender-independent material-slot rollback helpers."""
+"""Blender-independent material-slot rollback and paint-setting helpers."""
+
+
+def configure_texture_paint_visibility(image_paint):
+    """Use QSS-safe visibility settings for BSP surface painting.
+
+    Keep occlusion enabled so geometry still blocks brush projections, but
+    disable backface culling. Imported BSP face winding/normals are not
+    guaranteed to agree with Blender's paint projection culling convention;
+    enabling it can suppress strokes on otherwise visible surfaces.
+    """
+    image_paint.use_occlude = True
+    image_paint.use_backface_culling = False
 
 
 def trim_appended_material_slots(materials, original_count):
