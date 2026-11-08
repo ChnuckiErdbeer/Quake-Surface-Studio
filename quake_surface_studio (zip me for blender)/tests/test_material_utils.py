@@ -1,9 +1,55 @@
+import array
 import os
 import sys
 import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import material_utils
+
+
+class LightmapResolutionTests(unittest.TestCase):
+    def test_supported_resolution_dimensions(self):
+        self.assertEqual(material_utils.lightmap_resolution_dimensions(512, 1), 512)
+        self.assertEqual(material_utils.lightmap_resolution_dimensions(512, 2), 1024)
+        self.assertEqual(material_utils.lightmap_resolution_dimensions(512, 4), 2048)
+        self.assertEqual(material_utils.lightmap_resolution_dimensions(512, 8), 4096)
+
+    def test_resolution_guard_rejects_excessive_images(self):
+        with self.assertRaises(ValueError):
+            material_utils.lightmap_resolution_dimensions(1024, 8)
+
+    def test_only_supported_resolution_factors_are_accepted(self):
+        for value in (0, 3, 16, 'high'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                material_utils.validate_lightmap_resolution(value)
+
+    def test_working_scale_is_resolved_from_image_dimensions(self):
+        self.assertEqual(material_utils.lightmap_resolution_ratio(512, 2048), 4)
+        with self.assertRaises(ValueError):
+            material_utils.lightmap_resolution_ratio(512, 1536)
+
+    def test_face_rectangle_is_scaled_without_changing_uvs(self):
+        self.assertEqual(material_utils.lightmap_sample_region(10, 20, 2, 2, 4), (48, 88, 8))
+
+    def test_upscale_replicates_source_luxels_exactly(self):
+        source = array.array('f', [1, 0, 0, 1, 0, 1, 0, 1,
+                                   0, 0, 1, 1, 1, 1, 1, 1])
+        result = material_utils.resample_rgba_pixels(source, 2, 2, 4, 4)
+        self.assertEqual(len(result), 4 * 4 * 4)
+        self.assertEqual(tuple(result[0:4]), (1.0, 0.0, 0.0, 1.0))
+        self.assertEqual(tuple(result[(1 * 4 + 1) * 4:(1 * 4 + 1) * 4 + 4]), (1.0, 0.0, 0.0, 1.0))
+        self.assertEqual(tuple(result[(3 * 4 + 3) * 4:(3 * 4 + 3) * 4 + 4]), (1.0, 1.0, 1.0, 1.0))
+
+    def test_downscale_box_averages_high_resolution_pixels(self):
+        source = array.array('f', [0, 0, 0, 1] * 3 + [1, 1, 1, 1])
+        result = material_utils.resample_rgba_pixels(source, 2, 2, 1, 1)
+        self.assertEqual(tuple(round(value, 4) for value in result), (0.25, 0.25, 0.25, 1.0))
+
+    def test_resampling_rejects_incompatible_dimensions_and_buffers(self):
+        with self.assertRaises(ValueError):
+            material_utils.resample_rgba_pixels([0.0] * 4, 2, 2, 4, 4)
+        with self.assertRaises(ValueError):
+            material_utils.resample_rgba_pixels([0.0] * 16, 2, 2, 3, 3)
 
 
 class FakeIDMaterials:
