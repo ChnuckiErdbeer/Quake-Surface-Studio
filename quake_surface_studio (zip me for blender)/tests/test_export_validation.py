@@ -46,6 +46,35 @@ def make_test_bsp(lightmapped=False):
 
 
 class ExportValidationTests(unittest.TestCase):
+    def test_compiler_generated_test02_export_round_trip(self):
+        fixture_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'mapandbsp'))
+        source_path = os.path.join(fixture_dir, 'test02_compile.bsp')
+        lit_path = os.path.join(fixture_dir, 'test02_compile.lit')
+        if not (os.path.isfile(source_path) and os.path.isfile(lit_path)):
+            self.skipTest("Compiler-generated test02 BSP/.lit fixtures are not present")
+
+        with open(source_path, 'rb') as handle:
+            source_data = handle.read()
+        with open(lit_path, 'rb') as handle:
+            source_lit = handle.read()
+        source = bsp.BSP29(source_data)
+        source_rgb = bsp.parse_lit_file(source_lit, len(source.lumps[bsp.LUMP_LIGHTING]))
+        self.assertIsNotNone(source_rgb, "The checked-in compiler .lit must match the BSP LIGHTING sample count")
+
+        # Simulate a valid RGB-lightmap edit while retaining the original
+        # classic BSP offsets, geometry, textures and unrelated BSPX records.
+        edited_rgb = bytes((value ^ 1) for value in source_rgb)
+        lumps = list(source.lumps)
+        bspx_lumps = dict(source.bspx_lumps)
+        bspx_lumps['RGBLIGHTING'] = edited_rgb
+        exported_data = source.write(lumps, bspx_lumps)
+        report = export_validation.validate_export_bytes(
+            source_data, exported_data, bsp.build_lit_file(edited_rgb)
+        )
+        self.assertEqual(report['faces'], len(source.faces()))
+        self.assertEqual(report['classic_required_samples'], len(source.lumps[bsp.LUMP_LIGHTING]))
+        self.assertTrue(report['external_lit'])
+
     def test_identical_unlit_export_passes(self):
         original = make_test_bsp()
         report = export_validation.validate_export_bytes(original.write(), original.write())
