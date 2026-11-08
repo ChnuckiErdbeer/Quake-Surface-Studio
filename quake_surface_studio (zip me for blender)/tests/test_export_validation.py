@@ -63,14 +63,18 @@ class ExportValidationTests(unittest.TestCase):
     def test_enhanced_lmshift_offset_and_style_arrays_pass(self):
         original = make_test_bsp(lightmapped=True)
         # 64-qu triangle extents sampled every 8 units produce a 9x9 luxel grid.
-        enhanced_rgb = bytes((20, 40, 60)) * 81
-        encoded = original.write(bspx_lumps={
+        # The classic 25-sample area remains at the front for legacy engines;
+        # enhanced samples are appended and addressed by LMOFFSET.
+        enhanced_rgb = bytes((80, 80, 80)) * 25 + bytes((20, 40, 60)) * 81
+        lumps = list(original.lumps)
+        lumps[bsp.LUMP_LIGHTING] += bytes(81)
+        encoded = original.write(lumps, bspx_lumps={
             'RGBLIGHTING': enhanced_rgb,
             'LMSHIFT': bytes([3]),
-            'LMOFFSET': struct.pack('<I', 0),
+            'LMOFFSET': struct.pack('<I', 25),
             'LMSTYLE': bytes([0]),
         })
-        lit = bsp.build_lit_file(bytes((100, 100, 100)) * 25)
+        lit = bsp.build_lit_file(bytes((100, 100, 100)) * 106)
         report = export_validation.validate_export_bytes(original.write(), encoded, lit)
         self.assertEqual(report['enhanced_lighting_samples'], 81)
         self.assertIn('LMSHIFT', report['bspx_lumps'])
@@ -78,21 +82,38 @@ class ExportValidationTests(unittest.TestCase):
 
     def test_enhanced_lightmap_rejects_truncated_rgb_data(self):
         original = make_test_bsp(lightmapped=True)
-        encoded = original.write(bspx_lumps={
-            'RGBLIGHTING': bytes(3 * 80),
+        lumps = list(original.lumps)
+        lumps[bsp.LUMP_LIGHTING] += bytes(81)
+        encoded = original.write(lumps, bspx_lumps={
+            'RGBLIGHTING': bytes(3 * 25) + bytes(3 * 80),
             'LMSHIFT': bytes([3]),
-            'LMOFFSET': struct.pack('<I', 0),
+            'LMOFFSET': struct.pack('<I', 25),
             'LMSTYLE': bytes([0]),
         })
         with self.assertRaisesRegex(bsp.BSPError, 'ends at sample 81'):
             export_validation.validate_export_bytes(original.write(), encoded)
 
-    def test_enhanced_lightmap_requires_per_face_arrays(self):
+    def test_enhanced_lmoffset_cannot_overlap_classic_samples(self):
         original = make_test_bsp(lightmapped=True)
-        encoded = original.write(bspx_lumps={
-            'RGBLIGHTING': bytes(3 * 81),
+        lumps = list(original.lumps)
+        lumps[bsp.LUMP_LIGHTING] += bytes(81)
+        encoded = original.write(lumps, bspx_lumps={
+            'RGBLIGHTING': bytes(3 * 106),
             'LMSHIFT': bytes([3]),
             'LMOFFSET': struct.pack('<I', 0),
+            'LMSTYLE': bytes([0]),
+        })
+        with self.assertRaisesRegex(bsp.BSPError, 'overlaps the classic sample range'):
+            export_validation.validate_export_bytes(original.write(), encoded)
+
+    def test_enhanced_lightmap_requires_per_face_arrays(self):
+        original = make_test_bsp(lightmapped=True)
+        lumps = list(original.lumps)
+        lumps[bsp.LUMP_LIGHTING] += bytes(81)
+        encoded = original.write(lumps, bspx_lumps={
+            'RGBLIGHTING': bytes(3 * 106),
+            'LMSHIFT': bytes([3]),
+            'LMOFFSET': struct.pack('<I', 25),
         })
         with self.assertRaisesRegex(bsp.BSPError, 'LMSTYLE'):
             export_validation.validate_export_bytes(original.write(), encoded)
