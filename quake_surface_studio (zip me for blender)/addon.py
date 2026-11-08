@@ -22,7 +22,7 @@ from bpy.types import Operator, Panel
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
 from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils
-from . import export_validation, quake_paths, external_tools
+from . import export_validation, quake_paths, external_tools, texture_export
 
 
 ADDON_VERSION = (0, 14, 3)
@@ -33,6 +33,7 @@ DEFAULT_QUAKE_UNIT_SCALE = 0.0254
 
 # Track keymap items created by this add-on. This must exist before register().
 _addon_keymaps = []
+_qss_fps_navigation_sessions = {}
 
 
 def _report(op, level, message):
@@ -533,6 +534,70 @@ def _face_local_texinfo_projection(source_texinfo, bounds, output_size):
         s[0] * scale_s, s[1] * scale_s, s[2] * scale_s, (s[3] - min_s) * scale_s,
         t[0] * scale_t, t[1] * scale_t, t[2] * scale_t, (t[3] - min_t) * scale_t,
     )
+
+
+def _qss_create_detached_face_atlas(plans, atlas_size=512):
+    """Pack multiple detached face images into one shared paint canvas.
+
+    Each face keeps its own material and texinfo projection, but all those
+    materials reference the same image so Blender can paint the whole selected
+    group in one Material paint slot.
+    """
+    if len(plans) < 2:
+        return None
+    source_images = [plan["image"] for plan in plans]
+    layout = texture_export.pack_face_rectangles(
+        [tuple(int(value) for value in image.size) for image in source_images],
+        atlas_size=atlas_size, padding=2,
+    )
+    atlas = bpy.data.images.new(
+        name="QSS_Detached_Face_Atlas", width=atlas_size, height=atlas_size,
+        alpha=True, float_buffer=True,
+    )
+    try:
+        atlas.colorspace_settings.name = source_images[0].colorspace_settings.name
+    except Exception:
+        pass
+    atlas_pixels = array.array("f", [0.0]) * (atlas_size * atlas_size * 4)
+    padding = int(layout["padding"])
+    for plan, source, tile in zip(plans, source_images, layout["tiles"]):
+        width, height = int(source.size[0]), int(source.size[1])
+        source_pixels = array.array("f", [0.0]) * (width * height * 4)
+        source.update()
+        source.pixels.foreach_get(source_pixels)
+        target_w, target_h = int(tile["width"]), int(tile["height"])
+        resized = texture_export.resample_rgba_nearest(
+            source_pixels, width, height, target_w, target_h
+        )
+        # Duplicate edge texels into a two-pixel border to prevent linear
+        # filtering/mipmap bleed between adjacent detached-face tiles.
+        for y in range(-padding, target_h + padding):
+            source_y = min(target_h - 1, max(0, y))
+            dest_y = int(tile["y"]) + y
+            for x in range(-padding, target_w + padding):
+                source_x = min(target_w - 1, max(0, x))
+                dest_x = int(tile["x"]) + x
+                src_offset = (source_y * target_w + source_x) * 4
+                dst_offset = (dest_y * atlas_size + dest_x) * 4
+                atlas_pixels[dst_offset:dst_offset + 4] = resized[src_offset:src_offset + 4]
+        plan["uvs"] = texture_export.remap_uvs_to_atlas(
+            plan["uvs"], tile, atlas_size
+        )
+        plan["projection"] = texture_export.projection_for_atlas_tile(
+            plan["projection"], (width, height), tile, atlas_size
+        )
+        plan["local_image"] = source
+        plan["image"] = atlas
+    atlas.pixels.foreach_set(atlas_pixels)
+    atlas.update()
+    try:
+        atlas.pack()
+    except RuntimeError:
+        pass
+    atlas["qss_import_hash"] = ""
+    atlas["qss_face_local_baked"] = True
+    atlas["qss_detached_face_atlas"] = True
+    return atlas
 
 
 def _install_lightmap_nodes(mat, image):
@@ -1541,6 +1606,8 @@ def _build_enhanced_lightmap_payload(
                 'shift': shift,
                 'width': width,
                 'height': height,
+                's_min': s_min,
+                't_min': t_min,
                 'rgb': rgb_samples,
             }
 
@@ -1563,6 +1630,8 @@ def _build_enhanced_lightmap_payload(
                 'shift': 4,
                 'width': base_width,
                 'height': base_height,
+                's_min': base_s_min,
+                't_min': base_t_min,
                 'rgb': rgb_samples,
             }
         face_records[face_id] = record
@@ -1583,9 +1652,14 @@ def _build_enhanced_lightmap_payload(
     if len(rgb) != len(lighting) * 3:
         raise bsp.BSPError("Enhanced RGB and monochrome lightmap sample counts do not match.")
 
+    try:
+        decoupled_lm = lightmap_export_utils.build_decoupled_lightmap_data(
+            faces, texinfos, face_records, extension['LMOFFSET']
+        )
+    except ValueError as exc:
+        raise bsp.BSPError(f"Could not build DECOUPLED_LM BSPX data: {exc}") from exc
     bspx = {
-        'LMSHIFT': extension['LMSHIFT'],
-        'LMOFFSET': extension['LMOFFSET'],
+        'DECOUPLED_LM': decoupled_lm,
         'LMSTYLE': extension['LMSTYLE'],
         'RGBLIGHTING': bytes(rgb),
     }
@@ -1593,7 +1667,7 @@ def _build_enhanced_lightmap_payload(
 
 
 
-def _patch_lightmap_lump(obj, parsed, enhanced=False):
+def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None):
     """Return (monochrome BSP lighting lump, QLIT v1 sidecar or None)."""
     image_name = obj.get('qss_lightmap_image_name', '')
     lighting_source = parsed.lumps[bsp.LUMP_LIGHTING]
@@ -1609,7 +1683,7 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False):
         if enhanced:
             raise bsp.BSPError('Enhanced lightmap export requires an imported working lightmap atlas.')
         original_lit = bsp.build_lit_file(source_lit_rgb) if source_lit_rgb is not None else None
-        return lighting_source, original_lit, {}
+        return lighting_source, original_lit, {}, (output_faces_lump or parsed.lumps[bsp.LUMP_FACES])
     image = bpy.data.images.get(image_name)
     if image is None:
         raise bsp.BSPError("The imported lightmap atlas image is missing from this .blend file.")
@@ -1635,6 +1709,8 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False):
     image.update()
     image.pixels.foreach_get(px)
     faces = parsed.faces()
+    faces_lump = bytes(output_faces_lump or parsed.lumps[bsp.LUMP_FACES])
+    texinfos = parsed.texinfos()
     lighting = bytearray(lighting_source)
     if source_lit_rgb is None:
         lit_rgb = bytearray(channel for sample in lighting for channel in (sample, sample, sample))
@@ -1695,14 +1771,121 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False):
             rgb_start, rgb_end = layer_start * 3, layer_end * 3
             if rgb_end <= len(lit_rgb):
                 lit_rgb[rgb_start:rgb_end] = bytes(block_size * 3)
+    # Classic BSP29 derives lightmap extents from texinfo. Detached faces
+    # use a face-local texture projection, so append a replacement classic
+    # lightmap block sampled through the original projection and redirect only
+    # that face's lightofs. This also provides a valid vanilla fallback when
+    # the optional DECOUPLED_LM BSPX extension is ignored by an engine.
+    for poly_index, poly in enumerate(mesh.polygons):
+        if not has_attr.data[poly_index].value:
+            continue
+        if poly.material_index < 0 or poly.material_index >= len(mesh.materials):
+            continue
+        mat = mesh.materials[poly.material_index]
+        custom_projection = (
+            mat.get('qss_texinfo_projection')
+            if mat is not None and mat.get('qss_face_local_projection') else None
+        )
+        if custom_projection is None:
+            continue
+        face_id = int(face_attr.data[poly_index].value)
+        if face_id < 0 or face_id >= len(faces):
+            raise bsp.BSPError(f"Detached lightmap refers to invalid BSP face {face_id}.")
+        face = faces[face_id]
+        light_offset = int(face[9])
+        if light_offset < 0 or int(face[5]) == 255:
+            continue
+        style_count = sum(1 for style in face[5:9] if int(style) != 255)
+        if style_count <= 0:
+            continue
+        source_texinfo_id = int(face[4])
+        if source_texinfo_id < 0 or source_texinfo_id >= len(texinfos):
+            raise bsp.BSPError(f"Detached face {face_id} has an invalid source texinfo.")
+        old_texinfo = texinfos[source_texinfo_id]
+        projection = tuple(float(value) for value in custom_projection)
+        if len(projection) != 8:
+            raise bsp.BSPError(f"Detached face {face_id} has an invalid texture projection.")
+        new_texinfo = projection + tuple(old_texinfo[8:10])
+        vertex_ids = parsed.face_vertex_indices(face)
+        vertices = parsed.vertices()
+        if len(vertex_ids) < 3 or any(index < 0 or index >= len(vertices) for index in vertex_ids):
+            raise bsp.BSPError(f"Detached face {face_id} has invalid vertex references.")
+        positions = [vertices[index] for index in vertex_ids]
+        base_s_min, base_t_min, base_extent_s, base_extent_t, _sv, _tv = _calc_face_lightmap_extents(
+            positions, old_texinfo
+        )
+        base_width = (base_extent_s >> 4) + 1
+        base_height = (base_extent_t >> 4) + 1
+        stored_width = int(w_attr.data[poly_index].value)
+        stored_height = int(h_attr.data[poly_index].value)
+        if (stored_width, stored_height) != (base_width, base_height):
+            raise bsp.BSPError(
+                f"Detached face {face_id} atlas metadata is {stored_width}x{stored_height}, "
+                f"but its source lightmap grid is {base_width}x{base_height}. Re-import the BSP."
+            )
+        new_s_min, new_t_min, new_extent_s, new_extent_t, _nsv, _ntv = _calc_face_lightmap_extents(
+            positions, new_texinfo
+        )
+        new_width = (new_extent_s >> 4) + 1
+        new_height = (new_extent_t >> 4) + 1
+        if new_width <= 0 or new_height <= 0 or new_width > 256 or new_height > 256:
+            raise bsp.BSPError(
+                f"Detached face {face_id} would need a {new_width}x{new_height} classic lightmap, "
+                "outside the supported 256x256 surface limit."
+            )
+        new_s_coordinates = tuple(new_s_min + index * 16 for index in range(new_width))
+        new_t_coordinates = tuple(new_t_min + index * 16 for index in range(new_height))
+        try:
+            old_s_coordinates = texture_export.inverse_project_axis_coordinates(
+                old_texinfo[0:4], new_texinfo[0:4], new_s_coordinates
+            )
+            old_t_coordinates = texture_export.inverse_project_axis_coordinates(
+                old_texinfo[4:8], new_texinfo[4:8], new_t_coordinates
+            )
+            rgb_samples = lightmap_export_utils.sample_face_rgb_at_coordinates(
+                px, size, resolution,
+                int(x_attr.data[poly_index].value),
+                int(y_attr.data[poly_index].value),
+                gutter, scale,
+                base_s_min, base_t_min,
+                old_s_coordinates, old_t_coordinates,
+            )
+        except ValueError as exc:
+            raise bsp.BSPError(
+                f"Could not reproject the lightmap for detached BSP face {face_id}: {exc}"
+            ) from exc
+        block_size = new_width * new_height
+        if len(rgb_samples) != block_size * 3:
+            raise bsp.BSPError(f"Detached face {face_id} lightmap sampler returned an invalid RGB block.")
+        mono_samples = bytes(
+            max(0, min(255, int(round(
+                0.2126 * rgb_samples[index]
+                + 0.7152 * rgb_samples[index + 1]
+                + 0.0722 * rgb_samples[index + 2]
+            ))))
+            for index in range(0, len(rgb_samples), 3)
+        )
+        new_lightofs = len(lighting)
+        if new_lightofs > 0x7FFFFFFF:
+            raise bsp.BSPError("Detached-face lightmaps exceed the signed BSP29 lightofs range.")
+        faces_lump = bsp.replace_face_lightofs(faces_lump, face_id, new_lightofs)
+        lighting.extend(mono_samples)
+        lit_rgb.extend(rgb_samples)
+        # The editable atlas contains the sum of the source styles. Preserve
+        # the face's style count but clear the unused source planes.
+        if style_count > 1:
+            lighting.extend(bytes(block_size * (style_count - 1)))
+            lit_rgb.extend(bytes(block_size * 3 * (style_count - 1)))
+
     if enhanced:
-        return _build_enhanced_lightmap_payload(
+        enhanced_lighting, enhanced_lit, enhanced_bspx = _build_enhanced_lightmap_payload(
             obj, parsed, image, px, lighting, lit_rgb,
             lighting_source, source_lit_rgb, face_attrs, resolution,
             int(obj.get('qss_lightmap_scale', 1)),
             int(obj.get('qss_lightmap_gutter', 2)),
         )
-    return bytes(lighting), bsp.build_lit_file(bytes(lit_rgb)), {}
+        return enhanced_lighting, enhanced_lit, enhanced_bspx, faces_lump
+    return bytes(lighting), bsp.build_lit_file(bytes(lit_rgb)), {}, faces_lump
 
 
 
@@ -2293,6 +2476,7 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
 
     # First encode only new/detached materials and edited existing images.
     new_texture_for_material = {}
+    new_texture_for_image = {}
     replacements = {}
     for mat in obj.data.materials:
         if mat is None or 'qss_texture_index' not in mat:
@@ -2304,13 +2488,18 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
         digest = _image_hash(image)
         baseline = image.get('qss_import_hash', '')
         if source_texture_id == -1:
-            key = mat.as_pointer()
-            if key not in new_texture_for_material:
-                fallback = f"qss_{len(entries) + len(new_texture_for_material):05d}"
+            material_key = mat.as_pointer()
+            image_key = image.as_pointer()
+            if image_key not in new_texture_for_image:
+                fallback = f"qss_{len(entries):05d}"
                 tex_name = _safe_texture_name(mat.get('qss_export_name', ''), fallback)
                 blob = _encode_image_to_miptex(image, palette, tex_name)
-                new_texture_for_material[key] = len(entries) + len(new_texture_for_material)
-                entries.append(bsp.MipTexture(blob, tex_name, image.size[0], image.size[1]))
+                texture_index = texture_export.allocate_image_texture_index(
+                    entries, new_texture_for_image, image_key,
+                    bsp.MipTexture(blob, tex_name, image.size[0], image.size[1]),
+                )
+                new_texture_for_image[image_key] = texture_index
+            new_texture_for_material[material_key] = new_texture_for_image[image_key]
             continue
         if source_texture_id >= 0 and source_texture_id < len(entries) and digest != baseline:
             fallback = entries[source_texture_id].name or f"qss_{source_texture_id:05d}"
@@ -2371,12 +2560,8 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
             continue
         custom_projection = mat.get('qss_texinfo_projection') if mat.get('qss_face_local_projection') else None
         if custom_projection is not None:
-            if lightmap_export_mode == 'ENHANCED':
-                raise bsp.BSPError(
-                    "Enhanced BSPX lightmap export currently cannot be combined with detached face-local "
-                    "texinfo projections. Export this map in Classic BSP29 mode, or remove the detached "
-                    "projection before using LMSHIFT."
-                )
+            # DECOUPLED_LM keeps the lightmap projection independent of this
+            # face-local texture projection in BSPX-aware engines.
             projection_key = tuple(float(v) for v in custom_projection)
             if len(projection_key) != 8:
                 raise bsp.BSPError(f"Material '{mat.name}' has an invalid face-local texinfo projection.")
@@ -2401,10 +2586,12 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
     new_lumps[bsp.LUMP_TEXTURES] = bsp.build_texture_lump(entries)
     new_lumps[bsp.LUMP_TEXINFO] = new_texinfo_lump
     new_lumps[bsp.LUMP_FACES] = new_faces_lump
-    lighting_lump, lit_file_data, lightmap_bspx_updates = _patch_lightmap_lump(
-        obj, parsed, enhanced=(lightmap_export_mode == 'ENHANCED')
+    lighting_lump, lit_file_data, lightmap_bspx_updates, new_faces_lump = _patch_lightmap_lump(
+        obj, parsed, enhanced=(lightmap_export_mode == 'ENHANCED'),
+        output_faces_lump=new_faces_lump,
     )
     new_lumps[bsp.LUMP_LIGHTING] = lighting_lump
+    new_lumps[bsp.LUMP_FACES] = new_faces_lump
     new_bspx_lumps = dict(parsed.bspx_lumps)
     new_bspx_lumps.update(lightmap_bspx_updates)
     if lit_file_data is not None:
@@ -2490,110 +2677,114 @@ class QSS_OT_optimize_clipping(Operator):
 class QSS_OT_fps_walk(Operator):
     bl_idname = "qss.fps_walk"
     bl_label = "FPS / Walk Navigation"
-    bl_description = "Enter Blender's first-person Walk Navigation after fitting clip planes to the imported Quake map"
+    bl_description = "Toggle persistent first-person navigation: WASD moves, hold MMB to look, press again or Esc to stop"
+    bl_options = {"REGISTER"}
+
+    _move_keys = {"W", "A", "S", "D", "Q", "E", "LEFT_SHIFT", "RIGHT_SHIFT"}
 
     @classmethod
     def poll(cls, context):
         obj = context.object
-        return bool(obj and obj.type == 'MESH' and obj.get('qss_object_role') == 'quake_bsp29')
-
-    def execute(self, context):
-        obj = context.object
-        _apply_map_view_clipping(context, obj)
-        _configure_quake_walk_speed(context, obj)
-        # Re-center at the Quake player start for each navigation session.
-        _frame_player_start(context, obj)
-        screen = getattr(context, 'screen', None)
-        preferred_area = context.area if getattr(context.area, 'type', None) == 'VIEW_3D' else None
-        areas = ([preferred_area] if preferred_area else []) + [
-            a for a in (screen.areas if screen else [])
-            if a.type == 'VIEW_3D' and a is not preferred_area
-        ]
-        for area in areas:
-            region = next((r for r in area.regions if r.type == 'WINDOW'), None)
-            if region is None:
-                continue
-            try:
-                space = next((sp for sp in area.spaces if sp.type == 'VIEW_3D'), None)
-                if space and space.region_3d.view_perspective == 'ORTHO':
-                    space.region_3d.view_perspective = 'PERSP'
-                with context.temp_override(window=context.window, area=area, region=region):
-                    bpy.ops.view3d.walk('INVOKE_DEFAULT')
-                return {'FINISHED'}
-            except Exception as exc:
-                _report(self, 'ERROR', f"Could not start Blender Walk Navigation: {exc}")
-                return {'CANCELLED'}
-        _report(self, 'WARNING', "No 3D View found. Run FPS / Walk Navigation from a 3D View.")
-        return {'CANCELLED'}
-
-
-
-class QSS_OT_hold_mmb_fps(Operator):
-    """Hold MMB to look; WASD moves only while the corresponding key is held."""
-    bl_idname = 'qss.hold_mmb_fps'
-    bl_label = 'Hold MMB for WASD Navigation'
-    bl_options = {'INTERNAL'}
-
-    _move_keys = {'W', 'A', 'S', 'D', 'Q', 'E', 'LEFT_SHIFT', 'RIGHT_SHIFT'}
-
-    @classmethod
-    def poll(cls, context):
-        obj = context.object
-        return bool(context.area and context.area.type == 'VIEW_3D' and obj and
-                    obj.type == 'MESH' and obj.get('qss_object_role') == 'quake_bsp29')
+        return bool(
+            context.area and context.area.type == "VIEW_3D"
+            and obj and obj.type == "MESH"
+            and obj.get("qss_object_role") == "quake_bsp29"
+        )
 
     def _finish(self, context):
         try:
             if self._timer is not None:
-                context.window_manager.event_timer_remove(self._timer)
+                self._window_manager.event_timer_remove(self._timer)
+        except Exception:
+            pass
+        self._timer = None
+        if getattr(self, "_looking", False):
+            try:
+                self._window.cursor_modal_restore()
+            except Exception:
+                pass
+        self._looking = False
+        try:
+            self._area.header_text_set(None)
+            self._area.tag_redraw()
         except Exception:
             pass
         try:
-            context.window.cursor_modal_restore()
+            if _qss_fps_navigation_sessions.get(self._session_key) is self:
+                del _qss_fps_navigation_sessions[self._session_key]
         except Exception:
             pass
-        try:
-            context.area.header_text_set(None)
-        except Exception:
-            pass
-        return {'FINISHED'}
+        return {"FINISHED"}
 
     def invoke(self, context, event):
+        window = context.window
+        if window is None:
+            self.report({"WARNING"}, "FPS navigation needs an active Blender window.")
+            return {"CANCELLED"}
+        session_key = window.as_pointer()
+        existing = _qss_fps_navigation_sessions.get(session_key)
+        if existing is not None:
+            existing._stop_requested = True
+            try:
+                existing._area.tag_redraw()
+            except Exception:
+                pass
+            self.report({"INFO"}, "FPS navigation stopping.")
+            return {"FINISHED"}
+
+        area = context.area
+        if area is None or area.type != "VIEW_3D":
+            self.report({"WARNING"}, "Start FPS navigation from a 3D View.")
+            return {"CANCELLED"}
+        region = next((item for item in area.regions if item.type == "WINDOW"), None)
+        space = next((item for item in area.spaces if item.type == "VIEW_3D"), None)
+        if region is None or space is None or space.region_3d is None:
+            self.report({"WARNING"}, "The 3D View has no usable window region.")
+            return {"CANCELLED"}
+
         from mathutils import Vector
-        if context.area.type != 'VIEW_3D' or context.region is None:
-            return {'CANCELLED'}
-        self._area = context.area
-        self._region = context.region
-        self._rv3d = context.space_data.region_3d
-        if self._rv3d.view_perspective == 'ORTHO':
-            self._rv3d.view_perspective = 'PERSP'
-        if self._rv3d.view_perspective == 'CAMERA':
-            self._rv3d.view_perspective = 'PERSP'
-        self._view_distance = max(0.001, float(self._rv3d.view_distance))
-        self._rotation = self._rv3d.view_rotation.copy()
+        obj = context.object
+        rv3d = space.region_3d
+        if rv3d.view_perspective in {"ORTHO", "CAMERA"}:
+            rv3d.view_perspective = "PERSP"
+        self._area = area
+        self._region = region
+        self._rv3d = rv3d
+        self._window = window
+        self._window_manager = context.window_manager
+        self._scene = context.scene
+        self._object = obj
+        self._session_key = session_key
+        self._stop_requested = False
+        self._looking = False
+        self._view_distance = max(0.001, float(rv3d.view_distance))
+        self._rotation = rv3d.view_rotation.copy()
         forward = self._rotation @ Vector((0.0, 0.0, -1.0))
         self._yaw = math.atan2(forward.y, forward.x)
         self._pitch = math.asin(max(-1.0, min(1.0, forward.z)))
-        self._camera = self._rv3d.view_location.copy() + self._rotation @ Vector((0.0, 0.0, self._view_distance))
+        self._camera = rv3d.view_location.copy() + self._rotation @ Vector((0.0, 0.0, self._view_distance))
         self._last_mouse = (event.mouse_x, event.mouse_y)
         self._keys_down = set()
         self._last_time = time.monotonic()
-        self._timer = context.window_manager.event_timer_add(1.0 / 60.0, window=context.window)
-        obj = context.object
         _apply_map_view_clipping(context, obj)
-        unit_scale = float(obj.get('qss_unit_scale', DEFAULT_QUAKE_UNIT_SCALE))
-        self._unit_scale = unit_scale
-        self._speed = float(context.scene.qss_nav_speed_quake) * unit_scale
-        self._fast_factor = float(context.scene.qss_nav_fast_factor)
-        self._scene = context.scene
-        self._window = context.window
+        unit_scale = float(obj.get("qss_unit_scale", DEFAULT_QUAKE_UNIT_SCALE))
+        self._unit_scale = max(1e-8, unit_scale)
+        self._speed = max(0.0, float(context.scene.qss_nav_speed_quake)) * self._unit_scale
+        self._fast_factor = max(1.0, float(context.scene.qss_nav_fast_factor))
         try:
-            context.window.cursor_modal_set('NONE')
+            self._timer = self._window_manager.event_timer_add(1.0 / 60.0, window=window)
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not start FPS navigation timer: {exc}")
+            return {"CANCELLED"}
+        _qss_fps_navigation_sessions[session_key] = self
+        try:
+            self._area.header_text_set("QSS FPS ACTIVE: WASD move | hold MMB to look | Q/E down/up | Shift fast | Esc or button to stop")
+            self._area.tag_redraw()
         except Exception:
             pass
-        context.area.header_text_set('QSS FPS: hold MMB | WASD move | Q/E down/up | Shift fast | release MMB to exit')
-        context.window_manager.modal_handler_add(self)
-        return {'RUNNING_MODAL'}
+        self._window_manager.modal_handler_add(self)
+        self.report({"INFO"}, "FPS navigation active. WASD moves; hold MMB to look.")
+        return {"RUNNING_MODAL"}
 
     def _move_with_wall_collision(self, context, displacement, right):
         """Simple eye-level ray collision and slide against the imported BSP mesh."""
@@ -2607,7 +2798,7 @@ class QSS_OT_hold_mmb_fps(Operator):
         best_hit = None
         offsets = (Vector((0.0, 0.0, 0.0)), right * radius, -right * radius)
         for offset in offsets:
-            hit, location, normal, _face_index, _hit_obj, _matrix = context.scene.ray_cast(
+            hit, location, normal, _face_index, _hit_obj, _matrix = self._scene.ray_cast(
                 depsgraph, self._camera + offset, direction, distance=length + radius
             )
             if hit:
@@ -2629,56 +2820,106 @@ class QSS_OT_hold_mmb_fps(Operator):
 
     def modal(self, context, event):
         from mathutils import Vector
-        if event.type == 'MIDDLEMOUSE' and event.value == 'RELEASE':
+        if self._stop_requested:
             return self._finish(context)
-        if event.type in {'ESC', 'RIGHTMOUSE'} and event.value == 'PRESS':
+        if event.type == "ESC" and event.value == "PRESS":
             return self._finish(context)
-        if event.type in self._move_keys:
-            if event.value == 'PRESS':
-                self._keys_down.add(event.type)
-            elif event.value == 'RELEASE':
-                self._keys_down.discard(event.type)
-            return {'RUNNING_MODAL'}
-        if event.type == 'MOUSEMOVE':
+        if event.type == "TIMER" and event.timer == self._timer:
+            try:
+                now = time.monotonic()
+                dt = max(0.0, min(0.05, now - self._last_time))
+                self._last_time = now
+                if self._keys_down:
+                    forward = Vector((math.cos(self._yaw), math.sin(self._yaw), 0.0))
+                    right = Vector((-math.sin(self._yaw), math.cos(self._yaw), 0.0))
+                    movement = Vector((0.0, 0.0, 0.0))
+                    if "W" in self._keys_down: movement += forward
+                    if "S" in self._keys_down: movement -= forward
+                    if "D" in self._keys_down: movement += right
+                    if "A" in self._keys_down: movement -= right
+                    if "E" in self._keys_down: movement.z += 1.0
+                    if "Q" in self._keys_down: movement.z -= 1.0
+                    if movement.length > 1e-8:
+                        movement.normalize()
+                        fast = bool({"LEFT_SHIFT", "RIGHT_SHIFT"} & self._keys_down)
+                        speed = self._speed * (self._fast_factor if fast else 1.0)
+                        displacement = self._move_with_wall_collision(
+                            context, movement * speed * dt, right
+                        )
+                        self._camera += displacement
+                        self._rv3d.view_location = (
+                            self._camera - self._rotation @ Vector((0.0, 0.0, self._view_distance))
+                        )
+                        self._area.tag_redraw()
+            except (ReferenceError, RuntimeError):
+                return self._finish(context)
+            return {"RUNNING_MODAL"}
+
+        in_viewport = bool(
+            context.area == self._area and context.region
+            and context.region.type == "WINDOW"
+        )
+
+        # Releases are always observed, even when the pointer crosses into the
+        # Sidebar, so a held key/button cannot keep moving or looking forever.
+        if event.type in self._move_keys and event.value == "RELEASE":
+            self._keys_down.discard(event.type)
+            return {"RUNNING_MODAL"} if in_viewport else {"PASS_THROUGH"}
+        if event.type == "MIDDLEMOUSE" and event.value == "RELEASE":
+            if self._looking:
+                self._looking = False
+                try:
+                    self._window.cursor_modal_restore()
+                except Exception:
+                    pass
+            return {"RUNNING_MODAL"} if in_viewport else {"PASS_THROUGH"}
+
+        if not in_viewport:
+            self._last_mouse = (event.mouse_x, event.mouse_y)
+            return {"PASS_THROUGH"}
+
+        if event.type in self._move_keys and event.value == "PRESS":
+            self._keys_down.add(event.type)
+            return {"RUNNING_MODAL"}
+
+        if event.type == "MIDDLEMOUSE" and event.value == "PRESS":
+            self._looking = True
+            self._last_mouse = (event.mouse_x, event.mouse_y)
+            try:
+                self._window.cursor_modal_set("NONE")
+            except Exception:
+                pass
+            return {"RUNNING_MODAL"}
+
+        if event.type == "MOUSEMOVE":
+            if not self._looking:
+                return {"PASS_THROUGH"}
             dx = event.mouse_x - self._last_mouse[0]
             dy = event.mouse_y - self._last_mouse[1]
             self._last_mouse = (event.mouse_x, event.mouse_y)
             sensitivity = 0.0022
             self._yaw += dx * sensitivity
-            self._pitch = max(math.radians(-89.0), min(math.radians(89.0), self._pitch + dy * sensitivity))
+            self._pitch = max(
+                math.radians(-89.0),
+                min(math.radians(89.0), self._pitch + dy * sensitivity),
+            )
             cp = math.cos(self._pitch)
-            forward3 = Vector((cp * math.cos(self._yaw), cp * math.sin(self._yaw), math.sin(self._pitch)))
-            self._rotation = forward3.to_track_quat('-Z', 'Y')
+            forward = Vector((
+                cp * math.cos(self._yaw),
+                cp * math.sin(self._yaw),
+                math.sin(self._pitch),
+            ))
+            self._rotation = forward.to_track_quat("-Z", "Y")
             self._rv3d.view_rotation = self._rotation
-            self._rv3d.view_location = self._camera - self._rotation @ Vector((0.0, 0.0, self._view_distance))
-            return {'RUNNING_MODAL'}
-        if event.type == 'TIMER' and event.timer == self._timer:
-            now = time.monotonic()
-            dt = max(0.0, min(0.05, now - self._last_time))
-            self._last_time = now
-            if self._keys_down:
-                forward = Vector((math.cos(self._yaw), math.sin(self._yaw), 0.0))
-                right = Vector((-math.sin(self._yaw), math.cos(self._yaw), 0.0))
-                move = Vector((0.0, 0.0, 0.0))
-                if 'W' in self._keys_down: move += forward
-                if 'S' in self._keys_down: move -= forward
-                if 'D' in self._keys_down: move += right
-                if 'A' in self._keys_down: move -= right
-                if 'E' in self._keys_down: move.z += 1.0
-                if 'Q' in self._keys_down: move.z -= 1.0
-                if move.length > 1e-8:
-                    move.normalize()
-                    fast_held = bool({'LEFT_SHIFT', 'RIGHT_SHIFT'} & self._keys_down)
-                    speed = self._speed * (self._fast_factor if fast_held else 1.0)
-                    right_vector = right
-                    displacement = move * speed * dt
-                    displacement = self._move_with_wall_collision(context, displacement, right_vector)
-                    self._camera += displacement
-                    self._rv3d.view_location = self._camera - self._rotation @ Vector((0.0, 0.0, self._view_distance))
-            return {'RUNNING_MODAL'}
-        # Consume remaining events while MMB is held so Blender's orbit/zoom
-        # operators cannot race this modal camera transform.
-        return {'RUNNING_MODAL'}
+            self._rv3d.view_location = (
+                self._camera - self._rotation @ Vector((0.0, 0.0, self._view_distance))
+            )
+            return {"RUNNING_MODAL"}
+
+        return {"PASS_THROUGH"}
+
+    def cancel(self, context):
+        self._finish(context)
 
 
 class QSS_OT_player_start(Operator):
@@ -4048,6 +4289,12 @@ class QSS_OT_detach_faces(Operator):
                     'projection': projection,
                 })
 
+            stage = 'pack selected faces into one paint atlas'
+            if len(plans) > 1:
+                atlas_image = _qss_create_detached_face_atlas(plans, atlas_size=512)
+                if atlas_image is not None:
+                    created_images.append(atlas_image)
+
             stage = 'create detached material copies'
             for plan in plans:
                 new_mat = plan['source_mat'].copy()
@@ -4102,6 +4349,11 @@ class QSS_OT_detach_faces(Operator):
                     context, obj, detached_image, 'Quake_Texture_UV',
                     material=detached_mat
                 )
+                paint_slot_index = material_utils.find_image_slot_index(
+                    list(detached_mat.texture_paint_images), detached_image
+                )
+                if paint_slot_index >= 0:
+                    detached_mat.paint_active_slot = paint_slot_index
 
             if was_edit_mode:
                 stage = 'restore Edit Mode selection'
@@ -4116,10 +4368,22 @@ class QSS_OT_detach_faces(Operator):
                     bm.faces.active = bm.faces[selected_indices[-1]]
                 bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
 
+            for plan in plans:
+                local_image = plan.get("local_image")
+                if local_image is not None:
+                    try:
+                        if local_image.users == 0:
+                            bpy.data.images.remove(local_image, do_unlink=True)
+                        if local_image in created_images:
+                            created_images.remove(local_image)
+                    except Exception:
+                        pass
             _report(
                 self, 'INFO',
-                f"Detached {len(plans)} face(s) into separate 0–1 paint textures. "
-                "Use 'Enter Texture Paint' to paint the active selected face."
+                f"Detached {len(plans)} face(s). "
+                + ("Their face-local textures share one paint atlas." if len(plans) > 1
+                   else "The face has its own paint texture.")
+                + " Use 'Enter Texture Paint' to paint the selected face(s)."
             )
             return {'FINISHED'}
 
@@ -6102,7 +6366,12 @@ class QSS_PT_navigation(Panel):
         player.label(text="FIRST-PERSON NAVIGATION", icon='ORIENTATION_VIEW')
         if obj.get('qss_has_player_start'):
             player.operator(QSS_OT_player_start.bl_idname, icon='EMPTY_AXIS')
-        player.operator(QSS_OT_fps_walk.bl_idname, icon='VIEW_PAN')
+        fps_active = _qss_fps_navigation_sessions.get(context.window.as_pointer()) is not None
+        player.operator(
+            QSS_OT_fps_walk.bl_idname,
+            text="Stop FPS Navigation" if fps_active else "Start FPS Navigation",
+            icon='PAUSE' if fps_active else 'VIEW_PAN',
+        )
         player.prop(context.scene, 'qss_nav_speed_quake', text="Speed (Quake u/s)")
         player.prop(context.scene, 'qss_nav_fast_factor', text="Fast multiplier")
         player.label(text=f"Clip: {obj.get('qss_view_clip_start', 0.01):.3g} / {obj.get('qss_view_clip_end', 1000):.3g}")
@@ -6110,8 +6379,8 @@ class QSS_PT_navigation(Panel):
             row = player.row()
             row.alert = True
             row.label(text="Imported with inverted Z axis", icon='INFO')
-        player.prop(context.scene, 'qss_mmb_fps_walk', text='Enable hold-MMB FPS navigation')
-        player.label(text="Hold MMB: look + WASD; release to exit")
+        player.label(text="WASD moves continuously · hold MMB to look")
+        player.label(text="Press the button again or Esc to stop")
 
 
 class QSS_PT_texture(Panel):
@@ -6410,7 +6679,6 @@ CLASSES = (
     QSS_OT_optimize_clipping,
     QSS_OT_player_start,
     QSS_OT_fps_walk,
-    QSS_OT_hold_mmb_fps,
     QSS_OT_preview_imported_lights,
     QSS_OT_preview_source_lightmaps,
     QSS_OT_preview_bsp_lightmaps,
@@ -6485,6 +6753,13 @@ def _remove_scene_properties():
 
 def _unregister_qss_classes():
     """Unregister stale QSS classes by RNA name and current Python class.
+    # Removed in the persistent FPS-navigation redesign; clean up an older registration.
+    legacy_fps = getattr(bpy.types, "QSS_OT_hold_mmb_fps", None)
+    if legacy_fps is not None:
+        try:
+            bpy.utils.unregister_class(legacy_fps)
+        except (RuntimeError, TypeError, ValueError):
+            pass
 
     Blender may retain registered classes after an interrupted add-on enable.
     Resolve the registered RNA class first (it can belong to an older module
@@ -6506,31 +6781,6 @@ def _cleanup_previous_registration():
     _remove_qss_keymaps()
     _remove_scene_properties()
     _unregister_qss_classes()
-
-
-def _update_mmb_walk_keymap():
-    """Install optional hold-MMB FPS navigation without changing defaults."""
-    global _addon_keymaps
-    _remove_qss_keymaps()
-    scene = getattr(bpy.context, 'scene', None)
-    if scene is None or not getattr(scene, 'qss_mmb_fps_walk', False):
-        return
-    wm = getattr(bpy.context, 'window_manager', None)
-    keyconfigs = getattr(wm, 'keyconfigs', None) if wm else None
-    keyconfig = getattr(keyconfigs, 'addon', None) if keyconfigs else None
-    if keyconfig is None:
-        return
-    km = keyconfig.keymaps.new(name='3D View', space_type='VIEW_3D')
-    try:
-        kmi = km.keymap_items.new(QSS_OT_hold_mmb_fps.bl_idname, 'MIDDLEMOUSE', 'PRESS', head=True)
-    except TypeError:
-        kmi = km.keymap_items.new(QSS_OT_hold_mmb_fps.bl_idname, 'MIDDLEMOUSE', 'PRESS')
-    _addon_keymaps.append((km, kmi))
-
-
-def _on_mmb_fps_walk_changed(self, context):
-    _update_mmb_walk_keymap()
-
 
 
 def register():
@@ -6647,12 +6897,6 @@ def register():
             name='Light contribution gate',
             description='Ignore per-sample light contributions below this ericw-style intensity threshold',
             default=0.001, min=0.0, max=10.0, precision=5
-        )
-        bpy.types.Scene.qss_mmb_fps_walk = BoolProperty(
-            name='MMB starts FPS / WASD',
-            description='Hold middle mouse to look and use WASD; movement stops and Blender navigation resumes immediately on release',
-            default=False,
-            update=_on_mmb_fps_walk_changed,
         )
         # Apply the persisted selection only after the dynamic enum and
         # its item callback are registered and a real Scene is available.

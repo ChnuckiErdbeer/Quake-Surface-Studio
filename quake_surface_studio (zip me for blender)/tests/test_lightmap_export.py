@@ -89,6 +89,35 @@ class LightmapExportTests(unittest.TestCase):
                 0, 0, (float("nan"),), (0,),
             )
 
+
+    def test_builds_decoupled_lightmap_records_with_independent_axes(self):
+        faces = [
+            (0, 0, 0, 3, 0, 0, 255, 255, 255, 0),
+            (0, 0, 0, 3, 0, 255, 255, 255, 255, -1),
+        ]
+        texinfos = [(2.0, 0.0, 0.0, 8.0, 0.0, 4.0, 0.0, 16.0, 0, 0)]
+        records = {0: {
+            "shift": 3, "width": 3, "height": 2,
+            "s_min": 8, "t_min": 16, "rgb": bytes(18),
+        }}
+        offsets = (100).to_bytes(4, "little") + (0xFFFFFFFF).to_bytes(4, "little")
+        data = lightmap_export.build_decoupled_lightmap_data(faces, texinfos, records, offsets)
+        self.assertEqual(len(data), 40 * 2)
+        first = __import__("struct").unpack_from("<HHI8f", data, 0)
+        self.assertEqual(first[:3], (3, 2, 100))
+        self.assertEqual(first[3:], (0.25, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0))
+        second = __import__("struct").unpack_from("<HHI8f", data, 40)
+        self.assertEqual(second[:3], (0, 0, 0xFFFFFFFF))
+        self.assertEqual(second[3:], (0.0,) * 8)
+
+    def test_decoupled_builder_rejects_missing_offsets(self):
+        with self.assertRaisesRegex(ValueError, "one uint32"):
+            lightmap_export.build_decoupled_lightmap_data(
+                [(0, 0, 0, 3, 0, 0, 255, 255, 255, 0)],
+                [(1, 0, 0, 0, 0, 1, 0, 0, 0, 0)],
+                {}, b"",
+            )
+
     def test_rejects_invalid_face_sample_buffer(self):
         with self.assertRaisesRegex(ValueError, 'does not match'):
             lightmap_export.build_lightmap_extension_data(

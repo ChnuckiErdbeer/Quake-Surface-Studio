@@ -196,6 +196,50 @@ def sample_face_rgb_at_coordinates(
     return bytes(output)
 
 
+
+def build_decoupled_lightmap_data(faces, texinfos, face_records, face_offsets):
+    """Serialize BSPX DECOUPLED_LM records (40 bytes per BSP face).
+
+    Lightmap axes are reconstructed from the source texinfo, independently of
+    any face-local texture projection used by the exported texture.
+    """
+    faces = list(faces)
+    texinfos = list(texinfos)
+    offsets = bytes(face_offsets)
+    if len(offsets) != len(faces) * 4:
+        raise ValueError("DECOUPLED_LM requires one uint32 sample offset per face")
+    output = bytearray()
+    for face_id, face in enumerate(faces):
+        record = face_records.get(face_id)
+        offset = struct.unpack_from("<I", offsets, face_id * 4)[0]
+        if record is None or offset == NO_LIGHT_OFFSET:
+            output.extend(struct.pack("<HHI8f", 0, 0, NO_LIGHT_OFFSET, *([0.0] * 8)))
+            continue
+        width = int(record.get("width", 0))
+        height = int(record.get("height", 0))
+        shift = int(record.get("shift", -1))
+        s_min = float(record.get("s_min", float("nan")))
+        t_min = float(record.get("t_min", float("nan")))
+        if not (1 <= width <= 65535 and 1 <= height <= 65535):
+            raise ValueError(f"Face {face_id} has invalid decoupled lightmap dimensions {width}x{height}")
+        if shift < 0 or shift > 4:
+            raise ValueError(f"Face {face_id} has invalid decoupled lightmap shift {shift}")
+        if face[4] < 0 or face[4] >= len(texinfos):
+            raise ValueError(f"Face {face_id} has an invalid source texinfo index")
+        texinfo = texinfos[face[4]]
+        spacing = float(1 << shift)
+        vectors = (
+            float(texinfo[0]) / spacing, float(texinfo[1]) / spacing,
+            float(texinfo[2]) / spacing, (float(texinfo[3]) - s_min) / spacing,
+            float(texinfo[4]) / spacing, float(texinfo[5]) / spacing,
+            float(texinfo[6]) / spacing, (float(texinfo[7]) - t_min) / spacing,
+        )
+        if not all(math.isfinite(value) for value in vectors):
+            raise ValueError(f"Face {face_id} has non-finite decoupled lightmap axes")
+        output.extend(struct.pack("<HHI8f", width, height, offset, *vectors))
+    return bytes(output)
+
+
 def build_lightmap_extension_data(
     face_count: int,
     face_records: Mapping[int, Mapping[str, Any]],
