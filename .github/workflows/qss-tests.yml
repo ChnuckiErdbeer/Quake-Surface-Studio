@@ -42,3 +42,17 @@ jobs:
           name: Quake-Surface-Studio-v0.11.3
           path: Quake-Surface-Studio-v0.11.3.zip
           if-no-files-found: error
+
+      - name: Package Blender install ZIP
+        if: success()
+        run: |
+          cd "quake_surface_studio (zip me for blender)"
+          zip -r ../Quake-Surface-Studio-v0.11.4-install.zip . -x "*/__pycache__/*" "*.pyc"
+      - name: Upload Blender install ZIP
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quake-Surface-Studio-v0.11.4-install
+          path: Quake-Surface-Studio-v0.11.4-install.zip
+          if-no-files-found: error
+          retention-days: 30
