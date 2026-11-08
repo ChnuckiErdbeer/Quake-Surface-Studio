@@ -6848,6 +6848,13 @@ def _unregister_qss_classes():
 
 
 def _cleanup_previous_registration():
+    # Stop active modal sessions before their operator class/timer is removed.
+    for operator in tuple(_qss_fps_navigation_sessions.values()):
+        try:
+            operator._finish(bpy.context)
+        except Exception:
+            pass
+    _qss_fps_navigation_sessions.clear()
     _remove_qss_keymaps()
     _remove_scene_properties()
     _unregister_qss_classes()
@@ -6979,7 +6986,6 @@ def register():
                 scene.qss_game_dir = initial_game_dir
             finally:
                 _qss_config_update_depth = False
-        _update_mmb_walk_keymap()
     except Exception:
         # Blender can leave a partially registered add-on behind when register()
         # raises. Roll back everything created in this attempt before propagating.
