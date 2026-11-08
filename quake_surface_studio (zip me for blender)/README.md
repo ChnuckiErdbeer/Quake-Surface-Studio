@@ -1,4 +1,17 @@
-# Quake Surface Studio 0.11.2
+# Quake Surface Studio 0.11.3
+
+## 0.11.3 changes
+
+- Detached face texture painting now uses Blender's Material paint mode, not the object-wide Single Image override.
+- The active detached material's Image Texture node and `paint_active_slot` are explicitly selected. This prevents unrelated BSP faces with overlapping UV coordinates from displaying or receiving strokes from the detached face canvas.
+- The shared lightmap atlas remains in Single Image mode because its UVs are packed as one object-wide atlas.
+
+## 0.11.2 changes
+
+- Texture Paint now sets Blender 5.2's explicit paint canvas source and canvas image, as well as the legacy image-paint canvas pointer. This keeps the 3D viewport paint display and the image receiving strokes synchronized.
+- Face-local texture painting explicitly activates the `Quake_Texture_UV` map; lightmap painting explicitly activates `Quake_Lightmap_UV`.
+- CI now builds and uploads a versioned, directly installable Blender add-on ZIP for each tested push.
+
 
 ## 0.11.2 changes
 
