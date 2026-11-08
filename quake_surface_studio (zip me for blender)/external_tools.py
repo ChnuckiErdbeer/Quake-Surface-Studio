@@ -131,7 +131,11 @@ def build_ironwail_command(
             relative_game = _inside_directory(game, root)
         except ValueError:
             relative_game = ""
-        if relative_game and relative_game not in (".", "id1"):
+        if relative_game == ".":
+            # A game directory that is itself the root has no id1/mod child;
+            # make it the engine's base directory rather than relying on id1.
+            command[1:3] = ["-basedir", game]
+        elif relative_game and relative_game != "id1":
             command.extend(["-game", relative_game])
         elif not relative_game and game and os.path.isdir(game):
             # A separately selected game directory is usable as the base dir.

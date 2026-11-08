@@ -36,6 +36,15 @@ class ExternalToolsTests(unittest.TestCase):
             ])
             self.assertEqual(command[-4:], ["+developer", "1", "+map", "hip1m1"])
 
+    def test_game_directory_itself_can_be_the_engine_base_directory(self):
+        with tempfile.TemporaryDirectory() as game:
+            os.makedirs(os.path.join(game, "maps"))
+            command = external_tools.build_ironwail_command(
+                "/tools/ironwail", game, game, map_path="maps/custom.bsp"
+            )
+            self.assertEqual(command[:3], ["/tools/ironwail", "-basedir", game])
+            self.assertEqual(command[-4:], ["+developer", "1", "+map", "custom"])
+
     def test_builds_ironwail_demo_command(self):
         with tempfile.TemporaryDirectory() as root:
             game = os.path.join(root, "id1")
