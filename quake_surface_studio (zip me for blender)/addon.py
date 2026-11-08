@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export
 
 
-ADDON_VERSION = (0, 14, 3)
+ADDON_VERSION = (0, 15, 0)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -2913,15 +2913,22 @@ class QSS_OT_fps_walk(Operator):
             dx = event.mouse_x - self._last_mouse[0]
             dy = event.mouse_y - self._last_mouse[1]
             self._last_mouse = (event.mouse_x, event.mouse_y)
-            # Keep the cursor inside the window for uninterrupted FPS turning.
-            window_width = int(getattr(self._window, "width", 0))
-            window_height = int(getattr(self._window, "height", 0))
-            if window_width > 8 and window_height > 8 and (
-                event.mouse_x <= 3 or event.mouse_y <= 3
-                or event.mouse_x >= window_width - 4
-                or event.mouse_y >= window_height - 4
+            # Keep the cursor inside the actual 3D window region (not the full
+            # Blender window, whose Sidebar/Timeline would otherwise stop look input).
+            region_left = int(self._region.x)
+            region_bottom = int(self._region.y)
+            region_width = int(self._region.width)
+            region_height = int(self._region.height)
+            if region_width > 8 and region_height > 8 and (
+                event.mouse_x <= region_left + 3
+                or event.mouse_y <= region_bottom + 3
+                or event.mouse_x >= region_left + region_width - 4
+                or event.mouse_y >= region_bottom + region_height - 4
             ):
-                center = (window_width // 2, window_height // 2)
+                center = (
+                    region_left + region_width // 2,
+                    region_bottom + region_height // 2,
+                )
                 try:
                     self._window.cursor_warp(*center)
                     self._last_mouse = center
