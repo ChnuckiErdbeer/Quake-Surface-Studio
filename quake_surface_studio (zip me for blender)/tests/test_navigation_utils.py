@@ -1,7 +1,6 @@
 import os
 import sys
 import unittest
-import math
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import navigation_utils
@@ -46,65 +45,6 @@ class NavigationEventTests(unittest.TestCase):
         forward, right = navigation_utils.horizontal_movement_axes(0.0, 0.0, 0.0, 0.0)
         self.assertEqual(forward, (1.0, 0.0))
         self.assertEqual(right, (0.0, -1.0))
-
-    def test_mouse_right_turns_view_right_without_pitch_change(self):
-        yaw_delta, pitch_delta = navigation_utils.mouse_look_deltas(10, 0, 0.0, sensitivity=0.01)
-        self.assertAlmostEqual(yaw_delta, -0.1)
-        self.assertAlmostEqual(pitch_delta, 0.0)
-
-    def test_mouse_up_raises_view(self):
-        yaw_delta, pitch_delta = navigation_utils.mouse_look_deltas(0, -10, 0.0, sensitivity=0.01)
-        self.assertAlmostEqual(yaw_delta, 0.0)
-        self.assertAlmostEqual(pitch_delta, 0.1)
-
-    def test_pitch_clamps_at_both_extrema_without_wraparound(self):
-        limit = math.radians(89.0)
-        _yaw, pitch_delta = navigation_utils.mouse_look_deltas(
-            0, -1000, math.radians(88.0), sensitivity=0.01, pitch_limit=limit
-        )
-        self.assertAlmostEqual(pitch_delta, limit - math.radians(88.0))
-        _yaw, pitch_delta = navigation_utils.mouse_look_deltas(
-            0, 1000, math.radians(-88.0), sensitivity=0.01, pitch_limit=limit
-        )
-        self.assertAlmostEqual(pitch_delta, -limit + math.radians(88.0))
-
-    def test_viewport_center_uses_window_relative_region_origin(self):
-        center = navigation_utils.viewport_region_center(120, 80, 900, 700)
-        self.assertEqual(center, (570, 430))
-
-    def test_mouse_delta_uses_current_minus_previous_event_position(self):
-        dx, dy = navigation_utils.mouse_delta_from_event(
-            582, 421, 570, 430, 570, 430
-        )
-        self.assertEqual((dx, dy), (12, -9))
-
-    def test_center_warp_feedback_is_ignored_even_with_large_previous_delta(self):
-        center = navigation_utils.viewport_region_center(120, 80, 900, 700)
-        self.assertEqual(
-            navigation_utils.mouse_delta_from_event(
-                center[0], center[1], 20, 900, *center
-            ),
-            (0, 0),
-        )
-
-    def test_large_single_event_delta_is_bounded(self):
-        dx, dy = navigation_utils.mouse_delta_from_event(
-            1000, -500, 0, 0, 570, 430, max_event_delta=120
-        )
-        self.assertEqual((dx, dy), (120, -120))
-
-    def test_one_pixel_center_warp_rounding_error_is_ignored(self):
-        dx, dy = navigation_utils.mouse_delta_from_event(
-            571, 429, 900, 100, 570, 430
-        )
-        self.assertEqual((dx, dy), (0, 0))
-
-    def test_center_is_recalculated_after_region_resize(self):
-        first = navigation_utils.viewport_region_center(120, 80, 900, 700)
-        second = navigation_utils.viewport_region_center(120, 80, 1000, 700)
-        self.assertEqual(first, (570, 430))
-        self.assertEqual(second, (620, 430))
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils
 
 
-ADDON_VERSION = (0, 15, 4)
+ADDON_VERSION = (0, 15, 5)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -2692,8 +2692,8 @@ class QSS_OT_fps_walk(Operator):
     bl_idname = "qss.fps_walk"
     bl_label = "FPS / Walk Navigation"
     bl_description = (
-        "Toggle combined first-person navigation: hold MMB to look, WASD moves, "
-        "Q/E moves vertically, and Shift moves faster"
+        "Toggle keyboard navigation: WASD moves relative to the current viewport heading, "
+        "Q/E moves vertically, and Blender's normal MMB orbit remains unchanged"
     )
     bl_options = {"REGISTER"}
 
@@ -2726,12 +2726,6 @@ class QSS_OT_fps_walk(Operator):
             except Exception:
                 pass
         session["timer"] = None
-        if session.get("looking", False):
-            try:
-                session["window"].cursor_modal_restore()
-            except Exception:
-                pass
-        session["looking"] = False
         try:
             session["area"].header_text_set(None)
             session["area"].tag_redraw()
@@ -2747,7 +2741,7 @@ class QSS_OT_fps_walk(Operator):
     def invoke(self, context, event):
         window = context.window
         if window is None:
-            self.report({"WARNING"}, "FPS navigation needs an active Blender window.")
+            self.report({"WARNING"}, "Keyboard navigation needs an active Blender window.")
             return {"CANCELLED"}
         session_key = window.as_pointer()
         existing = _qss_fps_navigation_sessions.get(session_key)
@@ -2772,37 +2766,29 @@ class QSS_OT_fps_walk(Operator):
             self.report({"WARNING"}, "The 3D View has no usable window region.")
             return {"CANCELLED"}
 
-        # QSS owns the MMB gesture while active. That keeps mouse-look and
-        # keyboard movement in one modal handler, so MMB cannot suspend WASD.
+        # Do not set view_perspective, view_rotation, view_location or cursor state
+        # when starting. QSS adds movement only; Blender retains full mouse control.
         session = {
             "stop_requested": False,
             "finished": False,
-            "looking": False,
             "timer": None,
             "window": window,
             "window_manager": context.window_manager,
             "area": area,
         }
         self._area = area
-        self._region = region
         self._rv3d = space.region_3d
-        self._window = window
         self._window_manager = context.window_manager
         self._scene = context.scene
         self._session_key = session_key
         self._session = session
         self._keys_down = set()
-        self._mouse_center = navigation_utils.viewport_region_center(
-            region.x, region.y, region.width, region.height
-        )
         self._last_time = time.monotonic()
-
         obj = context.object
         unit_scale = float(obj.get("qss_unit_scale", DEFAULT_QUAKE_UNIT_SCALE))
         self._unit_scale = max(1e-8, unit_scale)
         self._speed = max(0.0, float(context.scene.qss_nav_speed_quake)) * self._unit_scale
         self._fast_factor = max(1.0, float(context.scene.qss_nav_fast_factor))
-
         try:
             timer = self._window_manager.event_timer_add(1.0 / 60.0, window=window)
             session["timer"] = timer
@@ -2816,20 +2802,19 @@ class QSS_OT_fps_walk(Operator):
                     self._window_manager.event_timer_remove(session["timer"])
                 except Exception:
                     pass
-            self.report({"ERROR"}, f"Could not start FPS navigation: {exc}")
+            self.report({"ERROR"}, f"Could not start keyboard navigation: {exc}")
             return {"CANCELLED"}
-
         try:
             self._area.header_text_set(
-                "QSS FPS ACTIVE: WASD move | hold MMB to look | Q/E down/up | "
-                "Shift fast | Esc or button to stop"
+                "QSS MOVEMENT ACTIVE: WASD move | Q/E down/up | Shift fast | "
+                "Blender MMB orbit unchanged | Esc or button to stop"
             )
             self._area.tag_redraw()
         except Exception:
             pass
         self.report(
             {"INFO"},
-            "FPS navigation active. Hold MMB to look; WASD movement remains active while looking.",
+            "Keyboard movement active. WASD follows the current view heading; MMB remains Blender orbit.",
         )
         return {"RUNNING_MODAL"}
 
@@ -2866,92 +2851,15 @@ class QSS_OT_fps_walk(Operator):
             remaining -= normal * into_wall
         return safe_move + remaining
 
-    def _current_mouse_center(self):
-        """Return the 3D window region center in Blender window coordinates."""
-        return navigation_utils.viewport_region_center(
-            self._region.x, self._region.y, self._region.width, self._region.height
-        )
-
-    def _warp_mouse_to_center(self):
-        """Keep the hidden pointer anchored at the viewport center during MMB-look."""
-        center = self._current_mouse_center()
-        self._mouse_center = center
-        try:
-            self._window.cursor_warp(*center)
-        except Exception:
-            pass
-        return center
-
-    def _apply_mouse_look(self, event):
-        """Apply center-relative quaternion look and immediately recenter the pointer."""
-        from mathutils import Quaternion, Vector
-
-        center = self._current_mouse_center()
-        if center != self._mouse_center:
-            # A viewport resize or layout change moved the anchor. Re-anchor
-            # without interpreting that coordinate shift as mouse input.
-            self._warp_mouse_to_center()
-            return
-
-        # Blender exposes both the current and previous window-relative
-        # pointer coordinates on each event. Their difference is the actual
-        # motion for this event; subtracting an absolute coordinate from the
-        # viewport center can turn stale/warped coordinates into a huge
-        # one-frame rotation.
-        dx, dy = navigation_utils.mouse_delta_from_event(
-            event.mouse_x,
-            event.mouse_y,
-            getattr(event, "mouse_prev_x", event.mouse_x),
-            getattr(event, "mouse_prev_y", event.mouse_y),
-            center[0],
-            center[1],
-        )
-
-        # cursor_warp() can enqueue a synthetic MOUSEMOVE at the anchor.
-        # mouse_delta_from_event filters that event before we warp again.
-        if dx == 0 and dy == 0:
-            return
-        self._warp_mouse_to_center()
-
-        rotation = self._rv3d.view_rotation.copy()
-        forward = rotation @ Vector((0.0, 0.0, -1.0))
-        current_pitch = math.asin(max(-1.0, min(1.0, float(forward.z))))
-        yaw_delta, pitch_delta = navigation_utils.mouse_look_deltas(
-            dx, dy, current_pitch, sensitivity=0.0022
-        )
-
-        view_distance = max(0.001, float(self._rv3d.view_distance))
-        camera_position = (
-            self._rv3d.view_location.copy()
-            + rotation @ Vector((0.0, 0.0, view_distance))
-        )
-
-        # Yaw around world up, then pitch around the updated camera-right axis.
-        # Keeping the orientation as a quaternion avoids Euler gimbal lock.
-        if abs(yaw_delta) > 1e-10:
-            rotation = Quaternion(Vector((0.0, 0.0, 1.0)), yaw_delta) @ rotation
-        if abs(pitch_delta) > 1e-10:
-            right_axis = rotation @ Vector((1.0, 0.0, 0.0))
-            right_axis.normalize()
-            rotation = Quaternion(right_axis, pitch_delta) @ rotation
-        rotation.normalize()
-
-        self._rv3d.view_rotation = rotation
-        self._rv3d.view_location = (
-            camera_position - rotation @ Vector((0.0, 0.0, view_distance))
-        )
-        self._area.tag_redraw()
-
-
     def modal(self, context, event):
         try:
             return self._modal_event(context, event)
         except Exception as exc:
             # Never let a modal exception strand a session entry or viewport timer.
-            print("QSS FPS navigation failed: " + str(exc))
+            print("QSS keyboard navigation failed: " + str(exc))
             traceback.print_exc()
             self._finish(context)
-            self.report({"ERROR"}, f"FPS navigation stopped safely: {exc}")
+            self.report({"ERROR"}, f"Keyboard navigation stopped safely: {exc}")
             return {"CANCELLED"}
 
     def _modal_event(self, context, event):
@@ -2964,6 +2872,7 @@ class QSS_OT_fps_walk(Operator):
         if event.type == "ESC" and event.value == "PRESS":
             return self._finish(context)
 
+        # Blender 5.2 builds can expose TIMER events without Event.timer.
         if event.type == "TIMER" and navigation_utils.is_active_timer_event(
             event.type, getattr(event, "timer", None), session.get("timer")
         ):
@@ -2971,8 +2880,9 @@ class QSS_OT_fps_walk(Operator):
             dt = max(0.0, min(0.05, now - self._last_time))
             self._last_time = now
             if self._keys_down:
-                # The basis is read live every tick; mouse-look and movement
-                # therefore stay synchronized even while both inputs are held.
+                # Read the viewport rotation on every tick. MMB orbit therefore
+                # remains Blender-native and movement immediately follows the
+                # user's latest view heading instead of a cached QSS yaw/pitch.
                 view_rotation = self._rv3d.view_rotation.copy()
                 view_forward = view_rotation @ Vector((0.0, 0.0, -1.0))
                 view_right = view_rotation @ Vector((1.0, 0.0, 0.0))
@@ -2992,63 +2902,38 @@ class QSS_OT_fps_walk(Operator):
                     movement.normalize()
                     fast = bool({"LEFT_SHIFT", "RIGHT_SHIFT"} & self._keys_down)
                     speed = self._speed * (self._fast_factor if fast else 1.0)
-                    view_distance = max(0.001, float(self._rv3d.view_distance))
                     camera_position = (
                         self._rv3d.view_location.copy()
-                        + view_rotation @ Vector((0.0, 0.0, view_distance))
+                        + view_rotation @ Vector((
+                            0.0, 0.0, max(0.001, float(self._rv3d.view_distance))
+                        ))
                     )
                     displacement = self._move_with_wall_collision(
                         context, camera_position, movement * speed * dt, right
                     )
                     if displacement.length > 1e-8:
                         # Translate the existing view without changing its aim,
-                        # projection mode or orbit distance.
+                        # perspective mode or orbit distance.
                         self._rv3d.view_location = self._rv3d.view_location + displacement
                         self._area.tag_redraw()
             return {"RUNNING_MODAL"}
 
         in_area = context.area == self._area
-        in_viewport = bool(
-            in_area and context.region and context.region.type == "WINDOW"
-        )
 
+        # Observe releases even after the pointer crosses into the Sidebar.
         if event.type in self._move_keys and event.value == "RELEASE":
             self._keys_down.discard(event.type)
-            return {"RUNNING_MODAL"} if in_area else {"PASS_THROUGH"}
+            return {"PASS_THROUGH"}
 
+        # Record movement keys but pass the events onward. Blender remains the
+        # owner of its native MMB orbit modal and receives the full input stream.
         if event.type in self._move_keys and event.value == "PRESS":
             if in_area:
                 self._keys_down.add(event.type)
-                return {"RUNNING_MODAL"}
             return {"PASS_THROUGH"}
 
-        if event.type == "MIDDLEMOUSE" and event.value == "RELEASE":
-            if session.get("looking", False):
-                session["looking"] = False
-                try:
-                    self._window.cursor_modal_restore()
-                except Exception:
-                    pass
-                return {"RUNNING_MODAL"}
-            return {"PASS_THROUGH"}
-
-        if event.type == "MIDDLEMOUSE" and event.value == "PRESS":
-            if in_viewport:
-                session["looking"] = True
-                try:
-                    self._window.cursor_modal_set("NONE")
-                except Exception:
-                    pass
-                self._warp_mouse_to_center()
-                return {"RUNNING_MODAL"}
-            return {"PASS_THROUGH"}
-
-        if event.type == "MOUSEMOVE" and session.get("looking", False):
-            self._apply_mouse_look(event)
-            return {"RUNNING_MODAL"}
-
-        # All remaining events, including ordinary viewport interaction while
-        # not actively looking, remain available to Blender.
+        # Deliberately do not handle MIDDLEMOUSE or MOUSEMOVE. Blender receives
+        # those events normally for orbit, pan, cursor and other viewport tools.
         return {"PASS_THROUGH"}
 
     def cancel(self, context):

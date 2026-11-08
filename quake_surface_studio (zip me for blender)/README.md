@@ -1,14 +1,19 @@
-# Quake Surface Studio 0.15.4
+# Quake Surface Studio 0.15.5
 
-## 0.15.4 changes
+## 0.15.5 changes
 
-- Fixes the v0.15.3 mouse-look regression by deriving motion from Blender's per-event current/previous mouse coordinates instead of subtracting an absolute pointer position from the viewport center.
-- Filters cursor-warp feedback events at the viewport anchor and bounds any single-event delta to prevent a stale/outlier event from snapping pitch or spinning yaw.
-- Keeps the pointer centred while MMB-look is held and re-anchors after viewport-region resizing.
+- Removes QSS mouse-look completely. Blender's native MMB viewport navigation, mouse movement, cursor state and event handling are left untouched while FPS / Walk Navigation is active.
+- QSS now acts only as a keyboard-movement overlay: WASD moves along the current horizontal viewport heading, Q/E moves vertically, and Shift accelerates.
+- Movement reads the live viewport quaternion every update, so native Blender orbit immediately changes the direction of WASD movement.
+- Keeps the corrected Z-up right-hand basis: D moves to the camera's right and A to its left. No custom yaw, pitch, cursor hiding or cursor warping remains.
+
+## 0.15.4 changes (superseded)
+
+- Attempted to derive custom MMB-look from Blender mouse-event deltas. The custom mouse-look path is removed in v0.15.5 in favour of native Blender navigation.
 
 ## 0.15.3 changes (superseded)
 
-- Introduced per-event cursor-centre warping, but its absolute-coordinate delta handling could misinterpret stale or synthetic mouse coordinates as real movement. Replaced in v0.15.4.
+- Attempted to centre-lock the pointer during MMB-look. This custom mouse-look path is removed in v0.15.5.
 
 ## 0.15.2 changes
 
