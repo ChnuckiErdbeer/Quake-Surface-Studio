@@ -113,7 +113,7 @@ def _validate_classic_lightmaps(parsed: bsp.BSP29, label: str) -> int:
     return required_samples
 
 
-def _validate_enhanced_lightmaps(parsed: bsp.BSP29, classic_required: int) -> Optional[int]:
+def _validate_enhanced_lightmaps(parsed: bsp.BSP29, classic_required: int, base_sample_count: int) -> Optional[int]:
     extensions = parsed.bspx_lumps
     if not any(name in extensions for name in ("LMSHIFT", "LMOFFSET", "LMSTYLE")):
         return None
@@ -170,17 +170,14 @@ def _validate_enhanced_lightmaps(parsed: bsp.BSP29, classic_required: int) -> Op
             )
         spans.append((offset, end, face_index))
 
-    cursor = None
+    cursor = base_sample_count
     for start, end, face_index in sorted(spans):
-        if cursor is None:
-            cursor = start
         if start != cursor:
             _fail(
                 f"face {face_index} enhanced lightmap starts at sample {start}; "
                 f"expected contiguous sample offset {cursor} (overlap or gap)"
             )
         cursor = end
-    cursor = classic_required if cursor is None else cursor
     if cursor != rgb_samples:
         _fail(
             f"enhanced RGBLIGHTING has {rgb_samples} samples but face ranges "
@@ -231,7 +228,11 @@ def validate_export_bytes(
             _fail(f"unrelated BSPX lump {name} was not preserved")
 
     classic_required = _validate_classic_lightmaps(exported, "exported")
-    enhanced_samples = _validate_enhanced_lightmaps(exported, classic_required)
+    source_rgb = source.bspx_lumps.get('RGBLIGHTING')
+    base_sample_count = len(source.lumps[bsp.LUMP_LIGHTING])
+    if base_sample_count == 0 and source_rgb is not None and len(source_rgb) % 3 == 0:
+        base_sample_count = len(source_rgb) // 3
+    enhanced_samples = _validate_enhanced_lightmaps(exported, classic_required, base_sample_count)
     rgb_payload = exported.bspx_lumps.get("RGBLIGHTING")
     if rgb_payload is not None and enhanced_samples is None:
         if len(rgb_payload) % 3:
