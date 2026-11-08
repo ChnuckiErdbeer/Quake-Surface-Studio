@@ -24,7 +24,7 @@ from bpy_extras.io_utils import ImportHelper, ExportHelper
 from . import bsp, color, lighting as lighting_utils
 
 
-ADDON_VERSION = (0, 11, 0)
+ADDON_VERSION = (0, 11, 1)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -4114,6 +4114,7 @@ class QSS_PT_main(Panel):
 
     def draw(self, context):
         layout = self.layout
+        layout.label(text=f"Version {'.'.join(str(part) for part in ADDON_VERSION)}", icon='INFO')
         layout.use_property_split = True
         import_box = layout.box()
         import_box.label(text="START HERE · PROJECT", icon='FILE_3D')
