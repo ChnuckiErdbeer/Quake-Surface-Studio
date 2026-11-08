@@ -24,7 +24,7 @@ from bpy_extras.io_utils import ImportHelper, ExportHelper
 from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils
 
 
-ADDON_VERSION = (0, 12, 0)
+ADDON_VERSION = (0, 13, 0)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -2184,6 +2184,12 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
             continue
         custom_projection = mat.get('qss_texinfo_projection') if mat.get('qss_face_local_projection') else None
         if custom_projection is not None:
+            if lightmap_export_mode == 'ENHANCED':
+                raise bsp.BSPError(
+                    "Enhanced BSPX lightmap export currently cannot be combined with detached face-local "
+                    "texinfo projections. Export this map in Classic BSP29 mode, or remove the detached "
+                    "projection before using LMSHIFT."
+                )
             projection_key = tuple(float(v) for v in custom_projection)
             if len(projection_key) != 8:
                 raise bsp.BSPError(f"Material '{mat.name}' has an invalid face-local texinfo projection.")
