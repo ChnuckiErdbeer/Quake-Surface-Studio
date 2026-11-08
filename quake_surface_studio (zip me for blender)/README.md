@@ -1,4 +1,9 @@
-# Quake Surface Studio 0.14.1
+# Quake Surface Studio 0.14.2
+
+## 0.14.2 changes
+
+- Fixed Blender 5.2 dynamic Game / Mod enum registration by removing the unsupported registration-time default from the callback-driven EnumProperty. The persisted game selection is now applied after registration, once a Scene and valid enum items are available.
+
 
 ## 0.14.1 changes
 

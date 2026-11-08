@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths
 
 
-ADDON_VERSION = (0, 14, 1)
+ADDON_VERSION = (0, 14, 2)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -5545,11 +5545,14 @@ def register():
             default=initial_root,
             update=_on_quake_root_changed,
         )
+        # Dynamic EnumProperty items must not specify a registration-time
+        # default. Blender 5.2 can validate that default before a Scene
+        # context exists, causing RNA registration to fail even when the
+        # callback can later provide valid items.
         bpy.types.Scene.qss_game_folder = EnumProperty(
             name="Game / Mod",
             description="Select id1 or another detected Quake game/mod folder",
             items=_qss_game_folder_items,
-            default=initial_game_id,
             update=_on_game_folder_changed,
         )
         bpy.types.Scene.qss_game_dir = StringProperty(
@@ -5604,6 +5607,17 @@ def register():
             default=False,
             update=_on_mmb_fps_walk_changed,
         )
+        # Apply the persisted selection only after the dynamic enum and
+        # its item callback are registered and a real Scene is available.
+        scene = getattr(bpy.context, 'scene', None)
+        if scene is not None:
+            global _qss_config_update_depth
+            _qss_config_update_depth = True
+            try:
+                scene.qss_game_folder = initial_game_id
+                scene.qss_game_dir = initial_game_dir
+            finally:
+                _qss_config_update_depth = False
         _update_mmb_walk_keymap()
     except Exception:
         # Blender can leave a partially registered add-on behind when register()
