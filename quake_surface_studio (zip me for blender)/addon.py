@@ -129,13 +129,15 @@ def _set_material_image(mat, image):
 
 
 
-def _set_single_image_paint_target(context, obj, image, uv_name):
-    """Bind Texture Paint to one explicit image and the intended UV map.
+def _set_texture_paint_target(context, obj, image, uv_name, material=None):
+    """Bind Texture Paint to either one material slot or a shared image atlas.
 
-    Material-slot discovery is renderer/material dependent. QSS face-local
-    textures and the shared lightmap atlas are deterministic image targets,
-    so use Blender's Single Image paint mode rather than relying only on an
-    active Image Texture node.
+    Face-local albedo images must use Material mode. Single Image mode applies
+    a canvas override across the whole object, so unrelated BSP faces whose UVs
+    overlap the face-local 0..1 island can display/paint the wrong image.
+    Shared lightmap atlases remain in Single Image mode because all face
+    materials intentionally reference the same atlas and the lightmap UVs are
+    packed into non-overlapping islands.
     """
     if image is None:
         raise bsp.BSPError("The requested QSS paint image is missing.")
@@ -151,27 +153,76 @@ def _set_single_image_paint_target(context, obj, image, uv_name):
 
     try:
         tool_settings = context.scene.tool_settings
-        # Blender 5.x separates the canvas source selector from the legacy
-        # ImagePaint canvas pointer. Set both: the 3D viewport's paint display
-        # override reads PaintModeSettings, while the paint engine uses
-        # ImagePaint.canvas.
         paint_mode = tool_settings.paint_mode
         if paint_mode is None:
             raise RuntimeError("Blender has no active PaintModeSettings.")
-        paint_mode.canvas_source = 'IMAGE'
-        paint_mode.canvas_image = image
-
         image_paint = tool_settings.image_paint
-        image_paint.canvas = image
         image_paint.interpolation = 'CLOSEST'
-        if (
-            paint_mode.canvas_source != 'IMAGE'
-            or paint_mode.canvas_image != image
-            or image_paint.canvas != image
-        ):
-            raise RuntimeError("Blender did not retain the requested Single Image canvas.")
+
+        if material is not None:
+            if obj.active_material != material:
+                raise RuntimeError(
+                    f"Material '{material.name}' is not the object's active material."
+                )
+            if not material.use_nodes or material.node_tree is None:
+                raise RuntimeError(f"Material '{material.name}' has no node tree.")
+            nodes = material.node_tree.nodes
+            image_nodes = [node for node in nodes if node.type == 'TEX_IMAGE']
+            target_node = next(
+                (node for node in image_nodes if node.image == image), None
+            )
+            if target_node is None:
+                raise RuntimeError(
+                    f"Image '{image.name}' is not an Image Texture slot in '{material.name}'."
+                )
+
+            # Material paint slots are indexed in the order Blender discovers
+            # Image Texture nodes. Keep the chosen node and paint_active_slot in
+            # sync even when a copied material also contains a lightmap node.
+            for node in nodes:
+                node.select = False
+            target_node.select = True
+            nodes.active = target_node
+            slot_index = image_nodes.index(target_node)
+            material.paint_active_slot = slot_index
+
+            # Material mode restricts the canvas to the active material slot.
+            # Clear the global image override so unrelated faces keep their
+            # own material textures instead of showing this face-local image.
+            paint_mode.canvas_source = 'MATERIAL'
+            paint_mode.canvas_image = None
+            image_paint.mode = 'MATERIAL'
+            image_paint.canvas = image
+            if (
+                paint_mode.canvas_source != 'MATERIAL'
+                or paint_mode.canvas_image is not None
+                or image_paint.mode != 'MATERIAL'
+                or material.paint_active_slot != slot_index
+            ):
+                raise RuntimeError(
+                    "Blender did not retain the requested material paint slot."
+                )
+        else:
+            # The BSP lightmap is one shared atlas referenced by every face
+            # material; it intentionally uses the object-wide image canvas.
+            paint_mode.canvas_source = 'IMAGE'
+            paint_mode.canvas_image = image
+            image_paint.mode = 'IMAGE'
+            image_paint.canvas = image
+            if (
+                paint_mode.canvas_source != 'IMAGE'
+                or paint_mode.canvas_image != image
+                or image_paint.mode != 'IMAGE'
+                or image_paint.canvas != image
+            ):
+                raise RuntimeError(
+                    "Blender did not retain the requested Single Image canvas."
+                )
     except Exception as exc:
-        raise bsp.BSPError(f"Could not set '{image.name}' as the Texture Paint canvas: {exc}") from exc
+        raise bsp.BSPError(
+            f"Could not set '{image.name}' as the Texture Paint target: {exc}"
+        ) from exc
+
 
 def _next_pow2_clamped(value, minimum=16, maximum=512):
     """Choose a supported Quake miptex dimension for a face-local texture."""
@@ -2621,8 +2672,8 @@ class QSS_OT_activate_paint(Operator):
             return {'CANCELLED'}
         _set_material_image(mat, image)
         try:
-            _set_single_image_paint_target(
-                context, obj, image, 'Quake_Texture_UV'
+            _set_texture_paint_target(
+                context, obj, image, 'Quake_Texture_UV', material=mat
             )
         except bsp.BSPError as exc:
             _report(self, 'ERROR', str(exc))
@@ -2632,7 +2683,7 @@ class QSS_OT_activate_paint(Operator):
         except RuntimeError as exc:
             _report(self, 'ERROR', f"Could not enter Texture Paint mode: {exc}")
             return {'CANCELLED'}
-        _report(self, 'INFO', f"Painting image (Single Image canvas): {image.name}")
+        _report(self, 'INFO', f"Painting image (active material slot): {image.name}")
         return {'FINISHED'}
 
 
@@ -2672,7 +2723,7 @@ class QSS_OT_activate_lightmap_paint(Operator):
         node.select = True
         mat.node_tree.nodes.active = node
         try:
-            _set_single_image_paint_target(
+            _set_texture_paint_target(
                 context, obj, image, 'Quake_Lightmap_UV'
             )
         except bsp.BSPError as exc:
