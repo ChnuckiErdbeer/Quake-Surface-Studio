@@ -196,7 +196,10 @@ cd quake_surface_studio
 python -m unittest discover -s tests -v
 python qss_inspect.py path/to/map.bsp
 python qss_inspect.py path/to/map.bsp --lit path/to/map.lit
+python qss_export_check.py path/to/original.bsp path/to/exported.bsp
 ```
+
+`qss_export_check.py` compares an exported BSP against the exact original file used for import. It checks face/geometry identity, retained source lumps and unknown BSPX data, texture/texinfo references, classic lightmap bounds, optional enhanced BSPX lightmap offsets, and the sibling QLIT v1 `.lit` file. A sibling `.lit` file is detected automatically; use `--lit path/to/file.lit` to select another one. This validator is read-only and does not replace loading the output in the target engine.
 
 The inspector reports standard lump counts, BSPX extension names, RGBLIGHTING sample counts, optional QLIT validity, and face/texinfo/miptex references. It is a structural check, not a replacement for testing in the engine.
 
