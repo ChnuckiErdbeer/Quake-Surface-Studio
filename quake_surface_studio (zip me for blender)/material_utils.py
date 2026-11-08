@@ -4,7 +4,7 @@ import array
 
 
 LIGHTMAP_RESOLUTIONS = (1, 2, 4, 8)
-MAX_LIGHTMAP_IMAGE_SIZE = 4096
+MAX_LIGHTMAP_IMAGE_SIZE = 2048
 
 
 def validate_lightmap_resolution(value):
