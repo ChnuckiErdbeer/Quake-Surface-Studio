@@ -24,7 +24,7 @@ from bpy_extras.io_utils import ImportHelper, ExportHelper
 from . import bsp, color, lighting as lighting_utils, material_utils
 
 
-ADDON_VERSION = (0, 11, 5)
+ADDON_VERSION = (0, 11, 6)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -2773,7 +2773,8 @@ class QSS_OT_activate_paint(Operator):
 class QSS_OT_activate_lightmap_paint(Operator):
     bl_idname = "qss.activate_lightmap_paint"
     bl_label = "Enter Lightmap Paint"
-    bl_description = "Make the shared lightmap atlas active and enter Texture Paint mode"
+    bl_description = "Paint the working lightmap atlas, restricted to selected lightmapped faces"
+    bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
     def poll(cls, context):
@@ -2782,44 +2783,128 @@ class QSS_OT_activate_lightmap_paint(Operator):
             obj and obj.type == 'MESH'
             and obj.get('qss_object_role') == 'quake_bsp29'
             and obj.get('qss_lightmap_image_name')
-            and context.mode == 'OBJECT'
+            and context.mode in {'OBJECT', 'EDIT_MESH'}
         )
 
     def execute(self, context):
         obj = context.object
-        image = bpy.data.images.get(obj.get('qss_lightmap_image_name', ''))
-        if image is None:
-            _report(self, 'ERROR', "The lightmap atlas image is missing.")
-            return {'CANCELLED'}
+        mesh = obj.data
+        active_face_index = None
         try:
-            _rebuild_lightmap_preview(obj)
-        except Exception as exc:
-            _report(self, 'ERROR', f"Could not activate the editable working atlas: {exc}")
-            return {'CANCELLED'}
-        mat = obj.active_material
-        node = _find_image_node(mat, 'lightmap') if mat else None
-        if node is None:
-            _report(self, 'ERROR', "The active material has no lightmap image node.")
-            return {'CANCELLED'}
-        for n in mat.node_tree.nodes:
-            n.select = False
-        node.select = True
-        mat.node_tree.nodes.active = node
-        try:
-            _set_texture_paint_target(
-                context, obj, image, 'Quake_Lightmap_UV'
+            # Capture Edit Mode selection before switching modes. The shared
+            # atlas contains many UV islands, so face masking must be explicit.
+            if context.mode == 'EDIT_MESH':
+                import bmesh
+                bm = bmesh.from_edit_mesh(mesh)
+                bm.faces.ensure_lookup_table()
+                bm.faces.index_update()
+                selected_indices = [int(face.index) for face in bm.faces if face.select]
+                active_face = bm.faces.active
+                if active_face is not None and active_face.select:
+                    active_face_index = int(active_face.index)
+                if not selected_indices:
+                    raise bsp.BSPError(
+                        "Select one or more lightmapped faces in Edit Mode before entering Lightmap Paint."
+                    )
+                bpy.ops.object.mode_set(mode='OBJECT')
+                mesh = obj.data
+            else:
+                selected_indices = [int(poly.index) for poly in mesh.polygons if bool(poly.select)]
+                if not selected_indices:
+                    raise bsp.BSPError(
+                        "No faces are selected. Switch to Edit Mode, select the faces to paint, "
+                        "then click Enter Lightmap Paint."
+                    )
+
+            has_data_attr = mesh.attributes.get('qss_lm_has_data')
+            if has_data_attr is None or len(has_data_attr.data) != len(mesh.polygons):
+                raise bsp.BSPError(
+                    "The BSP lightmap face metadata is missing or out of date. Re-import the map."
+                )
+            lightmap_flags = [bool(item.value) for item in has_data_attr.data]
+            selected_indices = material_utils.filter_lightmapped_face_indices(
+                selected_indices, lightmap_flags
             )
-        except bsp.BSPError as exc:
-            _report(self, 'ERROR', str(exc))
-            return {'CANCELLED'}
-        try:
+            if not selected_indices:
+                raise bsp.BSPError(
+                    "The selected faces have no imported lightmap samples. Select a lightmapped face."
+                )
+
+            # Make the captured selection authoritative in Object Mode, then
+            # enable Texture Paint's face mask to prevent UV-island spillover.
+            selected_set = set(selected_indices)
+            for poly in mesh.polygons:
+                poly.select = poly.index in selected_set
+            mesh.use_paint_mask = True
+            mesh.update()
+            if active_face_index not in selected_set:
+                active_face_index = selected_indices[-1]
+            active_material_index = int(mesh.polygons[active_face_index].material_index)
+            if 0 <= active_material_index < len(mesh.materials):
+                obj.active_material_index = active_material_index
+
+            image = bpy.data.images.get(obj.get('qss_lightmap_image_name', ''))
+            if image is None:
+                raise bsp.BSPError("The editable lightmap atlas image is missing.")
+            # Repair every material's atlas hookup before painting.
+            _rebuild_lightmap_preview(obj)
+            mat = obj.active_material
+            node = _find_image_node(mat, 'lightmap') if mat else None
+            if node is None or node.image != image:
+                raise bsp.BSPError(
+                    "The active face material is not connected to the editable lightmap atlas."
+                )
+            for n in mat.node_tree.nodes:
+                n.select = False
+            node.select = True
+            mat.node_tree.nodes.active = node
+            try:
+                mat.update_tag()
+                context.view_layer.update()
+            except Exception:
+                pass
+
+            _set_texture_paint_target(context, obj, image, 'Quake_Lightmap_UV')
             bpy.ops.object.mode_set(mode='TEXTURE_PAINT')
-        except RuntimeError as exc:
+
+            # Verify the post-transition state, not only the requested state.
+            tool_settings = context.scene.tool_settings
+            paint_mode = tool_settings.paint_mode
+            image_paint = tool_settings.image_paint
+            active_uv = mesh.uv_layers.active
+            if (
+                paint_mode is None
+                or paint_mode.canvas_source != 'IMAGE'
+                or paint_mode.canvas_image != image
+                or image_paint.mode != 'IMAGE'
+                or image_paint.canvas != image
+            ):
+                raise bsp.BSPError(
+                    "Blender did not retain the editable lightmap as the active paint canvas."
+                )
+            if active_uv is None or active_uv.name != 'Quake_Lightmap_UV':
+                raise bsp.BSPError(
+                    "Blender did not retain Quake_Lightmap_UV as the active paint UV map."
+                )
+            if not mesh.use_paint_mask:
+                raise bsp.BSPError(
+                    "Blender disabled the selected-face paint mask; lightmap painting was stopped for safety."
+                )
+        except Exception as exc:
+            try:
+                if context.mode != 'OBJECT':
+                    bpy.ops.object.mode_set(mode='OBJECT')
+            except Exception:
+                pass
             _report(self, 'ERROR', f"Could not enter Lightmap Paint mode: {exc}")
             return {'CANCELLED'}
-        _report(self, 'INFO', f"Painting RGB lightmap atlas (Single Image canvas): {image.name}")
-        return {'FINISHED'}
 
+        _report(
+            self, 'INFO',
+            f"Painting working lightmap atlas '{image.name}' on {len(selected_indices)} "
+            f"selected lightmapped face(s); Quake_Lightmap_UV and face mask active."
+        )
+        return {'FINISHED'}
 
 def _copy_image_pixels(source, destination):
     if tuple(source.size) != tuple(destination.size):
@@ -4516,6 +4601,11 @@ class QSS_PT_lighting(Panel):
             layout.label(text=f"RGB source: {obj.get('qss_source_lighting_source', 'Monochrome')}")
             layout.label(text=f"Lightmapped faces: {obj.get('qss_lightmap_faces', 0)} / {obj.get('qss_total_bsp_faces', len(obj.data.polygons))}")
             layout.label(text=f"RGB chromatic faces: {obj.get('qss_lit_chromatic_faces', 0)} / {obj.get('qss_lit_rgb_faces', 0)}")
+            paint_box = layout.box()
+            paint_box.label(text="LIGHTMAP PAINT", icon='BRUSH_DATA')
+            paint_box.operator(QSS_OT_activate_lightmap_paint.bl_idname, icon='TPAINT_HLT')
+            paint_box.label(text="Select one or more faces in Edit Mode first.", icon='INFO')
+            paint_box.label(text="Painting is masked to selected lightmapped faces.")
 
 
 class QSS_PT_light_preview(Panel):
