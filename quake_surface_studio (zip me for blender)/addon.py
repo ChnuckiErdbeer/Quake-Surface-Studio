@@ -2465,6 +2465,7 @@ class QSS_OT_detach_faces(Operator):
                 if context.mode == 'EDIT_MESH':
                     bpy.ops.object.mode_set(mode='OBJECT')
                     mesh = obj.data
+                    uv_layer = mesh.uv_layers.get('Quake_Texture_UV')
             except Exception:
                 pass
             # Roll back any material-slot/UV changes already committed.
