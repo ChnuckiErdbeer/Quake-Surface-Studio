@@ -3046,8 +3046,8 @@ def _lightmap_sample_luminances(obj, image):
     for poly_index, _poly in enumerate(mesh.polygons):
         if not _qss_safe_collection_item(attrs['qss_lm_has_data'].data, poly_index, 'qss_lm_has_data').value:
             continue
-        x0 = int(_qss_safe_collection_item(attrs['qss_lm_atlas_x'].data, poly_index, 'qss_lm_atlas_x').value) + gutter
-        y0 = int(_qss_safe_collection_item(attrs['qss_lm_atlas_y'].data, poly_index, 'qss_lm_atlas_y').value) + gutter
+        x0 = int(_qss_safe_collection_item(attrs['qss_lm_atlas_x'].data, poly_index, 'qss_lm_atlas_x').value) * resolution + gutter
+        y0 = int(_qss_safe_collection_item(attrs['qss_lm_atlas_y'].data, poly_index, 'qss_lm_atlas_y').value) * resolution + gutter
         width = int(_qss_safe_collection_item(attrs['qss_lm_sample_w'].data, poly_index, 'qss_lm_sample_w').value)
         height = int(_qss_safe_collection_item(attrs['qss_lm_sample_h'].data, poly_index, 'qss_lm_sample_h').value)
         for sy in range(height):
