@@ -2509,8 +2509,17 @@ class QSS_OT_detach_faces(Operator):
             try:
                 if was_edit_mode and context.mode != 'EDIT_MESH':
                     bpy.ops.object.mode_set(mode='EDIT')
-            except Exception:
-                pass
+                    bm = bmesh.from_edit_mesh(obj.data)
+                    bm.faces.ensure_lookup_table()
+                    bm.faces.index_update()
+                    selected_set = set(selected_indices)
+                    for face in bm.faces:
+                        face.select_set(face.index in selected_set)
+                    if selected_indices and max(selected_indices) < len(bm.faces):
+                        bm.faces.active = bm.faces[selected_indices[-1]]
+                    bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
+            except Exception as restore_exc:
+                print(f"QSS detach selection restore warning: {restore_exc}")
             _report(self, 'ERROR', f"Could not detach face ({stage}): {exc}. If the mesh was hidden/revealed in Edit Mode, switch to Object Mode and re-import if the face/UV attribute counts are stale.")
             return {'CANCELLED'}
 
