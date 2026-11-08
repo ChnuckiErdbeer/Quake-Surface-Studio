@@ -22,7 +22,7 @@ from bpy.types import Operator, Panel
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
 from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils
-from . import export_validation, quake_paths
+from . import export_validation, quake_paths, external_tools
 
 
 ADDON_VERSION = (0, 14, 3)
