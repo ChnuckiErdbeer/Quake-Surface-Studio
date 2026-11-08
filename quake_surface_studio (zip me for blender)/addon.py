@@ -17,14 +17,14 @@ import time
 import traceback
 
 import bpy
-from bpy.props import StringProperty, FloatProperty, BoolProperty, IntProperty
+from bpy.props import StringProperty, FloatProperty, BoolProperty, IntProperty, EnumProperty
 from bpy.types import Operator, Panel
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
 from . import bsp, color, lighting as lighting_utils, material_utils
 
 
-ADDON_VERSION = (0, 11, 6)
+ADDON_VERSION = (0, 12, 0)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -967,11 +967,13 @@ def _calc_face_lightmap_extents(positions, texinfo):
     return s_min, t_min, s_max - s_min, t_max - t_min, svec, tvec
 
 
-def _pack_lightmap_rectangles(records, gutter=2):
+def _pack_lightmap_rectangles(records, gutter=2, max_atlas_size=2048):
     # Prefer 2x sample blocks for easier painting; fall back to 1:1 if needed.
     ordered = sorted(records, key=lambda r: (-(r['height']), -(r['width']), r['face_id']))
     for scale in (2, 1):
         for atlas_size in (512, 1024, 2048):
+            if atlas_size > int(max_atlas_size):
+                continue
             x = y = row_h = 0
             placements = {}
             failed = False
@@ -997,7 +999,7 @@ def _pack_lightmap_rectangles(records, gutter=2):
 
 
 def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by_face,
-                          lit_rgb=None, lighting_data=None):
+                          lit_rgb=None, lighting_data=None, resolution=1):
     faces = parsed.faces()
     texinfos = parsed.texinfos()
     lighting = (parsed.lumps[bsp.LUMP_LIGHTING] if lighting_data is None else lighting_data)
@@ -1066,7 +1068,9 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
         obj['qss_lightmap_faces'] = 0
         return None
 
-    packed = _pack_lightmap_rectangles(records)
+    resolution = material_utils.validate_lightmap_resolution(resolution)
+    max_base_size = material_utils.MAX_LIGHTMAP_IMAGE_SIZE // resolution
+    packed = _pack_lightmap_rectangles(records, max_atlas_size=max_base_size)
     if packed is None:
         obj['qss_lightmap_image_name'] = ''
         obj['qss_lightmap_faces'] = 0
@@ -1074,22 +1078,24 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
         return None
     atlas_size, scale, placements, gutter = packed
 
-    rgba = array.array('f', [1.0]) * (atlas_size * atlas_size * 4)  # white = unlightmapped
+    image_size = material_utils.lightmap_resolution_dimensions(atlas_size, resolution)
+    rgba = array.array('f', [1.0]) * (image_size * image_size * 4)  # white = unlightmapped
     record_by_face = {r['face_id']: r for r in records}
     for rec in records:
         x0, y0 = placements[rec['face_id']]
-        x0 += gutter
-        y0 += gutter
+        x0 = (x0 + gutter) * resolution
+        y0 = (y0 + gutter) * resolution
+        effective_scale = scale * resolution
         for sy in range(rec['height']):
             for sx in range(rec['width']):
                 sample_rgb = rec['samples_rgb'][sy * rec['width'] + sx]
                 values = tuple(channel / 255.0 for channel in sample_rgb)
-                for dy in range(scale):
-                    top_y = y0 + sy * scale + dy
-                    bottom_y = atlas_size - 1 - top_y
-                    for dx in range(scale):
-                        px = x0 + sx * scale + dx
-                        index = (bottom_y * atlas_size + px) * 4
+                for dy in range(effective_scale):
+                    top_y = y0 + sy * effective_scale + dy
+                    bottom_y = image_size - 1 - top_y
+                    for dx in range(effective_scale):
+                        px = x0 + sx * effective_scale + dx
+                        index = (bottom_y * image_size + px) * 4
                         rgba[index] = values[0]
                         rgba[index + 1] = values[1]
                         rgba[index + 2] = values[2]
@@ -1097,7 +1103,7 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
 
     image = bpy.data.images.new(
         name=f"QSS_Lightmap_{os.path.basename(obj.get('qss_source_path', 'map'))}",
-        width=atlas_size, height=atlas_size, alpha=True, float_buffer=True
+        width=image_size, height=image_size, alpha=True, float_buffer=True
     )
     image.colorspace_settings.name = 'Non-Color'
     image.pixels.foreach_set(rgba)
@@ -1171,6 +1177,7 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
     obj['qss_lightmap_image_name'] = image.name
     obj['qss_lightmap_atlas_size'] = atlas_size
     obj['qss_lightmap_scale'] = scale
+    obj['qss_lightmap_resolution'] = resolution
     obj['qss_lightmap_gutter'] = gutter
     # Keep a packed immutable source snapshot so a bake or paint session can
     # always be reset to the exact imported BSP lightmaps.
@@ -1197,6 +1204,17 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
     obj['qss_lightmap_uv_valid_faces'] = uv_valid_faces
     _rebuild_lightmap_preview(obj)
     return image
+
+
+def _qss_lightmap_pixel_scale(obj, image):
+    """Return the integer image-pixel scale relative to stored base atlas metadata."""
+    base_size = int(obj.get('qss_lightmap_atlas_size', 0))
+    if base_size <= 0:
+        raise bsp.BSPError('Stored base lightmap atlas size is missing; re-import the BSP.')
+    try:
+        return material_utils.lightmap_resolution_ratio(base_size, int(image.size[0]))
+    except ValueError as exc:
+        raise bsp.BSPError(f'Working lightmap resolution metadata is invalid: {exc}') from exc
 
 
 def _qss_validate_face_domain_attributes(mesh, names, operation):
@@ -1263,8 +1281,9 @@ def _patch_lightmap_lump(obj, parsed):
     size = int(image.size[0])
     if image.size[0] != image.size[1]:
         raise bsp.BSPError("Lightmap atlas must remain square; do not resize it in the Image Editor.")
-    scale = int(obj.get('qss_lightmap_scale', 1))
-    gutter = int(obj.get('qss_lightmap_gutter', 2))
+    resolution = _qss_lightmap_pixel_scale(obj, image)
+    scale = int(obj.get('qss_lightmap_scale', 1)) * resolution
+    gutter = int(obj.get('qss_lightmap_gutter', 2)) * resolution
     px = array.array('f', [0.0]) * (size * size * 4)
     image.update()
     image.pixels.foreach_get(px)
@@ -1287,8 +1306,8 @@ def _patch_lightmap_lump(obj, parsed):
             continue
         sample_w = int(w_attr.data[poly_index].value)
         sample_h = int(h_attr.data[poly_index].value)
-        atlas_x = int(x_attr.data[poly_index].value) + gutter
-        atlas_y = int(y_attr.data[poly_index].value) + gutter
+        atlas_x = int(x_attr.data[poly_index].value) * resolution + gutter
+        atlas_y = int(y_attr.data[poly_index].value) * resolution + gutter
         block_size = sample_w * sample_h
         style_count = sum(1 for style in styles if style != 255)
         if sample_w <= 0 or sample_h <= 0 or light_offset + block_size * style_count > len(lighting):
@@ -1641,7 +1660,7 @@ def _frame_player_start(context, obj):
 
 def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_file,
                        wad_textures=None, loose_textures=None, wad_sources=None, wad_unresolved=None, wad_failures=None,
-                       unit_scale=DEFAULT_QUAKE_UNIT_SCALE, flip_z=False):
+                       unit_scale=DEFAULT_QUAKE_UNIT_SCALE, flip_z=False, lightmap_resolution=1):
     source_path = bpy.path.abspath(source_path)
     game_dir = bpy.path.abspath(game_dir) if game_dir else ""
     palette_file = bpy.path.abspath(palette_file) if palette_file else ""
@@ -1769,7 +1788,7 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
         obj['qss_rgb_only_lighting'] = False
     _build_lightmap_atlas(
         obj, mesh, parsed, imported_face_ids, imported_texinfo_ids, imported_vertex_positions,
-        source_lit_rgb, lighting_data=atlas_lighting
+        source_lit_rgb, lighting_data=atlas_lighting, resolution=lightmap_resolution
     )
 
     # Preserve the source BSP's original face indexing for the exporter.
@@ -2329,6 +2348,15 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
         name="Invert Z axis", description="Only for non-standard/converter-generated BSPs that use Z-down coordinates",
         default=False
     )
+    lightmap_resolution: EnumProperty(
+        name="Working lightmap resolution",
+        description="Higher-resolution paint atlas; normalized BSP UV layout and classic export remain unchanged",
+        items=(('1', '1× · Original', 'Original packed atlas resolution'),
+               ('2', '2×', 'Twice the pixels per axis'),
+               ('4', '4×', 'Four times the pixels per axis'),
+               ('8', '8×', 'Eight times the pixels per axis; atlas packing is limited to 512²')),
+        default='1'
+    )
 
     def invoke(self, context, event):
         self.game_dir = context.scene.qss_game_dir
@@ -2341,6 +2369,7 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
         layout.separator()
         layout.prop(self, 'unit_scale')
         layout.prop(self, 'flip_z')
+        layout.prop(self, 'lightmap_resolution')
 
     def execute(self, context):
         try:
@@ -2360,7 +2389,8 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
             obj = _create_bsp_object(
                 context, parsed, source_path, palette, game_dir, palette_file,
                 wad_textures, loose_textures, loaded_wads, unresolved_wads, wad_failures,
-                unit_scale=self.unit_scale, flip_z=self.flip_z
+                unit_scale=self.unit_scale, flip_z=self.flip_z,
+                lightmap_resolution=int(self.lightmap_resolution)
             )
             light_count, has_spawn = _import_bsp_entities(
                 context, obj, parsed, self.unit_scale, self.flip_z
@@ -2376,7 +2406,8 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
                             f"{obj.get('qss_texture_wad_count', 0)} WAD, {obj.get('qss_texture_loose_count', 0)} external, "
                             f"{obj.get('qss_texture_white_count', 0)} white fallback.")
             spawn_note = " Spawn view set to info_player_start." if has_spawn else " No info_player_start found."
-            _report(self, 'INFO', f"Imported {len(obj.data.polygons)} faces, {light_count} light entities. Palette: {palette_origin}.{texture_note}{lit_note}{spawn_note}")
+            resolution_note = f" Working lightmap: {obj.get('qss_lightmap_resolution', 1)}× ({obj.get('qss_lightmap_atlas_size', 0) * obj.get('qss_lightmap_resolution', 1)}²)." if obj.get('qss_lightmap_image_name') else ""
+            _report(self, 'INFO', f"Imported {len(obj.data.polygons)} faces, {light_count} light entities. Palette: {palette_origin}.{texture_note}{lit_note}{resolution_note}{spawn_note}")
             return {'FINISHED'}
         except Exception as exc:
             _report(self, 'ERROR', str(exc))
@@ -3005,8 +3036,9 @@ def _lightmap_sample_luminances(obj, image):
         'sample lightmap luxels'
     )
     size = int(image.size[0])
-    scale = max(1, int(obj.get('qss_lightmap_scale', 1)))
-    gutter = max(0, int(obj.get('qss_lightmap_gutter', 0)))
+    resolution = _qss_lightmap_pixel_scale(obj, image)
+    scale = max(1, int(obj.get('qss_lightmap_scale', 1))) * resolution
+    gutter = max(0, int(obj.get('qss_lightmap_gutter', 0))) * resolution
     pixels = array.array('f', [0.0]) * (size * size * 4)
     image.update()
     image.pixels.foreach_get(pixels)
@@ -3249,8 +3281,9 @@ def _qss_run_ericw_direct_bake(context, obj):
     if image is None or image.size[0] != image.size[1]:
         raise bsp.BSPError('The square lightmap atlas is missing. Re-import the BSP.')
     size = int(image.size[0])
-    scale = max(1, int(obj.get('qss_lightmap_scale', 1)))
-    gutter = max(0, int(obj.get('qss_lightmap_gutter', 0)))
+    resolution = _qss_lightmap_pixel_scale(obj, image)
+    scale = max(1, int(obj.get('qss_lightmap_scale', 1))) * resolution
+    gutter = max(0, int(obj.get('qss_lightmap_gutter', 0))) * resolution
     unit_scale = float(obj.get('qss_unit_scale', DEFAULT_QUAKE_UNIT_SCALE))
     flip_z = bool(obj.get('qss_flip_z', False))
     energy_scale = max(0.0, float(context.scene.qss_light_energy_scale))
@@ -3291,8 +3324,8 @@ def _qss_run_ericw_direct_bake(context, obj):
         face_info = _qss_read_source_face_sample(mesh, poly_index, face_id, parsed)
         if face_info is None:
             continue
-        x0 = face_info['atlas_x'] + gutter
-        y0 = face_info['atlas_y'] + gutter
+        x0 = face_info['atlas_x'] * resolution + gutter
+        y0 = face_info['atlas_y'] * resolution + gutter
         for sy in range(face_info['height']):
             for sx in range(face_info['width']):
                 s_value = face_info['s_min'] + sx * 16.0 - float(face_info['texinfo'][3])
@@ -4187,8 +4220,9 @@ def _qss_diagnostics_text(context, obj):
         )
         if attrs_valid:
             size = int(image.size[0])
-            scale = max(1, int(obj.get('qss_lightmap_scale', 1)))
-            gutter = max(0, int(obj.get('qss_lightmap_gutter', 0)))
+            resolution = _qss_lightmap_pixel_scale(obj, image)
+            scale = max(1, int(obj.get('qss_lightmap_scale', 1))) * resolution
+            gutter = max(0, int(obj.get('qss_lightmap_gutter', 0))) * resolution
             pix = array.array('f', [0.0]) * (size * size * 4)
             image.update()
             image.pixels.foreach_get(pix)
@@ -4201,8 +4235,8 @@ def _qss_diagnostics_text(context, obj):
                     if not _qss_safe_collection_item(attrs['qss_lm_has_data'].data, i, 'qss_lm_has_data').value:
                         continue
                     face_id = int(_qss_safe_collection_item(attrs['qss_bsp_face_id'].data, i, 'qss_bsp_face_id').value)
-                    x0 = int(_qss_safe_collection_item(attrs['qss_lm_atlas_x'].data, i, 'qss_lm_atlas_x').value) + gutter
-                    y0 = int(_qss_safe_collection_item(attrs['qss_lm_atlas_y'].data, i, 'qss_lm_atlas_y').value) + gutter
+                    x0 = int(_qss_safe_collection_item(attrs['qss_lm_atlas_x'].data, i, 'qss_lm_atlas_x').value) * resolution + gutter
+                    y0 = int(_qss_safe_collection_item(attrs['qss_lm_atlas_y'].data, i, 'qss_lm_atlas_y').value) * resolution + gutter
                     w = int(_qss_safe_collection_item(attrs['qss_lm_sample_w'].data, i, 'qss_lm_sample_w').value)
                     h = int(_qss_safe_collection_item(attrs['qss_lm_sample_h'].data, i, 'qss_lm_sample_h').value)
                 except (bsp.BSPError, IndexError, RuntimeError, ReferenceError) as exc:
@@ -4601,6 +4635,7 @@ class QSS_PT_lighting(Panel):
             layout.label(text=f"RGB source: {obj.get('qss_source_lighting_source', 'Monochrome')}")
             layout.label(text=f"Lightmapped faces: {obj.get('qss_lightmap_faces', 0)} / {obj.get('qss_total_bsp_faces', len(obj.data.polygons))}")
             layout.label(text=f"RGB chromatic faces: {obj.get('qss_lit_chromatic_faces', 0)} / {obj.get('qss_lit_rgb_faces', 0)}")
+            layout.label(text=f"Working atlas: {tuple(bpy.data.images.get(obj.get('qss_lightmap_image_name', '')).size)} px · {obj.get('qss_lightmap_resolution', 1)}×")
             paint_box = layout.box()
             paint_box.label(text="LIGHTMAP PAINT", icon='BRUSH_DATA')
             paint_box.operator(QSS_OT_activate_lightmap_paint.bl_idname, icon='TPAINT_HLT')
