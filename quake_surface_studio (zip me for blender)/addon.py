@@ -24,7 +24,7 @@ from bpy_extras.io_utils import ImportHelper, ExportHelper
 from . import bsp, color, lighting as lighting_utils, material_utils
 
 
-ADDON_VERSION = (0, 11, 4)
+ADDON_VERSION = (0, 11, 5)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -158,6 +158,10 @@ def _set_texture_paint_target(context, obj, image, uv_name, material=None):
             raise RuntimeError("Blender has no active PaintModeSettings.")
         image_paint = tool_settings.image_paint
         image_paint.interpolation = 'CLOSEST'
+
+        # BSP face winding can differ from Blender's paint-projection culling
+        # convention. Keep occlusion, but never cull backfaces while painting.
+        material_utils.configure_texture_paint_visibility(image_paint)
 
         if material is not None:
             if obj.active_material != material:
