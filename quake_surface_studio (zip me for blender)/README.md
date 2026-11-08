@@ -1,4 +1,10 @@
-# Quake Surface Studio 0.11.3
+# Quake Surface Studio 0.11.5
+
+## 0.11.5 changes
+
+- Texture Paint explicitly keeps **Occlude enabled** and **Backface Culling disabled**. In Blender 5.2 testing, enabling Backface Culling prevented visible BSP faces from receiving brush strokes; disabling it restored painting while keeping occlusion enabled.
+
+## 0.11.3 changes
 
 ## 0.11.3 changes
 
