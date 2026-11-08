@@ -47,6 +47,21 @@ class MaterialSlotRollbackTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             material_utils.trim_appended_material_slots(slots, -1)
 
+    def test_finds_image_by_datablock_identity_not_node_position(self):
+        image_a = object()
+        image_b = object()
+        self.assertEqual(
+            material_utils.find_image_slot_index([image_a, image_b], image_b), 1
+        )
+
+    def test_missing_image_is_not_guessed(self):
+        self.assertEqual(
+            material_utils.find_image_slot_index([object()], object()), -1
+        )
+
+    def test_none_image_is_rejected(self):
+        self.assertEqual(material_utils.find_image_slot_index([], None), -1)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
