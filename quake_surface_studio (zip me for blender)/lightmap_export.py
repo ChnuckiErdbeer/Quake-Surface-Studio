@@ -1,0 +1,204 @@
+"""Pure helpers for exporting higher-density Quake BSPX lightmaps.
+
+BSPX LMSHIFT/LMOFFSET/LMSTYLE are used by QuakeSpasm-Spiked and FTE. The
+classic LIGHTING samples remain first in the standard lump; enhanced per-face
+samples are appended and addressed by LMOFFSET. This preserves the original
+dface_t offsets for engines that ignore the extensions.
+"""
+from __future__ import annotations
+
+import math
+import struct
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+SUPPORTED_RESOLUTIONS = (1, 2, 4, 8)
+MAX_SURFACE_LUXELS = 256
+NO_LIGHT_OFFSET = 0xFFFFFFFF
+
+
+def choose_luxel_grid(
+    s_values: Sequence[float],
+    t_values: Sequence[float],
+    working_resolution: int,
+    max_luxels: int = MAX_SURFACE_LUXELS,
+) -> tuple[int, int, int, int, int]:
+    """Choose the finest power-of-two luxel spacing supported by the atlas.
+
+    Returns (lmshift, s_min, t_min, width, height). A 1x working atlas uses
+    the classic 16-unit spacing (shift 4); 2x/4x/8x request progressively
+    denser 8/4/2-unit spacing. Oversized faces are conservatively coarsened.
+    """
+    if working_resolution not in SUPPORTED_RESOLUTIONS:
+        raise ValueError(f"Unsupported working lightmap resolution: {working_resolution}")
+    if not s_values or not t_values or len(s_values) != len(t_values):
+        raise ValueError("S/T projection coordinate arrays must be non-empty and equal length")
+    if max_luxels < 2:
+        raise ValueError("Maximum per-face luxel dimension must be at least 2")
+    values = tuple(float(v) for v in (*s_values, *t_values))
+    if not all(math.isfinite(v) for v in values):
+        raise ValueError("S/T projection coordinates must be finite")
+
+    target_shift = 4 - int(math.log2(working_resolution))
+    epsilon = 1e-7
+    for shift in range(target_shift, 5):
+        spacing = 1 << shift
+        s_min = math.floor(min(s_values) / spacing + epsilon) * spacing
+        s_max = math.ceil(max(s_values) / spacing - epsilon) * spacing
+        t_min = math.floor(min(t_values) / spacing + epsilon) * spacing
+        t_max = math.ceil(max(t_values) / spacing - epsilon) * spacing
+        width = (s_max - s_min) // spacing + 1
+        height = (t_max - t_min) // spacing + 1
+        if 1 <= width <= max_luxels and 1 <= height <= max_luxels:
+            return shift, int(s_min), int(t_min), int(width), int(height)
+    raise ValueError(
+        f"Face exceeds the {max_luxels}x{max_luxels} BSPX lightmap limit, even at 16 units per luxel"
+    )
+
+
+def bilinear_sample_rgba(
+    pixels: Sequence[float], width: int, height: int, x: float, y: float
+) -> tuple[float, float, float, float]:
+    """Bilinearly sample a bottom-up RGBA float buffer in pixel-index space."""
+    if width <= 0 or height <= 0 or len(pixels) != width * height * 4:
+        raise ValueError("RGBA buffer dimensions do not match its pixel data")
+    if not math.isfinite(x) or not math.isfinite(y):
+        raise ValueError("Pixel coordinates must be finite")
+    if x < -1e-6 or y < -1e-6 or x > width - 1 + 1e-6 or y > height - 1 + 1e-6:
+        raise ValueError("Pixel sample lies outside the atlas image")
+    x = min(max(x, 0.0), width - 1.0)
+    y = min(max(y, 0.0), height - 1.0)
+    x0, y0 = int(math.floor(x)), int(math.floor(y))
+    x1, y1 = min(width - 1, x0 + 1), min(height - 1, y0 + 1)
+    fx, fy = x - x0, y - y0
+
+    def rgba_at(px: int, py: int) -> tuple[float, float, float, float]:
+        offset = (py * width + px) * 4
+        return tuple(float(pixels[offset + channel]) for channel in range(4))
+
+    a = rgba_at(x0, y0)
+    b = rgba_at(x1, y0)
+    c = rgba_at(x0, y1)
+    d = rgba_at(x1, y1)
+    return tuple(
+        (a[i] * (1.0 - fx) + b[i] * fx) * (1.0 - fy)
+        + (c[i] * (1.0 - fx) + d[i] * fx) * fy
+        for i in range(4)
+    )
+
+
+def sample_face_rgb_from_atlas(
+    pixels: Sequence[float],
+    image_size: int,
+    working_resolution: int,
+    atlas_x: int,
+    atlas_y: int,
+    gutter: int,
+    pixels_per_luxel: int,
+    base_s_min: int,
+    base_t_min: int,
+    s_min: int,
+    t_min: int,
+    sample_width: int,
+    sample_height: int,
+    spacing: int,
+) -> bytes:
+    """Sample a face's luxel grid from the shared, bottom-up RGBA atlas.
+
+    atlas_x/y, gutter and pixels_per_luxel are in base-atlas pixels.
+    s_min/t_min and spacing describe the requested output luxel grid;
+    base_s_min/t_min describe the original 16-unit grid used by atlas UVs.
+    """
+    if image_size <= 0 or working_resolution not in SUPPORTED_RESOLUTIONS:
+        raise ValueError("Invalid image size or working resolution")
+    if min(atlas_x, atlas_y, gutter) < 0 or pixels_per_luxel <= 0:
+        raise ValueError("Invalid atlas rectangle metadata")
+    if sample_width <= 0 or sample_height <= 0 or spacing <= 0:
+        raise ValueError("Invalid output luxel grid")
+    if len(pixels) != image_size * image_size * 4:
+        raise ValueError("RGBA buffer dimensions do not match the atlas image")
+
+    pixel_block = pixels_per_luxel * working_resolution
+    origin_x = (atlas_x + gutter) * working_resolution
+    origin_y = (atlas_y + gutter) * working_resolution
+    output = bytearray()
+    for sy in range(sample_height):
+        t = t_min + sy * spacing
+        luxel_t = (t - base_t_min) / 16.0
+        center_y_from_top = origin_y + (luxel_t + 0.5) * pixel_block
+        pixel_y = image_size - center_y_from_top - 0.5
+        for sx in range(sample_width):
+            s = s_min + sx * spacing
+            luxel_s = (s - base_s_min) / 16.0
+            center_x = origin_x + (luxel_s + 0.5) * pixel_block
+            pixel_x = center_x - 0.5
+            red, green, blue, _alpha = bilinear_sample_rgba(
+                pixels, image_size, image_size, pixel_x, pixel_y
+            )
+            output.extend(
+                max(0, min(255, int(round(channel * 255.0))))
+                for channel in (red, green, blue)
+            )
+    return bytes(output)
+
+
+def build_lightmap_extension_data(
+    face_count: int,
+    face_records: Mapping[int, Mapping[str, Any]],
+    base_sample_count: int,
+) -> dict[str, bytes | int]:
+    """Build BSPX per-face arrays and appended mono/RGB sample payloads.
+
+    face_records maps original BSP face ID to {shift, width, height, rgb}.
+    rgb is exactly width*height RGB triplets in row-major face sample order.
+    Unlit faces receive shift=4, style=255 and LMOFFSET=0xffffffff.
+    """
+    if face_count < 0:
+        raise ValueError("Face count cannot be negative")
+    if base_sample_count < 0 or base_sample_count > NO_LIGHT_OFFSET:
+        raise ValueError("Classic lightmap sample count is outside uint32 range")
+
+    shifts = bytearray([4]) * face_count
+    offsets = bytearray()
+    styles = bytearray([255]) * face_count
+    appended_rgb = bytearray()
+    appended_mono = bytearray()
+    sample_offset = base_sample_count
+
+    for face_id in range(face_count):
+        record = face_records.get(face_id)
+        if record is None:
+            offset = NO_LIGHT_OFFSET
+        else:
+            shift = int(record.get("shift", -1))
+            width = int(record.get("width", 0))
+            height = int(record.get("height", 0))
+            rgb = bytes(record.get("rgb", b""))
+            if shift < 0 or shift > 4:
+                raise ValueError(f"Face {face_id} has invalid LMSHIFT value {shift}")
+            if width < 1 or height < 1 or width > MAX_SURFACE_LUXELS or height > MAX_SURFACE_LUXELS:
+                raise ValueError(f"Face {face_id} has invalid {width}x{height} lightmap dimensions")
+            if len(rgb) != width * height * 3:
+                raise ValueError(f"Face {face_id} RGB data does not match its {width}x{height} grid")
+            if sample_offset + width * height > NO_LIGHT_OFFSET:
+                raise ValueError("Enhanced RGBLIGHTING exceeds the uint32 sample-offset limit")
+            shifts[face_id] = shift
+            styles[face_id] = 0
+            offset = sample_offset
+            appended_rgb.extend(rgb)
+            for index in range(0, len(rgb), 3):
+                red, green, blue = rgb[index:index + 3]
+                appended_mono.append(max(0, min(255, int(round(
+                    0.2126 * red + 0.7152 * green + 0.0722 * blue
+                )))))
+            sample_offset += width * height
+        offsets.extend(struct.pack("<I", offset))
+
+    return {
+        "LMSHIFT": bytes(shifts),
+        "LMOFFSET": bytes(offsets),
+        "LMSTYLE": bytes(styles),
+        "RGBLIGHTING_APPEND": bytes(appended_rgb),
+        "LIGHTING_APPEND": bytes(appended_mono),
+        "enhanced_sample_count": sample_offset - base_sample_count,
+    }
