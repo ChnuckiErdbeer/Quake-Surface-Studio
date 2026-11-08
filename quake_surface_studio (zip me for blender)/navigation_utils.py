@@ -1,6 +1,5 @@
 """Blender-independent FPS navigation math and event helpers."""
 
-import math
 from math import hypot
 
 

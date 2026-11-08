@@ -2923,13 +2923,14 @@ class QSS_OT_fps_walk(Operator):
         # Observe releases even after the pointer crosses into the Sidebar.
         if event.type in self._move_keys and event.value == "RELEASE":
             self._keys_down.discard(event.type)
-            return {"PASS_THROUGH"}
+            return {"RUNNING_MODAL"} if in_area else {"PASS_THROUGH"}
 
-        # Record movement keys but pass the events onward. Blender remains the
-        # owner of its native MMB orbit modal and receives the full input stream.
+        # Consume only the navigation keys. Blender's MMB and MOUSEMOVE events
+        # are always passed through untouched to its native viewport operators.
         if event.type in self._move_keys and event.value == "PRESS":
             if in_area:
                 self._keys_down.add(event.type)
+                return {"RUNNING_MODAL"}
             return {"PASS_THROUGH"}
 
         # Deliberately do not handle MIDDLEMOUSE or MOUSEMOVE. Blender receives
@@ -6854,18 +6855,12 @@ def _cleanup_previous_registration():
                 window_manager.event_timer_remove(timer)
             except Exception:
                 pass
-        if session.get("looking", False):
-            try:
-                session["window"].cursor_modal_restore()
-            except Exception:
-                pass
         try:
             session["area"].header_text_set(None)
             session["area"].tag_redraw()
         except Exception:
             pass
         session["timer"] = None
-        session["looking"] = False
         session["finished"] = True
     _qss_fps_navigation_sessions.clear()
     _remove_qss_keymaps()
