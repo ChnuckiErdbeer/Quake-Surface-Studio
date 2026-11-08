@@ -5,6 +5,7 @@ Python and in CI against files exported by the add-on.
 """
 from __future__ import annotations
 
+import math
 import os
 import struct
 from typing import Optional
@@ -63,10 +64,10 @@ def _face_lightmap_dimensions(parsed: bsp.BSP29, face: tuple, spacing: int) -> t
         for index in vertex_ids
     ]
     epsilon = 1e-7
-    s_min = int(__import__("math").floor(min(s_values) / spacing + epsilon))
-    s_max = int(__import__("math").ceil(max(s_values) / spacing - epsilon))
-    t_min = int(__import__("math").floor(min(t_values) / spacing + epsilon))
-    t_max = int(__import__("math").ceil(max(t_values) / spacing - epsilon))
+    s_min = int(math.floor(min(s_values) / spacing + epsilon))
+    s_max = int(math.ceil(max(s_values) / spacing - epsilon))
+    t_min = int(math.floor(min(t_values) / spacing + epsilon))
+    t_max = int(math.ceil(max(t_values) / spacing - epsilon))
     return s_max - s_min + 1, t_max - t_min + 1
 
 
@@ -133,7 +134,7 @@ def _validate_enhanced_lightmaps(parsed: bsp.BSP29) -> Optional[int]:
     if rgb is None or len(rgb) % 3:
         _fail("enhanced lightmaps require a valid RGBLIGHTING BSPX lump")
     rgb_samples = len(rgb) // 3
-    max_end = 0
+    spans = []
     for face_index, face in enumerate(faces):
         shift = int(shifts[face_index])
         if shift > 4:
@@ -145,17 +146,31 @@ def _validate_enhanced_lightmaps(parsed: bsp.BSP29) -> Optional[int]:
                 _fail(f"face {face_index} has inconsistent no-light metadata")
             continue
         width, height = _face_lightmap_dimensions(parsed, face, 1 << shift)
+        if width > 256 or height > 256:
+            _fail(
+                f"face {face_index} enhanced lightmap is {width}x{height}; "
+                "BSPX LMSHIFT surfaces are limited to 256 luxels per axis"
+            )
         end = offset + width * height
         if end > rgb_samples:
             _fail(
                 f"face {face_index} enhanced lightmap ends at sample {end}, "
                 f"but RGBLIGHTING contains only {rgb_samples} samples"
             )
-        max_end = max(max_end, end)
-    if max_end != rgb_samples:
+        spans.append((offset, end, face_index))
+
+    cursor = 0
+    for start, end, face_index in sorted(spans):
+        if start != cursor:
+            _fail(
+                f"face {face_index} enhanced lightmap starts at sample {start}; "
+                f"expected contiguous sample offset {cursor} (overlap or gap)"
+            )
+        cursor = end
+    if cursor != rgb_samples:
         _fail(
-            f"enhanced RGBLIGHTING has {rgb_samples} samples but the highest "
-            f"referenced sample ends at {max_end}"
+            f"enhanced RGBLIGHTING has {rgb_samples} samples but face ranges "
+            f"consume {cursor}"
         )
     return rgb_samples
 
@@ -203,6 +218,16 @@ def validate_export_bytes(
 
     classic_required = _validate_classic_lightmaps(exported, "exported")
     enhanced_samples = _validate_enhanced_lightmaps(exported)
+    rgb_payload = exported.bspx_lumps.get("RGBLIGHTING")
+    if rgb_payload is not None and enhanced_samples is None:
+        if len(rgb_payload) % 3:
+            _fail("classic BSPX RGBLIGHTING payload is not a complete sequence of RGB samples")
+        classic_lighting = exported.lumps[bsp.LUMP_LIGHTING]
+        if classic_lighting and len(rgb_payload) != len(classic_lighting) * 3:
+            _fail(
+                "classic BSPX RGBLIGHTING must contain one RGB triplet per "
+                "classic LIGHTING sample"
+            )
 
     if lit_data is not None:
         classic_lighting = exported.lumps[bsp.LUMP_LIGHTING]
