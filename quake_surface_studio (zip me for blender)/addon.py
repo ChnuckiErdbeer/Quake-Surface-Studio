@@ -2936,6 +2936,875 @@ class QSS_OT_run_python_tests(Operator):
             return {'CANCELLED'}
 
 
+# Map-audit helpers. These deliberately use disposable Blender objects and files.
+def _qss_audit_add_check(record, name, status, detail=""):
+    record.setdefault("checks", []).append({
+        "name": str(name), "status": str(status).upper(), "detail": str(detail)
+    })
+    if str(status).upper() in {"FAIL", "TIMEOUT", "ERROR"}:
+        record["status"] = "FAIL"
+
+
+def _qss_audit_context_override(context, obj=None):
+    override = {
+        "scene": context.scene,
+        "view_layer": context.view_layer,
+    }
+    window = getattr(context, "window", None)
+    if window is not None:
+        override["window"] = window
+        screen = getattr(window, "screen", None)
+        areas = list(screen.areas) if screen else []
+        area = next((item for item in areas if item.type == "VIEW_3D"), None)
+        if area is not None:
+            override["area"] = area
+            region = next((item for item in area.regions if item.type == "WINDOW"), None)
+            if region is not None:
+                override["region"] = region
+    if obj is not None:
+        override.update({
+            "object": obj,
+            "active_object": obj,
+            "selected_objects": [obj],
+            "selected_editable_objects": [obj],
+        })
+    return override
+
+
+def _qss_audit_set_active(context, obj):
+    for selected in list(context.selected_objects):
+        try:
+            selected.select_set(False)
+        except Exception:
+            pass
+    obj.select_set(True)
+    context.view_layer.objects.active = obj
+
+
+def _qss_audit_call(context, operator, obj=None, **kwargs):
+    with context.temp_override(**_qss_audit_context_override(context, obj)):
+        return operator("EXEC_DEFAULT", **kwargs)
+
+
+def _qss_audit_external(record, label, result, log_directory):
+    status = result.get("status", "ERROR")
+    output = (result.get("stdout", "") or "")
+    errors = result.get("stderr", "") or ""
+    command = result.get("command", [])
+    log_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", label).strip("_") + ".log"
+    log_path = os.path.join(log_directory, log_name)
+    try:
+        with open(log_path, "w", encoding="utf-8", errors="replace") as handle:
+            handle.write("$ " + " ".join(str(part) for part in command) + "\n")
+            handle.write(output)
+            if errors:
+                handle.write("\n[stderr]\n" + errors)
+    except OSError as exc:
+        errors += f"\nCould not write tool log: {exc}"
+    _qss_audit_add_check(
+        record, label, status,
+        f"exit={result.get('returncode')} · {result.get('duration_seconds', 0):.2f}s · log={log_path}"
+        + (f" · {errors[-1000:]}" if errors else "")
+    )
+    record.setdefault("external_tools", []).append({
+        "name": label, "status": status, "returncode": result.get("returncode"),
+        "duration_seconds": result.get("duration_seconds", 0.0),
+        "command": command, "log": log_path, "output_tail": output[-6000:],
+        "error": errors[-2000:],
+    })
+
+
+def _qss_audit_run_external_tools(record, source_path, entry, game_dir, quake_root,
+                                  output_dir, timeout, run_light, run_compile):
+    tools_dir = _qss_abspath(getattr(bpy.context.scene, "qss_ericw_tools_dir", "") or "")
+    tools = external_tools.discover_tools(tools_dir)
+    log_dir = os.path.join(output_dir, "ericw_logs")
+    os.makedirs(log_dir, exist_ok=True)
+    if not tools_dir:
+        _qss_audit_add_check(record, "ericw-tools", "SKIP", "No ericw-tools folder configured.")
+        return
+
+    bspinfo = tools.get("bspinfo", "")
+    if bspinfo:
+        result = external_tools.run_command(bspinfo, [source_path], timeout=min(timeout, 60))
+        _qss_audit_external(record, "ericw bspinfo", result, log_dir)
+    else:
+        _qss_audit_add_check(record, "ericw bspinfo", "SKIP", "bspinfo executable not found in configured folder.")
+
+    if run_light:
+        light = tools.get("light", "")
+        if not light:
+            _qss_audit_add_check(record, "ericw light", "SKIP", "light executable not found.")
+        else:
+            copy_path = os.path.join(output_dir, "ericw_relight_input.bsp")
+            try:
+                shutil.copy2(source_path, copy_path)
+                args = ["-verbose", "-nocolor"]
+                if quake_root and os.path.isdir(quake_root):
+                    args.extend(["-basedir", quake_root])
+                if game_dir and os.path.isdir(game_dir):
+                    args.extend(["-gamedir", game_dir])
+                args.append(copy_path)
+                result = external_tools.run_command(light, args, timeout=timeout, cwd=output_dir)
+                _qss_audit_external(record, "ericw light disposable relight", result, log_dir)
+                if result.get("status") == "PASS" and os.path.isfile(copy_path):
+                    try:
+                        with open(copy_path, "rb") as handle:
+                            relit_data = handle.read()
+                        checked = export_validation.validate_export_bytes(relit_data, relit_data)
+                        _qss_audit_add_check(
+                            record, "ericw light output BSP parse", "PASS",
+                            f"faces={checked['faces']} textures={checked['textures']}"
+                        )
+                    except Exception as exc:
+                        _qss_audit_add_check(record, "ericw light output BSP parse", "FAIL", exc)
+            except Exception as exc:
+                _qss_audit_add_check(record, "ericw light disposable relight", "FAIL", exc)
+
+    if run_compile:
+        qbsp = tools.get("qbsp", "")
+        vis = tools.get("vis", "")
+        light = tools.get("light", "")
+        map_source = ""
+        if entry.get("kind") == "loose":
+            candidate = os.path.splitext(entry.get("file_path", ""))[0] + ".map"
+            if os.path.isfile(candidate):
+                map_source = candidate
+        if not map_source:
+            _qss_audit_add_check(
+                record, "ericw qbsp/vis/light pipeline", "SKIP",
+                "No sibling .map source file was found for this BSP."
+            )
+        elif not qbsp:
+            _qss_audit_add_check(record, "ericw qbsp/vis/light pipeline", "SKIP", "qbsp executable not found.")
+        else:
+            compiled = os.path.join(output_dir, "ericw_compiled.bsp")
+            args = ["-verbose"]
+            if quake_root and os.path.isdir(quake_root):
+                args.extend(["-basedir", quake_root])
+            if game_dir and os.path.isdir(game_dir):
+                args.extend(["-gamedir", game_dir])
+            args.extend([map_source, compiled])
+            qbsp_result = external_tools.run_command(qbsp, args, timeout=timeout, cwd=output_dir)
+            _qss_audit_external(record, "ericw qbsp compile", qbsp_result, log_dir)
+            if qbsp_result.get("status") == "PASS" and os.path.isfile(compiled):
+                if vis:
+                    result = external_tools.run_command(vis, ["-verbose", compiled],
+                                                        timeout=timeout, cwd=output_dir)
+                    _qss_audit_external(record, "ericw vis", result, log_dir)
+                else:
+                    _qss_audit_add_check(record, "ericw vis", "SKIP", "vis executable not found.")
+                if light:
+                    args = ["-verbose", "-nocolor"]
+                    if quake_root and os.path.isdir(quake_root):
+                        args.extend(["-basedir", quake_root])
+                    if game_dir and os.path.isdir(game_dir):
+                        args.extend(["-gamedir", game_dir])
+                    args.append(compiled)
+                    result = external_tools.run_command(light, args, timeout=timeout, cwd=output_dir)
+                    _qss_audit_external(record, "ericw light compiled MAP", result, log_dir)
+                else:
+                    _qss_audit_add_check(record, "ericw light compiled MAP", "SKIP", "light executable not found.")
+            elif qbsp_result.get("status") == "PASS":
+                _qss_audit_add_check(record, "ericw qbsp output", "FAIL", "qbsp returned success but no BSP was written.")
+
+
+def _qss_audit_map(context, entry, index, output_root, options):
+    record = {
+        "map": entry.get("path", ""),
+        "source_kind": entry.get("kind", ""),
+        "source_label": entry.get("source_label", ""),
+        "source_size": int(entry.get("length", 0)),
+        "status": "PASS",
+        "checks": [],
+        "metrics": {},
+        "external_tools": [],
+    }
+    output_dir = os.path.join(
+        output_root, f"{index:04d}_{re.sub(r'[^A-Za-z0-9_.-]+', '_', os.path.basename(entry.get('path', 'map')))}"
+    )
+    os.makedirs(output_dir, exist_ok=True)
+    original_active = context.view_layer.objects.active
+    original_selected = list(context.selected_objects)
+    original_engine = context.scene.render.engine
+    original_world = context.scene.world
+    original_mode = getattr(original_active, "mode", "OBJECT") if original_active else "OBJECT"
+    before_object_ids = {item.as_pointer() for item in bpy.data.objects}
+    before_mesh_ids = {item.as_pointer() for item in bpy.data.meshes}
+    before_material_ids = {item.as_pointer() for item in bpy.data.materials}
+    before_image_ids = {item.as_pointer() for item in bpy.data.images}
+    imported_obj = None
+    test_obj = None
+    source_path = ""
+    try:
+        # Parse the source before Blender import; this isolates malformed map files.
+        data = quake_paths.read_map_entry(entry)
+        structure = export_validation.validate_export_bytes(data, data)
+        record["metrics"].update({
+            "bsp_faces": structure.get("faces"),
+            "bsp_textures": structure.get("textures"),
+            "bsp_texinfos": structure.get("texinfos"),
+            "classic_lighting_bytes": structure.get("classic_lighting_bytes"),
+            "bspx_lumps": structure.get("bspx_lumps", []),
+        })
+        _qss_audit_add_check(
+            record, "BSP29 structural / reference / lightmap validation", "PASS",
+            f"faces={structure.get('faces')} · textures={structure.get('textures')} · "
+            f"lighting={structure.get('classic_lighting_bytes')} bytes"
+        )
+
+        cache_dir = bpy.utils.user_resource("DATAFILES", path=os.path.join("qss", "maps"), create=True)
+        source_path = quake_paths.extract_map(entry, cache_dir)
+        record["materialized_source"] = source_path
+
+        _qss_audit_run_external_tools(
+            record, source_path, entry, _qss_abspath(context.scene.qss_game_dir or ""),
+            _qss_abspath(context.scene.qss_quake_root or ""), output_dir,
+            int(options.get("timeout", 300)), bool(options.get("ericw_light")),
+            bool(options.get("ericw_compile")),
+        )
+
+        result = _qss_audit_call(
+            context, bpy.ops.qss.import_bsp, None,
+            filepath=source_path,
+            game_dir=context.scene.qss_game_dir,
+            unit_scale=context.scene.qss_quake_unit_scale,
+            lightmap_resolution="1",
+        )
+        new_maps = [
+            item for item in bpy.data.objects
+            if item.as_pointer() not in before_object_ids and _qss_is_map_object(item)
+        ]
+        if "FINISHED" not in result or not new_maps:
+            raise RuntimeError(f"QSS import did not produce a BSP object (operator result: {result}).")
+        imported_obj = next(
+            (item for item in new_maps if os.path.abspath(item.get("qss_source_path", "")) == os.path.abspath(source_path)),
+            new_maps[-1],
+        )
+        imported_obj["qss_game_map_path"] = entry.get("path", "")
+        mesh = imported_obj.data
+        texture_uv = mesh.uv_layers.get("Quake_Texture_UV")
+        light_uv = mesh.uv_layers.get("Quake_Lightmap_UV")
+        face_id = mesh.attributes.get("qss_bsp_face_id")
+        texinfo_id = mesh.attributes.get("qss_bsp_texinfo_id")
+        total_faces = len(mesh.polygons)
+        bad_material_faces = sum(
+            1 for poly in mesh.polygons
+            if poly.material_index < 0 or poly.material_index >= len(mesh.materials)
+        )
+        record["metrics"].update({
+            "mesh_faces": total_faces,
+            "vertices": len(mesh.vertices),
+            "loops": len(mesh.loops),
+            "materials": len(mesh.materials),
+            "lights": int(imported_obj.get("qss_light_entity_count", 0)),
+            "lightmap_faces": int(imported_obj.get("qss_lightmap_faces", 0)),
+            "texture_uv_entries": len(texture_uv.data) if texture_uv else 0,
+            "lightmap_uv_entries": len(light_uv.data) if light_uv else 0,
+            "source_has_player_start": bool(imported_obj.get("qss_has_player_start")),
+            "missing_textures": str(imported_obj.get("qss_missing_texture_names", "")),
+        })
+        _qss_audit_add_check(record, "QSS BSP import", "PASS",
+                             f"{total_faces} Blender faces · {len(mesh.materials)} material slots")
+        _qss_audit_add_check(
+            record, "Face/material/UV metadata",
+            "PASS" if (total_faces > 0 and face_id is not None and texinfo_id is not None
+                       and len(face_id.data) == total_faces and len(texinfo_id.data) == total_faces
+                       and texture_uv is not None and len(texture_uv.data) == len(mesh.loops)
+                       and bad_material_faces == 0) else "FAIL",
+            f"faces={total_faces} · face_ids={len(face_id.data) if face_id else 0} · "
+            f"texinfo_ids={len(texinfo_id.data) if texinfo_id else 0} · "
+            f"texture_uv={len(texture_uv.data) if texture_uv else 0}/{len(mesh.loops)} · "
+            f"invalid_material_faces={bad_material_faces}"
+        )
+        lightmap_name = imported_obj.get("qss_lightmap_image_name", "")
+        original_name = imported_obj.get("qss_original_lightmap_backup", "")
+        lightmap_image = bpy.data.images.get(lightmap_name) if lightmap_name else None
+        source_image = bpy.data.images.get(original_name) if original_name else None
+        _qss_audit_add_check(
+            record, "Original and editable lightmap images",
+            "PASS" if (lightmap_image is not None and source_image is not None
+                       and lightmap_image.size[0] > 0 and lightmap_image.size[1] > 0) else "FAIL",
+            f"working={tuple(lightmap_image.size) if lightmap_image else 'missing'} · "
+            f"original_snapshot={'present' if source_image else 'missing'}"
+        )
+
+        # Exercise the public lighting-preview operators and ensure they do not
+        # mutate the immutable imported atlas.
+        _qss_audit_set_active(context, imported_obj)
+        preview_checks = [
+            ("Original lightmap preview", bpy.ops.qss.preview_source_lightmaps, "source"),
+            ("Working lightmap preview", bpy.ops.qss.preview_bsp_lightmaps, "baked"),
+        ]
+        if source_image is not None:
+            source_hash_before = _image_hash(source_image)
+        else:
+            source_hash_before = ""
+        for label, operator, expected_mode in preview_checks:
+            op_result = _qss_audit_call(context, operator, imported_obj)
+            good = ("FINISHED" in op_result and imported_obj.get("qss_preview_mode") == expected_mode)
+            _qss_audit_add_check(record, label, "PASS" if good else "FAIL",
+                                 f"operator={op_result} · mode={imported_obj.get('qss_preview_mode')}")
+        if int(imported_obj.get("qss_light_entity_count", 0)) > 0:
+            op_result = _qss_audit_call(context, bpy.ops.qss.preview_imported_lights, imported_obj)
+            good = ("FINISHED" in op_result and imported_obj.get("qss_preview_mode") == "realtime")
+            _qss_audit_add_check(record, "Live imported-light preview", "PASS" if good else "FAIL",
+                                 f"operator={op_result} · mode={imported_obj.get('qss_preview_mode')}")
+            # Return through the public source-preview operator so QSS restores
+            # the user's render engine/world state before the temporary import is removed.
+            _qss_audit_call(context, bpy.ops.qss.preview_source_lightmaps, imported_obj)
+        else:
+            _qss_audit_add_check(record, "Live imported-light preview", "SKIP",
+                                 "This map contains no imported point/spot lights.")
+        if source_image is not None:
+            unchanged = _image_hash(source_image) == source_hash_before
+            _qss_audit_add_check(record, "Preview source atlas immutability",
+                                 "PASS" if unchanged else "FAIL",
+                                 "Original RGB snapshot unchanged." if unchanged else "Original RGB snapshot changed.")
+        op_result = _qss_audit_call(context, bpy.ops.qss.refresh_lightmap_preview, imported_obj)
+        _qss_audit_add_check(record, "Repair lightmap material links",
+                             "PASS" if "FINISHED" in op_result else "FAIL",
+                             f"operator={op_result} · valid_uv_faces={imported_obj.get('qss_lightmap_uv_valid_faces', 0)}")
+
+        # Optional direct light solver. It is deliberately opt-in because each
+        # real BSP luxel may require visibility rays against the imported mesh.
+        if options.get("quake_bake"):
+            if int(imported_obj.get("qss_light_entity_count", 0)) > 0:
+                op_result = _qss_audit_call(context, bpy.ops.qss.quake_direct_bake, imported_obj)
+                baked = ("FINISHED" in op_result
+                         and imported_obj.get("qss_lightmap_source") == "quake_direct_cpu_bake")
+                _qss_audit_add_check(record, "Quake Direct Lightmap Solver",
+                                     "PASS" if baked else "FAIL",
+                                     f"operator={op_result} · luxels={imported_obj.get('qss_last_quake_bake_luxels', 'n/a')} · "
+                                     f"lit={imported_obj.get('qss_last_quake_bake_lit_luxels', 'n/a')} · "
+                                     f"rays={imported_obj.get('qss_last_quake_bake_ray_tests', 'n/a')} · "
+                                     f"error={imported_obj.get('qss_last_quake_bake_error', '')}")
+                restore_result = _qss_audit_call(context, bpy.ops.qss.restore_original_lightmap, imported_obj)
+                _qss_audit_add_check(record, "Restore original after Quake bake",
+                                     "PASS" if "FINISHED" in restore_result else "FAIL",
+                                     f"operator={restore_result}")
+            else:
+                _qss_audit_add_check(record, "Quake Direct Lightmap Solver", "SKIP",
+                                     "No Quake light entities are present.")
+        else:
+            _qss_audit_add_check(record, "Quake Direct Lightmap Solver", "SKIP",
+                                 "Enable the optional full lighting bake in QSS audit settings.")
+
+        # Clone the imported object and mesh: selection, hide/reveal, detachment
+        # and texture-paint mode transitions must never alter the imported source.
+        test_obj = imported_obj.copy()
+        test_obj.data = imported_obj.data.copy()
+        # Copy material datablocks too: paint-target and node changes on the test
+        # object must not leak into the imported reference object.
+        material_copies = {}
+        for slot_index, material in enumerate(list(test_obj.data.materials)):
+            if material is None:
+                continue
+            pointer = material.as_pointer()
+            if pointer not in material_copies:
+                material_copies[pointer] = material.copy()
+            test_obj.data.materials[slot_index] = material_copies[pointer]
+        test_obj.name = "QSS_AUDIT_" + os.path.basename(entry.get("path", "map"))
+        context.scene.collection.objects.link(test_obj)
+        _qss_audit_set_active(context, test_obj)
+
+        view3d = next((area for area in context.screen.areas if area.type == "VIEW_3D"), None) if context.screen else None
+        if view3d is not None:
+            try:
+                with context.temp_override(**_qss_audit_context_override(context, test_obj)):
+                    bpy.ops.object.mode_set(mode="EDIT")
+                    import bmesh
+                    bm = bmesh.from_edit_mesh(test_obj.data)
+                    bm.faces.ensure_lookup_table()
+                    if bm.faces:
+                        for face in bm.faces:
+                            face.select_set(False)
+                        bm.faces[0].select_set(True)
+                        bm.faces.active = bm.faces[0]
+                        bmesh.update_edit_mesh(test_obj.data, loop_triangles=False, destructive=False)
+                        isolate_result = bpy.ops.qss.isolate_faces("EXEC_DEFAULT")
+                        hidden_count = sum(1 for face in bm.faces if face.hide)
+                        reveal_result = bpy.ops.qss.reveal_faces("EXEC_DEFAULT")
+                        revealed_count = sum(1 for face in bm.faces if face.hide)
+                        good = ("FINISHED" in isolate_result and "FINISHED" in reveal_result and revealed_count == 0)
+                        _qss_audit_add_check(
+                            record, "Isolate / reveal selected faces", "PASS" if good else "FAIL",
+                            f"isolate={isolate_result} · hidden_after_isolate={hidden_count} · "
+                            f"reveal={reveal_result} · hidden_after_reveal={revealed_count}"
+                        )
+                    else:
+                        _qss_audit_add_check(record, "Isolate / reveal selected faces", "SKIP", "Mesh has no faces.")
+                    bpy.ops.object.mode_set(mode="OBJECT")
+                    if test_obj.data.polygons:
+                        for poly in test_obj.data.polygons:
+                            poly.select = False
+                        test_obj.data.polygons[0].select = True
+                        frame_result = bpy.ops.qss.frame_selection("EXEC_DEFAULT")
+                        _qss_audit_add_check(record, "Focus selected face", 
+                                             "PASS" if "FINISHED" in frame_result else "FAIL",
+                                             f"operator={frame_result}")
+                    else:
+                        _qss_audit_add_check(record, "Focus selected face", "SKIP", "Mesh has no faces.")
+                    if test_obj.get("qss_has_player_start"):
+                        spawn_result = bpy.ops.qss.goto_player_start("EXEC_DEFAULT")
+                        _qss_audit_add_check(record, "Go to info_player_start",
+                                             "PASS" if "FINISHED" in spawn_result else "FAIL",
+                                             f"operator={spawn_result}")
+                    else:
+                        _qss_audit_add_check(record, "Go to info_player_start", "SKIP",
+                                             "No info_player_start was imported.")
+            except Exception as exc:
+                try:
+                    if test_obj.mode != "OBJECT":
+                        bpy.ops.object.mode_set(mode="OBJECT")
+                except Exception:
+                    pass
+                _qss_audit_add_check(record, "Viewport navigation operations", "FAIL",
+                                     f"{exc}\n{traceback.format_exc()[-3000:]}")
+        else:
+            _qss_audit_add_check(record, "Viewport navigation operations", "SKIP",
+                                 "No VIEW_3D area is available in this Blender session.")
+
+        # Face-local detach and paint-mode transitions are run on the disposable clone.
+        if test_obj.mode != "OBJECT":
+            with context.temp_override(**_qss_audit_context_override(context, test_obj)):
+                bpy.ops.object.mode_set(mode="OBJECT")
+        candidate_face = None
+        detached = False
+        for poly in test_obj.data.polygons:
+            slot = int(poly.material_index)
+            if 0 <= slot < len(test_obj.data.materials):
+                material = test_obj.data.materials[slot]
+                if material and _find_image(material, "base_texture") is not None:
+                    candidate_face = int(poly.index)
+                    break
+        if candidate_face is None:
+            _qss_audit_add_check(record, "Detach selected face", "SKIP",
+                                 "No face with an imported paintable base texture was found.")
+        else:
+            for poly in test_obj.data.polygons:
+                poly.select = False
+            test_obj.data.polygons[candidate_face].select = True
+            material_count_before = len(test_obj.data.materials)
+            detach_result = _qss_audit_call(context, bpy.ops.qss.detach_selected_faces, test_obj)
+            detached_index = int(test_obj.data.polygons[candidate_face].material_index)
+            detached_material = (test_obj.data.materials[detached_index]
+                                 if 0 <= detached_index < len(test_obj.data.materials) else None)
+            detached = ("FINISHED" in detach_result and len(test_obj.data.materials) > material_count_before
+                        and detached_material is not None
+                        and bool(detached_material.get("qss_face_local_projection")))
+            _qss_audit_add_check(record, "Detach selected face", "PASS" if detached else "FAIL",
+                                 f"operator={detach_result} · material_slots={material_count_before}->"
+                                 f"{len(test_obj.data.materials)} · face_local={bool(detached_material and detached_material.get('qss_face_local_projection'))}")
+            if detached and view3d is not None:
+                try:
+                    paint_result = _qss_audit_call(context, bpy.ops.qss.activate_texture_paint, test_obj)
+                    paint_good = "FINISHED" in paint_result and test_obj.mode == "TEXTURE_PAINT"
+                    _qss_audit_add_check(record, "Enter texture paint on detached face",
+                                         "PASS" if paint_good else "FAIL",
+                                         f"operator={paint_result} · mode={test_obj.mode}")
+                    if test_obj.mode != "OBJECT":
+                        with context.temp_override(**_qss_audit_context_override(context, test_obj)):
+                            bpy.ops.object.mode_set(mode="OBJECT")
+                except Exception as exc:
+                    _qss_audit_add_check(record, "Enter texture paint on detached face", "FAIL", exc)
+            elif detached:
+                _qss_audit_add_check(record, "Enter texture paint on detached face", "SKIP",
+                                     "Requires a VIEW_3D area.")
+        # The lightmap paint operator requires a selected face with a valid luxel island.
+        has_data = test_obj.data.attributes.get("qss_lm_has_data")
+        lit_face = None
+        if has_data is not None and len(has_data.data) == len(test_obj.data.polygons):
+            lit_face = next((i for i, item in enumerate(has_data.data) if bool(item.value)), None)
+        if lit_face is not None and view3d is not None:
+            for poly in test_obj.data.polygons:
+                poly.select = False
+            test_obj.data.polygons[int(lit_face)].select = True
+            try:
+                light_paint_result = _qss_audit_call(context, bpy.ops.qss.activate_lightmap_paint, test_obj)
+                light_paint_good = "FINISHED" in light_paint_result and test_obj.mode == "TEXTURE_PAINT"
+                _qss_audit_add_check(record, "Enter lightmap paint", "PASS" if light_paint_good else "FAIL",
+                                     f"operator={light_paint_result} · mode={test_obj.mode}")
+            except Exception as exc:
+                _qss_audit_add_check(record, "Enter lightmap paint", "FAIL", exc)
+            finally:
+                try:
+                    if test_obj.mode != "OBJECT":
+                        with context.temp_override(**_qss_audit_context_override(context, test_obj)):
+                            bpy.ops.object.mode_set(mode="OBJECT")
+                except Exception:
+                    pass
+        else:
+            _qss_audit_add_check(record, "Enter lightmap paint", "SKIP",
+                                 "No lightmapped face or no VIEW_3D area.")
+
+        # Classic export exercises the same public operator used by the user.
+        _qss_audit_set_active(context, imported_obj)
+        classic_path = os.path.join(output_dir, "qss_classic_export.bsp")
+        export_result = _qss_audit_call(
+            context, bpy.ops.qss.export_bsp, imported_obj,
+            filepath=classic_path, lightmap_export_mode="CLASSIC"
+        )
+        if "FINISHED" in export_result and os.path.isfile(classic_path):
+            try:
+                validation = export_validation.validate_export_pair(source_path, classic_path)
+                _qss_audit_add_check(record, "Classic BSP29 export + integrity validator", "PASS",
+                                     f"faces={validation.get('faces')} · textures={validation.get('textures')} · "
+                                     f"lit={validation.get('external_lit')}")
+                record["classic_export"] = classic_path
+            except Exception as exc:
+                _qss_audit_add_check(record, "Classic BSP29 export + integrity validator", "FAIL", exc)
+        else:
+            _qss_audit_add_check(record, "Classic BSP29 export + integrity validator", "FAIL",
+                                 f"export operator={export_result} · file_exists={os.path.isfile(classic_path)}")
+
+        # Export the detached clone too, proving new face-local materials can be serialized.
+        if detached:
+            detached_path = os.path.join(output_dir, "qss_detached_export.bsp")
+            try:
+                _export_object(test_obj, detached_path, "CLASSIC")
+                validation = export_validation.validate_export_pair(source_path, detached_path)
+                _qss_audit_add_check(record, "Detached-face BSP export + integrity validator", "PASS",
+                                     f"faces={validation.get('faces')} · textures={validation.get('textures')}")
+                record["detached_export"] = detached_path
+            except Exception as exc:
+                _qss_audit_add_check(record, "Detached-face BSP export + integrity validator", "FAIL", exc)
+
+        if options.get("enhanced_export"):
+            enhanced_path = os.path.join(output_dir, "qss_enhanced_export.bsp")
+            try:
+                _export_object(imported_obj, enhanced_path, "ENHANCED")
+                validation = export_validation.validate_export_pair(source_path, enhanced_path)
+                _qss_audit_add_check(record, "Enhanced BSPX export + integrity validator", "PASS",
+                                     f"RGB samples={validation.get('enhanced_lighting_samples')}")
+                record["enhanced_export"] = enhanced_path
+            except Exception as exc:
+                message = str(exc)
+                expected_limit = any(token in message.lower() for token in (
+                    "enhanced", "bspx", "decoupled_lm", "texinfo projection", "lmshift"
+                ))
+                _qss_audit_add_check(record, "Enhanced BSPX export",
+                                     "SKIP" if expected_limit else "FAIL", message)
+        else:
+            _qss_audit_add_check(record, "Enhanced BSPX export", "SKIP",
+                                 "Disabled in QSS audit settings.")
+
+        record["result_counts"] = {
+            state: sum(1 for check in record["checks"] if check["status"] == state)
+            for state in ("PASS", "FAIL", "SKIP", "TIMEOUT", "ERROR", "MISSING")
+        }
+        if any(check["status"] == "FAIL" for check in record["checks"]):
+            record["status"] = "FAIL"
+        return record
+
+    except Exception as exc:
+        _qss_audit_add_check(record, "Map audit runner", "FAIL",
+                             f"{exc}\n{traceback.format_exc()[-5000:]}")
+        record["status"] = "FAIL"
+        return record
+    finally:
+        # Restore preview/render state before deleting the temporary QSS object.
+        if imported_obj is not None:
+            try:
+                if bpy.data.objects.get(imported_obj.name) is not None:
+                    _qss_audit_set_active(context, imported_obj)
+                    if bpy.data.images.get(imported_obj.get("qss_original_lightmap_backup", "")):
+                        _qss_audit_call(context, bpy.ops.qss.preview_source_lightmaps, imported_obj)
+            except Exception:
+                pass
+        for obj in list(bpy.data.objects):
+            if obj.as_pointer() not in before_object_ids:
+                try:
+                    bpy.data.objects.remove(obj, do_unlink=True)
+                except Exception:
+                    pass
+        # Remove only datablocks created by this map's import/tests and now orphaned.
+        for collection, previous in (
+            (bpy.data.meshes, before_mesh_ids),
+            (bpy.data.materials, before_material_ids),
+            (bpy.data.images, before_image_ids),
+        ):
+            for block in list(collection):
+                if block.as_pointer() not in previous and getattr(block, "users", 0) == 0:
+                    try:
+                        collection.remove(block)
+                    except Exception:
+                        pass
+        try:
+            context.scene.render.engine = original_engine
+            context.scene.world = original_world
+            for selected in list(context.selected_objects):
+                selected.select_set(False)
+            for selected in original_selected:
+                if bpy.data.objects.get(selected.name) is not None:
+                    selected.select_set(True)
+            if original_active is not None and bpy.data.objects.get(original_active.name) is not None:
+                context.view_layer.objects.active = original_active
+                if original_mode == "EDIT" and original_active.type == "MESH":
+                    with context.temp_override(**_qss_audit_context_override(context, original_active)):
+                        bpy.ops.object.mode_set(mode="EDIT")
+        except Exception:
+            pass
+
+
+class QSS_OT_run_map_audit(Operator):
+    bl_idname = "qss.run_map_audit"
+    bl_label = "Run Full Map Audit"
+    bl_description = "Import every discovered map, exercise QSS workflows, export/validate, and capture optional ericw-tools diagnostics"
+    bl_options = {"REGISTER"}
+
+    @classmethod
+    def poll(cls, context):
+        return bool(context.scene and getattr(context.scene, "qss_game_dir", ""))
+
+    def _begin(self, context):
+        game_dir = _qss_abspath(context.scene.qss_game_dir or "")
+        self._entries = quake_paths.discover_maps(game_dir)
+        if not self._entries:
+            self.report({"WARNING"}, "No loose or PAK maps found in the active game folder.")
+            return False
+        root_dir = bpy.utils.user_resource("DATAFILES", path=os.path.join("qss", "audits"), create=True)
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        self._output_root = os.path.join(root_dir, "Map_Audit_" + stamp)
+        os.makedirs(self._output_root, exist_ok=True)
+        self._index = 0
+        self._records = []
+        self._options = {
+            "enhanced_export": bool(context.scene.qss_audit_enhanced_export),
+            "quake_bake": bool(context.scene.qss_audit_quake_bake),
+            "ericw_light": bool(context.scene.qss_audit_ericw_light),
+            "ericw_compile": bool(context.scene.qss_audit_ericw_compile),
+            "timeout": int(context.scene.qss_audit_timeout),
+        }
+        self._metadata = {
+            "qss_version": ".".join(str(part) for part in ADDON_VERSION),
+            "blender_version": bpy.app.version_string,
+            "game_dir": game_dir,
+            "quake_root": _qss_abspath(context.scene.qss_quake_root or ""),
+            "ericw_tools_dir": _qss_abspath(context.scene.qss_ericw_tools_dir or ""),
+            "ironwail_executable": _qss_abspath(context.scene.qss_ironwail_executable or ""),
+            "options": dict(self._options),
+            "started": stamp,
+            "discovered_maps": len(self._entries),
+        }
+        # Run the pure-Python regression suite once per audit, not once per map.
+        try:
+            test_result = bpy.ops.qss.run_python_tests("EXEC_DEFAULT")
+            text_block = bpy.data.texts.get("QSS_Python_Test_Report")
+            test_text = text_block.as_string() if text_block else ""
+            status = "PASS" if "failed, 0 errors" in test_text and "0 failed" in test_text else (
+                "PASS" if "0 failed, 0 errors" in test_text else "FAIL"
+            )
+            self._global_checks = [{
+                "name": "QSS standalone Python test suite", "status": status,
+                "detail": f"operator={test_result}; report=QSS_Python_Test_Report; {test_text.splitlines()[0] if test_text else 'no report'}"
+            }]
+        except Exception as exc:
+            self._global_checks = [{
+                "name": "QSS standalone Python test suite", "status": "FAIL", "detail": str(exc)
+            }]
+        return True
+
+    def _save_report(self, context, cancelled=False):
+        from datetime import datetime
+        report = {
+            "schema_version": 1,
+            "metadata": dict(self._metadata),
+            "global_checks": list(self._global_checks),
+            "cancelled": bool(cancelled),
+            "completed": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "maps": list(self._records),
+        }
+        counts = {"PASS": 0, "FAIL": 0, "SKIP": 0}
+        for item in self._records:
+            counts[item.get("status", "FAIL")] = counts.get(item.get("status", "FAIL"), 0) + 1
+        report["summary"] = {
+            "maps_total": len(self._entries),
+            "maps_processed": len(self._records),
+            "maps_passed": counts["PASS"],
+            "maps_failed": counts["FAIL"],
+            "maps_cancelled_or_remaining": max(0, len(self._entries) - len(self._records)),
+        }
+        report_json = os.path.join(self._output_root, "report.json")
+        with open(report_json, "w", encoding="utf-8") as handle:
+            json.dump(report, handle, indent=2, ensure_ascii=False, default=str)
+            handle.write("\n")
+        lines = [
+            "QUAKE SURFACE STUDIO — AUTOMATED MAP AUDIT",
+            f"QSS {self._metadata['qss_version']} · Blender {self._metadata['blender_version']}",
+            f"Game: {self._metadata['game_dir']}",
+            f"Maps: {report['summary']['maps_processed']}/{report['summary']['maps_total']} processed · "
+            f"{counts['PASS']} map pass · {counts['FAIL']} map fail",
+            f"Cancelled: {bool(cancelled)}",
+            "",
+            "GLOBAL CHECKS",
+        ]
+        lines.extend(f"{item['status']:6} {item['name']}: {item['detail']}" for item in self._global_checks)
+        for item in self._records:
+            lines.extend(["", "=" * 72, f"{item['status']}  {item['map']} [{item['source_label']}]"])
+            if item.get("metrics"):
+                lines.append("METRICS " + json.dumps(item["metrics"], ensure_ascii=False, default=str))
+            for check in item.get("checks", []):
+                lines.append(f"{check['status']:7} {check['name']}: {check['detail']}")
+        report_text = "\n".join(lines) + "\n"
+        report_path = os.path.join(self._output_root, "report.txt")
+        with open(report_path, "w", encoding="utf-8", errors="replace") as handle:
+            handle.write(report_text)
+        _qss_write_text_report("QSS_Map_Audit_Report", report_text)
+        _qss_write_text_report("QSS_Map_Audit_JSON", json.dumps(report, indent=2, ensure_ascii=False, default=str))
+        self._report_json = report_json
+        self._report_text = report_path
+        return report
+
+    def _process_next(self, context):
+        index = self._index
+        entry = self._entries[index]
+        try:
+            record = _qss_audit_map(context, entry, index + 1, self._output_root, self._options)
+        except Exception as exc:
+            record = {
+                "map": entry.get("path", ""), "status": "FAIL",
+                "checks": [{"name": "Unhandled map audit exception", "status": "FAIL",
+                            "detail": f"{exc}\n{traceback.format_exc()[-5000:]}"}],
+            }
+        self._records.append(record)
+        self._index += 1
+        # Checkpoint after every map, so a Blender crash cannot erase completed work.
+        try:
+            with open(os.path.join(self._output_root, "progress.json"), "w", encoding="utf-8") as handle:
+                json.dump({"metadata": self._metadata, "processed": self._index,
+                           "total": len(self._entries), "maps": self._records},
+                          handle, indent=2, ensure_ascii=False, default=str)
+        except OSError as exc:
+            print(f"QSS audit checkpoint warning: {exc}")
+
+    def invoke(self, context, event):
+        if not self._begin(context):
+            return {"CANCELLED"}
+        wm = context.window_manager
+        wm.progress_begin(0, len(self._entries))
+        self._timer = wm.event_timer_add(0.15, window=context.window)
+        wm.modal_handler_add(self)
+        self.report({"INFO"}, f"QSS map audit started: {len(self._entries)} maps. Press Esc to stop after the current map.")
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        if not self._begin(context):
+            return {"CANCELLED"}
+        wm = context.window_manager
+        wm.progress_begin(0, len(self._entries))
+        try:
+            while self._index < len(self._entries):
+                self._process_next(context)
+                wm.progress_update(self._index)
+        finally:
+            wm.progress_end()
+        report = self._save_report(context, cancelled=False)
+        summary = report["summary"]
+        self.report({"INFO"} if summary["maps_failed"] == 0 else {"WARNING"},
+                    f"Audit finished: {summary['maps_passed']} passed, {summary['maps_failed']} failed. "
+                    f"Report: {self._report_text}")
+        return {"FINISHED"}
+
+    def modal(self, context, event):
+        wm = context.window_manager
+        if event.type == "ESC":
+            wm.event_timer_remove(self._timer)
+            wm.progress_end()
+            report = self._save_report(context, cancelled=True)
+            self.report({"WARNING"}, f"Audit stopped after {len(self._records)} maps. Partial report: {self._report_text}")
+            return {"CANCELLED"}
+        if event.type == "TIMER":
+            if self._index < len(self._entries):
+                self._process_next(context)
+                wm.progress_update(self._index)
+            if self._index >= len(self._entries):
+                wm.event_timer_remove(self._timer)
+                wm.progress_end()
+                report = self._save_report(context, cancelled=False)
+                summary = report["summary"]
+                self.report({"INFO"} if summary["maps_failed"] == 0 else {"WARNING"},
+                            f"Audit finished: {summary['maps_passed']} passed, {summary['maps_failed']} failed. "
+                            f"Report: {self._report_text}")
+                return {"FINISHED"}
+        return {"RUNNING_MODAL"}
+
+
+class QSS_OT_launch_ironwail(Operator):
+    bl_idname = "qss.launch_ironwail"
+    bl_label = "Launch Ironwail"
+    bl_description = "Launch Ironwail with developer output and load the active map or a selected demo"
+
+    demo_file: StringProperty(name="Demo file (optional)", subtype="FILE_PATH", default="")
+    timedemo: BoolProperty(name="Timedemo", default=False)
+
+    @classmethod
+    def poll(cls, context):
+        scene = context.scene
+        executable = _qss_abspath(getattr(scene, "qss_ironwail_executable", "") or "")
+        target = bool(getattr(scene, "qss_ironwail_demo", "") or _qss_is_map_object(context.object))
+        return bool(executable and os.path.isfile(executable)
+                    and scene.qss_game_dir and os.path.isdir(_qss_abspath(scene.qss_game_dir))
+                    and target)
+
+    def invoke(self, context, event):
+        self.demo_file = getattr(context.scene, "qss_ironwail_demo", "") or ""
+        return context.window_manager.invoke_props_dialog(self, width=620)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "demo_file")
+        layout.prop(self, "timedemo")
+        layout.label(text="Leave Demo file empty to launch the active imported map.", icon="INFO")
+        layout.label(text="Developer console output is captured to a QSS log file.", icon="TEXT")
+
+    def execute(self, context):
+        scene = context.scene
+        executable = _qss_abspath(scene.qss_ironwail_executable or "")
+        quake_root = _qss_abspath(scene.qss_quake_root or "")
+        game_dir = _qss_abspath(scene.qss_game_dir or "")
+        demo_file = bpy.path.abspath(self.demo_file) if self.demo_file else ""
+        try:
+            if not executable or not os.path.isfile(executable):
+                raise FileNotFoundError("Set a valid Ironwail executable in Project & Source.")
+            if demo_file:
+                scene.qss_ironwail_demo = demo_file
+                _qss_save_config(scene)
+                command = external_tools.build_ironwail_command(
+                    executable, quake_root, game_dir,
+                    demo_file=demo_file, timedemo=bool(self.timedemo), developer_mode=True
+                )
+                label = os.path.basename(demo_file)
+            else:
+                obj = context.object
+                if not _qss_is_map_object(obj):
+                    raise RuntimeError("Select an imported Quake BSP or choose a demo file.")
+                virtual_path = str(obj.get("qss_game_map_path", "") or "")
+                if not virtual_path:
+                    source = os.path.abspath(obj.get("qss_source_path", ""))
+                    try:
+                        virtual_path = os.path.relpath(source, game_dir).replace(os.sep, "/")
+                    except ValueError:
+                        virtual_path = ""
+                if not virtual_path or virtual_path.startswith(".."):
+                    raise RuntimeError("The active BSP is outside the configured game directory and has no Quake virtual map path.")
+                command = external_tools.build_ironwail_command(
+                    executable, quake_root, game_dir, map_path=virtual_path, developer_mode=True
+                )
+                label = os.path.basename(virtual_path)
+            log_dir = bpy.utils.user_resource("DATAFILES", path=os.path.join("qss", "ironwail_logs"), create=True)
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            log_path = os.path.join(log_dir, f"Ironwail_{stamp}.log")
+            pid = external_tools.launch_process(command, cwd=os.path.dirname(executable), log_path=log_path)
+            self.report({"INFO"}, f"Ironwail launched for {label} (PID {pid}). Developer log: {log_path}")
+            return {"FINISHED"}
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not launch Ironwail: {exc}")
+            return {"CANCELLED"}
+
+
+
+
 class QSS_OT_detach_faces(Operator):
     bl_idname = "qss.detach_selected_faces"
     bl_label = "Detach Selected Faces"
@@ -5035,6 +5904,17 @@ class QSS_PT_project(Panel):
         project_box.prop(scene, 'qss_game_folder', text="Game / Mod")
         project_box.operator(QSS_OT_browse_game_maps.bl_idname, text="Browse Game Maps…", icon='FILEBROWSER')
         project_box.operator(QSS_OT_scan_game_maps.bl_idname, text="Validate Maps in Active Game", icon='CHECKMARK')
+        tools_box = layout.box()
+        tools_box.label(text="EXTERNAL TOOLS", icon='CONSOLE')
+        tools_box.prop(scene, 'qss_ericw_tools_dir', text="ericw-tools folder")
+        tools_box.prop(scene, 'qss_ironwail_executable', text="Ironwail executable")
+        tools_box.prop(scene, 'qss_ironwail_demo', text="Demo (.dem)")
+        launch = tools_box.row()
+        launch.enabled = bool(scene.qss_ironwail_executable and os.path.isfile(_qss_abspath(scene.qss_ironwail_executable)))
+        launch.operator(QSS_OT_launch_ironwail.bl_idname, text="Launch Ironwail…", icon='PLAY')
+        if scene.qss_ericw_tools_dir:
+            found_tools = [name for name, path in external_tools.discover_tools(_qss_abspath(scene.qss_ericw_tools_dir)).items() if path]
+            tools_box.label(text="Found: " + (", ".join(found_tools) if found_tools else "no ericw executables"), icon='INFO')
         tests_box = layout.box()
         tests_box.label(text="TESTING & BSP VALIDATION", icon='EXPERIMENTAL')
         tests_box.operator(QSS_OT_validate_bsp_export.bl_idname, text="Validate Exported BSP…", icon='CHECKMARK')
@@ -5346,6 +6226,16 @@ class QSS_PT_diagnostics(Panel):
         diagnostics.label(text="REPORTS & AUTOMATED TESTS", icon='TEXT')
         diagnostics.operator(QSS_OT_write_diagnostics.bl_idname, text="Save Lighting Diagnostics…", icon='FILE_TEXT')
         diagnostics.operator(QSS_OT_run_blender_selftest.bl_idname, text="Run Full Self-Test + Delay Benchmark", icon='EXPERIMENTAL')
+        audit = layout.box()
+        audit.label(text="FULL GAME MAP AUDIT", icon='CHECKMARK')
+        audit.label(text="Imports every map, exercises QSS workflows, exports and validates disposable copies.")
+        audit.prop(context.scene, 'qss_audit_timeout')
+        audit.prop(context.scene, 'qss_audit_ericw_light')
+        audit.prop(context.scene, 'qss_audit_ericw_compile')
+        audit.prop(context.scene, 'qss_audit_quake_bake')
+        audit.prop(context.scene, 'qss_audit_enhanced_export')
+        audit.operator(QSS_OT_run_map_audit.bl_idname, text="Run Full Map Audit", icon='PLAY')
+        audit.label(text="Reports and per-tool logs: Blender user data / qss / audits", icon='FILE_FOLDER')
         diagnostics.label(text="Object Mode required. Tests every BSP luxel in seven passes.", icon='TIME')
         diagnostics.label(text="Progress appears in Blender's status bar; report is saved to Desktop and a Text datablock.", icon='INFO')
         diagnostics.label(text="Dry run only: does not change the BSP or lightmap atlas.", icon='CHECKMARK')
@@ -5395,6 +6285,8 @@ CLASSES = (
     QSS_OT_validate_bsp_export,
     QSS_OT_scan_game_maps,
     QSS_OT_run_python_tests,
+    QSS_OT_run_map_audit,
+    QSS_OT_launch_ironwail,
     QSS_OT_detach_faces,
     QSS_OT_activate_paint,
     QSS_OT_activate_lightmap_paint,
@@ -5462,7 +6354,10 @@ def _remove_qss_keymaps():
 def _remove_scene_properties():
     """Remove QSS Scene properties, including properties from an older module."""
     for name in (
-        'qss_quake_root', 'qss_game_folder', 'qss_game_dir', 'qss_quake_unit_scale', 'qss_nav_speed_quake',
+        'qss_quake_root', 'qss_game_folder', 'qss_game_dir', 'qss_ericw_tools_dir',
+        'qss_ironwail_executable', 'qss_ironwail_demo', 'qss_audit_enhanced_export',
+        'qss_audit_quake_bake', 'qss_audit_ericw_light', 'qss_audit_ericw_compile',
+        'qss_audit_timeout', 'qss_quake_unit_scale', 'qss_nav_speed_quake',
         'qss_nav_fast_factor', 'qss_light_energy_scale',
         'qss_bake_output_scale', 'qss_bake_bounces', 'qss_bake_match_source', 'qss_mmb_fps_walk',
         'qss_quake_bake_shadows', 'qss_quake_bake_gate',
@@ -5560,6 +6455,40 @@ def register():
             description="Resolved active game folder used by the importer and texture/WAD lookup",
             subtype='DIR_PATH',
             default=initial_game_dir,
+        )
+        bpy.types.Scene.qss_ericw_tools_dir = StringProperty(
+            name="ericw-tools folder", description="Folder containing qbsp, vis, light and bspinfo",
+            subtype='DIR_PATH', default=_qss_abspath(initial_config.get('ericw_tools_dir', '')),
+            update=_on_external_tool_path_changed,
+        )
+        bpy.types.Scene.qss_ironwail_executable = StringProperty(
+            name="Ironwail executable", description="Path to ironwail.exe or the Ironwail executable",
+            subtype='FILE_PATH', default=_qss_abspath(initial_config.get('ironwail_executable', '')),
+            update=_on_external_tool_path_changed,
+        )
+        bpy.types.Scene.qss_ironwail_demo = StringProperty(
+            name="Ironwail demo", description="Optional .dem file to play when launching Ironwail",
+            subtype='FILE_PATH', default=_qss_abspath(initial_config.get('ironwail_demo', '')),
+            update=_on_external_tool_path_changed,
+        )
+        bpy.types.Scene.qss_audit_enhanced_export = BoolProperty(
+            name="Test Enhanced BSPX export", default=False,
+            description="Attempt Enhanced LMSHIFT export on each imported map where supported",
+        )
+        bpy.types.Scene.qss_audit_quake_bake = BoolProperty(
+            name="Run Quake direct lightmap bake", default=False,
+            description="Run the full CPU ray-traced Quake lightmap solver on each map; can take a long time",
+        )
+        bpy.types.Scene.qss_audit_ericw_light = BoolProperty(
+            name="Run ericw light on disposable BSP copy", default=False,
+            description="Run verbose ericw light on a copy of each BSP; never overwrites the game map",
+        )
+        bpy.types.Scene.qss_audit_ericw_compile = BoolProperty(
+            name="Compile sibling MAP files with ericw-tools", default=False,
+            description="Run qbsp, vis and light when a loose sibling .map source is available",
+        )
+        bpy.types.Scene.qss_audit_timeout = IntProperty(
+            name="External tool timeout (seconds)", default=300, min=10, max=7200,
         )
         bpy.types.Scene.qss_quake_unit_scale = FloatProperty(
             name="Quake unit scale", description="Blender metres per Quake unit", default=DEFAULT_QUAKE_UNIT_SCALE,

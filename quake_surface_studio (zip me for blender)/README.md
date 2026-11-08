@@ -1,3 +1,16 @@
+# Quake Surface Studio 0.15.0
+
+## 0.15.0 changes
+
+- Added a persistent ericw-tools directory, Ironwail executable path and optional demo path to `CONFIG/qss/config.json`.
+- Added an Ironwail launcher in Project & Source. It launches the active imported game map or a selected `.dem`, enables developer mode, uses `-condebug`, and records process output in QSS user data.
+- Added **Run Full Map Audit**. It discovers every effective loose/PAK map in the selected game folder and processes them one at a time, continuing after individual map failures.
+- Each map receives BSP structural/reference/lightmap validation, a real QSS import, face/material/UV metadata checks, Original/Working/Live preview checks, immutable source-atlas verification, lightmap-link repair, viewport selection/hide/reveal tests, texture detach and paint-mode tests on a disposable duplicate, and Classic BSP export plus source-to-export integrity validation.
+- Optional audit stages include the full Quake direct CPU lightmap bake with restore, Enhanced BSPX export, ericw `bspinfo`, verbose disposable-BSP `light` runs, and a `.map` → `qbsp` → `vis` → `light` compile pipeline when a sibling MAP source exists.
+- Audit reports are written after every map to a checkpoint JSON file and, at completion, to `report.json`, `report.txt`, plus Blender Text datablocks `QSS_Map_Audit_Report` and `QSS_Map_Audit_JSON`. External tool output is stored in per-map log files.
+- Destructive operations use a duplicate mesh/object and disposable export/compiler inputs; original game BSP files are not passed to ericw `light` because that tool overwrites its input.
+- Optional CPU lighting bakes and compiler runs are disabled by default. Viewport tests require a running Blender UI with a VIEW_3D area; unavailable viewport tests are reported as SKIP.
+
 # Quake Surface Studio 0.14.1
 
 ## 0.14.1 changes
