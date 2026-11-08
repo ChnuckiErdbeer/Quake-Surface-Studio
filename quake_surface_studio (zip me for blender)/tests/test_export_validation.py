@@ -116,10 +116,19 @@ class ExportValidationTests(unittest.TestCase):
         original = make_test_bsp()
         texinfo = struct.pack('<8fii', 1, 0, 0, 0, 0, 1, 0, 0, 0, 999)
         lumps = list(original.lumps)
-        lumps[bsp.LUMP_TEXINFO] = texinfo
+        lumps[bsp.LUMP_TEXINFO] = lumps[bsp.LUMP_TEXINFO] + texinfo
+        lumps[bsp.LUMP_FACES] = bsp.replace_face_texinfo(
+            lumps[bsp.LUMP_FACES], 0, 1
+        )
         changed = original.write(lumps)
         with self.assertRaisesRegex(bsp.BSPError, 'invalid texture 999'):
             export_validation.validate_export_bytes(original.write(), changed)
+
+    def test_classic_rgb_lightmap_must_match_monochrome_sample_count(self):
+        original = make_test_bsp(lightmapped=True)
+        encoded = original.write(bspx_lumps={'RGBLIGHTING': bytes(3 * 24)})
+        with self.assertRaisesRegex(bsp.BSPError, 'one RGB triplet per'):
+            export_validation.validate_export_bytes(original.write(), encoded)
 
     def test_classic_lightmap_truncation_is_rejected(self):
         original = make_test_bsp(lightmapped=True)
