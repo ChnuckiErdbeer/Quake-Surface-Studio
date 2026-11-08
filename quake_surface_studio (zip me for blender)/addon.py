@@ -3365,6 +3365,39 @@ def _qss_audit_map(context, entry, index, output_root, options):
             _qss_audit_add_check(record, "Viewport navigation operations", "SKIP",
                                  "No VIEW_3D area is available in this Blender session.")
 
+        # Optional Cycles bake on the isolated duplicate. Undo must restore the
+        # exact pre-bake atlas; this is deliberately opt-in due to render cost.
+        if options.get("cycles_bake"):
+            if int(test_obj.get("qss_light_entity_count", 0)) > 0:
+                before_cycles_image = bpy.data.images.get(test_obj.get("qss_lightmap_image_name", ""))
+                before_cycles_hash = _image_hash(before_cycles_image) if before_cycles_image else ""
+                cycles_result = _qss_audit_call(context, bpy.ops.qss.bake_scene_lights, test_obj)
+                has_backup = bool(test_obj.get("qss_last_bake_backup"))
+                _qss_audit_add_check(
+                    record, "Cycles PBR lightmap bake",
+                    "PASS" if ("FINISHED" in cycles_result and has_backup) else "FAIL",
+                    f"operator={cycles_result} · backup_created={has_backup} · "
+                    f"raw_mean={test_obj.get('qss_last_bake_raw_mean', 'n/a')} · "
+                    f"sampled_luxels={test_obj.get('qss_last_bake_attempt_sample_count', 'n/a')} · "
+                    f"error={test_obj.get('qss_last_bake_error', '')}"
+                )
+                if has_backup:
+                    undo_result = _qss_audit_call(context, bpy.ops.qss.undo_last_bake, test_obj)
+                    restored_image = bpy.data.images.get(test_obj.get("qss_lightmap_image_name", ""))
+                    restored_hash = _image_hash(restored_image) if restored_image else ""
+                    restored = ("FINISHED" in undo_result and restored_hash == before_cycles_hash)
+                    _qss_audit_add_check(
+                        record, "Undo Cycles bake restores exact atlas",
+                        "PASS" if restored else "FAIL",
+                        f"operator={undo_result} · hash_restored={restored}"
+                    )
+            else:
+                _qss_audit_add_check(record, "Cycles PBR lightmap bake", "SKIP",
+                                     "No imported Quake light entities are present.")
+        else:
+            _qss_audit_add_check(record, "Cycles PBR lightmap bake", "SKIP",
+                                 "Enable the optional Cycles bake in QSS audit settings.")
+
         # Face-local detach and paint-mode transitions are run on the disposable clone.
         if test_obj.mode != "OBJECT":
             with context.temp_override(**_qss_audit_context_override(context, test_obj)):
@@ -3572,6 +3605,7 @@ class QSS_OT_run_map_audit(Operator):
         self._options = {
             "enhanced_export": bool(context.scene.qss_audit_enhanced_export),
             "quake_bake": bool(context.scene.qss_audit_quake_bake),
+            "cycles_bake": bool(context.scene.qss_audit_cycles_bake),
             "ericw_light": bool(context.scene.qss_audit_ericw_light),
             "ericw_compile": bool(context.scene.qss_audit_ericw_compile),
             "timeout": int(context.scene.qss_audit_timeout),
@@ -3768,6 +3802,8 @@ class QSS_OT_launch_ironwail(Operator):
             if not executable or not os.path.isfile(executable):
                 raise FileNotFoundError("Set a valid Ironwail executable in Project & Source.")
             if demo_file:
+                if not os.path.isfile(demo_file):
+                    raise FileNotFoundError(f"Demo file does not exist: {demo_file}")
                 scene.qss_ironwail_demo = demo_file
                 _qss_save_config(scene)
                 command = external_tools.build_ironwail_command(
@@ -3795,7 +3831,7 @@ class QSS_OT_launch_ironwail(Operator):
             log_dir = bpy.utils.user_resource("DATAFILES", path=os.path.join("qss", "ironwail_logs"), create=True)
             stamp = time.strftime("%Y%m%d_%H%M%S")
             log_path = os.path.join(log_dir, f"Ironwail_{stamp}.log")
-            pid = external_tools.launch_process(command, cwd=os.path.dirname(executable), log_path=log_path)
+            pid = external_tools.launch_process(command, cwd=log_dir, log_path=log_path)
             self.report({"INFO"}, f"Ironwail launched for {label} (PID {pid}). Developer log: {log_path}")
             return {"FINISHED"}
         except Exception as exc:
@@ -6233,6 +6269,7 @@ class QSS_PT_diagnostics(Panel):
         audit.prop(context.scene, 'qss_audit_ericw_light')
         audit.prop(context.scene, 'qss_audit_ericw_compile')
         audit.prop(context.scene, 'qss_audit_quake_bake')
+        audit.prop(context.scene, 'qss_audit_cycles_bake')
         audit.prop(context.scene, 'qss_audit_enhanced_export')
         audit.operator(QSS_OT_run_map_audit.bl_idname, text="Run Full Map Audit", icon='PLAY')
         audit.label(text="Reports and per-tool logs: Blender user data / qss / audits", icon='FILE_FOLDER')
@@ -6356,7 +6393,7 @@ def _remove_scene_properties():
     for name in (
         'qss_quake_root', 'qss_game_folder', 'qss_game_dir', 'qss_ericw_tools_dir',
         'qss_ironwail_executable', 'qss_ironwail_demo', 'qss_audit_enhanced_export',
-        'qss_audit_quake_bake', 'qss_audit_ericw_light', 'qss_audit_ericw_compile',
+        'qss_audit_quake_bake', 'qss_audit_cycles_bake', 'qss_audit_ericw_light', 'qss_audit_ericw_compile',
         'qss_audit_timeout', 'qss_quake_unit_scale', 'qss_nav_speed_quake',
         'qss_nav_fast_factor', 'qss_light_energy_scale',
         'qss_bake_output_scale', 'qss_bake_bounces', 'qss_bake_match_source', 'qss_mmb_fps_walk',
@@ -6478,6 +6515,10 @@ def register():
         bpy.types.Scene.qss_audit_quake_bake = BoolProperty(
             name="Run Quake direct lightmap bake", default=False,
             description="Run the full CPU ray-traced Quake lightmap solver on each map; can take a long time",
+        )
+        bpy.types.Scene.qss_audit_cycles_bake = BoolProperty(
+            name="Run Cycles PBR lightmap bake", default=False,
+            description="Run the experimental Cycles bake on a disposable duplicate and verify exact undo; can be very slow",
         )
         bpy.types.Scene.qss_audit_ericw_light = BoolProperty(
             name="Run ericw light on disposable BSP copy", default=False,

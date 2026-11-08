@@ -11,7 +11,7 @@ import subprocess
 import time
 from typing import Iterable
 
-ERCIW_TOOL_NAMES = {
+ERICW_TOOL_NAMES = {
     "qbsp": ("qbsp", "qbsp.exe"),
     "vis": ("vis", "vis.exe"),
     "light": ("light", "light.exe"),
@@ -23,7 +23,7 @@ ERCIW_TOOL_NAMES = {
 def resolve_tool(tool_directory: str, tool_name: str) -> str:
     """Resolve a known ericw executable from a configured directory."""
     key = str(tool_name or "").strip().lower()
-    if key not in ERCIW_TOOL_NAMES:
+    if key not in ERICW_TOOL_NAMES:
         raise ValueError(f"Unknown ericw tool: {tool_name!r}")
     directory = os.path.abspath(os.path.expandvars(os.path.expanduser(tool_directory or "")))
     if not os.path.isdir(directory):
@@ -32,7 +32,7 @@ def resolve_tool(tool_directory: str, tool_name: str) -> str:
         entries = {name.casefold(): name for name in os.listdir(directory)}
     except OSError:
         return ""
-    for candidate in ERCIW_TOOL_NAMES[key]:
+    for candidate in ERICW_TOOL_NAMES[key]:
         actual = entries.get(candidate.casefold())
         if actual:
             path = os.path.join(directory, actual)
@@ -43,7 +43,7 @@ def resolve_tool(tool_directory: str, tool_name: str) -> str:
 
 def discover_tools(tool_directory: str) -> dict[str, str]:
     """Return absolute executable paths for every known ericw tool."""
-    return {name: resolve_tool(tool_directory, name) for name in ERCIW_TOOL_NAMES}
+    return {name: resolve_tool(tool_directory, name) for name in ERICW_TOOL_NAMES}
 
 
 def run_command(
