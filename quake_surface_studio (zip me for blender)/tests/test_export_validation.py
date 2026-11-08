@@ -1,6 +1,7 @@
 import math
 import os
 import struct
+import tempfile
 import sys
 import unittest
 
