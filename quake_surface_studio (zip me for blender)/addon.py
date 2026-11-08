@@ -4483,12 +4483,10 @@ class QSS_OT_generate_decoupled_lightmaps(Operator, ImportHelper):
         source = obj.get("qss_source_path", "") if _qss_is_map_object(obj) else ""
         if source and os.path.isfile(bpy.path.abspath(source)):
             self.filepath = bpy.path.abspath(source)
-            return context.window_manager.invoke_props_dialog(self, width=560)
         return ImportHelper.invoke(self, context, event)
 
     def draw(self, context):
         layout = self.layout
-        layout.prop(self, "filepath", text="Source BSP")
         layout.prop(self, "world_units_per_luxel")
         layout.label(text="A new *_decoupled.bsp copy will be created beside the source.", icon="INFO")
         layout.label(text="The source BSP is never modified; lighting is recalculated.", icon="INFO")
@@ -4531,10 +4529,6 @@ class QSS_OT_generate_decoupled_lightmaps(Operator, ImportHelper):
             )
 
             shutil.copy2(source_path, output_path)
-            source_lit = source_root + ".lit"
-            if os.path.isfile(source_lit):
-                shutil.copy2(source_lit, output_lit)
-
             result = external_tools.run_command(
                 light, command[1:], timeout=float(getattr(scene, "qss_audit_timeout", 300)),
                 cwd=os.path.dirname(output_path) or None,
