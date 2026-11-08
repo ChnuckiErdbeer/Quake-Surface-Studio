@@ -1,4 +1,10 @@
-# Quake Surface Studio 0.14.0
+# Quake Surface Studio 0.14.1
+
+## 0.14.1 changes
+
+- Fixed Blender 5.2 registration of the dynamic Game / Mod enum. During RNA registration Blender can evaluate enum items without a Scene context; QSS now resolves the item list from its saved installation configuration in that case.
+- Validates the saved game identifier against discovered game folders before assigning the enum default.
+- Hardened add-on cleanup after interrupted or failed registration so stale operator classes are unregistered before a retry.
 
 ## 0.14.0 changes
 
