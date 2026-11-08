@@ -1,4 +1,17 @@
-# Quake Surface Studio 0.11.0
+# Quake Surface Studio 0.11.2
+
+## 0.11.2 changes
+
+- Texture Paint now sets Blender 5.2's explicit paint canvas source and canvas image, as well as the legacy image-paint canvas pointer. This keeps the 3D viewport paint display and the image receiving strokes synchronized.
+- Face-local texture painting explicitly activates the `Quake_Texture_UV` map; lightmap painting explicitly activates `Quake_Lightmap_UV`.
+- CI now builds and uploads a versioned, directly installable Blender add-on ZIP for each tested push.
+
+## 0.11.1 changes
+
+- Correct add-on version metadata to 0.11.1 and display the version in the Quake sidebar.
+- Add a regression test for BSP face light-style sample ordering when the face style slots are not numerically sorted.
+- Make failed face detachment transactional, including material-slot, UV, active-slot, and Edit Mode selection rollback.
+
 
 ## Changes
 
