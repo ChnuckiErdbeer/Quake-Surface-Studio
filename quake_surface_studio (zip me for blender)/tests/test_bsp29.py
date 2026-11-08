@@ -85,6 +85,20 @@ class BSP29Tests(unittest.TestCase):
         self.assertEqual(texinfo[8], 0)
         self.assertEqual(texinfo[9], 0)
 
+
+    def test_replace_face_lightofs(self):
+        original = make_test_bsp()
+        changed = bsp.replace_face_lightofs(original.lumps[bsp.LUMP_FACES], 0, 1234)
+        self.assertEqual(bsp.BSP29(original.write([
+            changed if index == bsp.LUMP_FACES else lump
+            for index, lump in enumerate(original.lumps)
+        ])).faces()[0][9], 1234)
+
+    def test_replace_face_lightofs_rejects_invalid_offset(self):
+        original = make_test_bsp()
+        with self.assertRaises(bsp.BSPError):
+            bsp.replace_face_lightofs(original.lumps[bsp.LUMP_FACES], 0, 0x80000000)
+
     def test_rejects_non_bsp29(self):
         with self.assertRaises(bsp.BSPError):
             bsp.BSP29(b'BSP2' + b'\0' * 120)

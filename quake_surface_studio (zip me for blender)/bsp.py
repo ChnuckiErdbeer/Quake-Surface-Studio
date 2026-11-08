@@ -348,6 +348,22 @@ def build_texture_lump(entries: Iterable[MipTexture]) -> bytes:
     return bytes(out)
 
 
+
+def replace_face_lightofs(faces_lump: bytes, face_index: int, lightofs: int) -> bytes:
+    """Return a face lump with one dface_t lightofs field replaced."""
+    if len(faces_lump) % SIZE_FACE:
+        raise BSPError("Face lump has an invalid size.")
+    count = len(faces_lump) // SIZE_FACE
+    if face_index < 0 or face_index >= count:
+        raise BSPError(f"Face index {face_index} is out of range.")
+    value = int(lightofs)
+    if value < -1 or value > 0x7FFFFFFF:
+        raise BSPError("Lightmap offset exceeds the signed 32-bit BSP29 field.")
+    result = bytearray(faces_lump)
+    struct.pack_into("<i", result, face_index * SIZE_FACE + 16, value)
+    return bytes(result)
+
+
 def replace_face_texinfo(faces_lump: bytes, face_index: int, texinfo_index: int) -> bytes:
     if len(faces_lump) % SIZE_FACE:
         raise BSPError("Face lump has an invalid size.")

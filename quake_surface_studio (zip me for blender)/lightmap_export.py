@@ -142,6 +142,60 @@ def sample_face_rgb_from_atlas(
     return bytes(output)
 
 
+
+def sample_face_rgb_at_coordinates(
+    pixels: Sequence[float],
+    image_size: int,
+    working_resolution: int,
+    atlas_x: int,
+    atlas_y: int,
+    gutter: int,
+    pixels_per_luxel: int,
+    base_s_min: int,
+    base_t_min: int,
+    s_coordinates: Sequence[float],
+    t_coordinates: Sequence[float],
+) -> bytes:
+    """Sample arbitrary S/T luxel coordinates from a face's shared atlas island.
+
+    Coordinates use the source face's original Quake texinfo projection and
+    the original 16-unit luxel grid. This is used when a detached face gets a
+    new texinfo projection and therefore needs a reprojected classic lightmap.
+    """
+    if image_size <= 0 or working_resolution not in SUPPORTED_RESOLUTIONS:
+        raise ValueError("Invalid image size or working-resolution multiplier")
+    if min(atlas_x, atlas_y, gutter) < 0 or pixels_per_luxel <= 0:
+        raise ValueError("Invalid atlas rectangle metadata")
+    if not s_coordinates or not t_coordinates:
+        raise ValueError("S/T sample coordinates must be non-empty")
+    if len(pixels) != image_size * image_size * 4:
+        raise ValueError("RGBA buffer dimensions do not match the atlas image")
+    coordinates = tuple(float(v) for v in (*s_coordinates, *t_coordinates))
+    if not all(math.isfinite(value) for value in coordinates):
+        raise ValueError("S/T sample coordinates must be finite")
+
+    pixel_block = int(pixels_per_luxel) * int(working_resolution)
+    origin_x = (int(atlas_x) + int(gutter)) * int(working_resolution)
+    origin_y = (int(atlas_y) + int(gutter)) * int(working_resolution)
+    output = bytearray()
+    for t in t_coordinates:
+        luxel_t = (float(t) - float(base_t_min)) / 16.0
+        center_y_from_top = origin_y + (luxel_t + 0.5) * pixel_block
+        pixel_y = image_size - center_y_from_top - 0.5
+        for s in s_coordinates:
+            luxel_s = (float(s) - float(base_s_min)) / 16.0
+            center_x = origin_x + (luxel_s + 0.5) * pixel_block
+            pixel_x = center_x - 0.5
+            red, green, blue, _alpha = bilinear_sample_rgba(
+                pixels, image_size, image_size, pixel_x, pixel_y
+            )
+            output.extend(
+                max(0, min(255, int(round(channel * 255.0))))
+                for channel in (red, green, blue)
+            )
+    return bytes(output)
+
+
 def build_lightmap_extension_data(
     face_count: int,
     face_records: Mapping[int, Mapping[str, Any]],
