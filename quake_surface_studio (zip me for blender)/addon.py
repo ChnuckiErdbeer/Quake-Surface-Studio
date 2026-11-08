@@ -601,6 +601,7 @@ def _qss_create_detached_face_atlas(plans, atlas_size=512):
         atlas["qss_import_hash"] = ""
         atlas["qss_face_local_baked"] = True
         atlas["qss_detached_face_atlas"] = True
+        atlas["qss_detached_atlas_scale"] = float(layout["scale"])
         return atlas
     except Exception:
         try:
@@ -4415,11 +4416,20 @@ class QSS_OT_detach_faces(Operator):
                             created_images.remove(local_image)
                     except Exception:
                         pass
+            atlas_scale_note = ""
+            if len(plans) > 1 and plans[0].get("image") is not None:
+                atlas_scale = float(plans[0]["image"].get("qss_detached_atlas_scale", 1.0))
+                if atlas_scale < 0.999:
+                    atlas_scale_note = (
+                        f" Face textures were resampled to {atlas_scale:.0%} "
+                        "to fit the 512x512 Quake texture limit."
+                    )
             _report(
                 self, 'INFO',
                 f"Detached {len(plans)} face(s). "
                 + ("Their face-local textures share one paint atlas." if len(plans) > 1
                    else "The face has its own paint texture.")
+                + atlas_scale_note
                 + " Use 'Enter Texture Paint' to paint the selected face(s)."
             )
             return {'FINISHED'}
@@ -6848,13 +6858,14 @@ def _unregister_qss_classes():
 
 
 def _cleanup_previous_registration():
-    # Stop active modal sessions before their operator class/timer is removed.
+    # Ask active modal sessions to terminate on their next event. The operator
+    # itself removes its timer/cursor state from modal()/cancel(), avoiding a
+    # manually-finished modal handler left attached to the window.
     for operator in tuple(_qss_fps_navigation_sessions.values()):
         try:
-            operator._finish(bpy.context)
+            operator._stop_requested = True
         except Exception:
             pass
-    _qss_fps_navigation_sessions.clear()
     _remove_qss_keymaps()
     _remove_scene_properties()
     _unregister_qss_classes()
