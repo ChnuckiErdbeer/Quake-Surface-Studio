@@ -7,6 +7,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 import bsp
 import export_validation
+import lightmap_export
+import lighting as lighting_utils
 
 
 def make_test_bsp(lightmapped=False):
@@ -74,6 +76,91 @@ class ExportValidationTests(unittest.TestCase):
         self.assertEqual(report['faces'], len(source.faces()))
         self.assertLessEqual(report['classic_required_samples'], len(source.lumps[bsp.LUMP_LIGHTING]))
         self.assertTrue(report['external_lit'])
+
+    def test_compiler_fixture_accepts_appended_lms_hift_payload(self):
+        fixture_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'mapandbsp'))
+        source_path = os.path.join(fixture_dir, 'test02_compile.bsp')
+        lit_path = os.path.join(fixture_dir, 'test02_compile.lit')
+        if not (os.path.isfile(source_path) and os.path.isfile(lit_path)):
+            self.skipTest("Compiler-generated test02 BSP/.lit fixtures are not present")
+        with open(source_path, 'rb') as handle:
+            source_data = handle.read()
+        with open(lit_path, 'rb') as handle:
+            lit_data = handle.read()
+        parsed = bsp.BSP29(source_data)
+        source_lighting = parsed.lumps[bsp.LUMP_LIGHTING]
+        source_rgb = bsp.parse_lit_file(lit_data, len(source_lighting))
+        self.assertIsNotNone(source_rgb)
+
+        vertices = parsed.vertices()
+        texinfos = parsed.texinfos()
+        face_records = {}
+        for face_id, face in enumerate(parsed.faces()):
+            if face[9] < 0 or face[5] == 255:
+                continue
+            vertex_ids = parsed.face_vertex_indices(face)
+            positions = [vertices[index] for index in vertex_ids]
+            texinfo = texinfos[face[4]]
+            s_values = [
+                p[0] * texinfo[0] + p[1] * texinfo[1] + p[2] * texinfo[2] + texinfo[3]
+                for p in positions
+            ]
+            t_values = [
+                p[0] * texinfo[4] + p[1] * texinfo[5] + p[2] * texinfo[6] + texinfo[7]
+                for p in positions
+            ]
+            base_s_min = int(__import__('math').floor(min(s_values) / 16.0 + 1e-7)) * 16
+            base_t_min = int(__import__('math').floor(min(t_values) / 16.0 + 1e-7)) * 16
+            base_width, base_height = export_validation._face_lightmap_dimensions(parsed, face, 16)
+            block_size = base_width * base_height
+            styles = [style for style in face[5:9] if style != 255]
+            combined = lighting_utils.combine_style_samples(
+                source_lighting, source_rgb, face[9], block_size, styles
+            )
+            shift, s_min, t_min, width, height = lightmap_export.choose_luxel_grid(
+                s_values, t_values, 2
+            )
+            rgb = bytearray()
+            for sy in range(height):
+                v = (t_min + sy * (1 << shift) - base_t_min) / 16.0
+                y0 = max(0, min(base_height - 1, int(__import__('math').floor(v))))
+                y1 = min(base_height - 1, y0 + 1)
+                fy = min(1.0, max(0.0, v - y0))
+                for sx in range(width):
+                    u = (s_min + sx * (1 << shift) - base_s_min) / 16.0
+                    x0 = max(0, min(base_width - 1, int(__import__('math').floor(u))))
+                    x1 = min(base_width - 1, x0 + 1)
+                    fx = min(1.0, max(0.0, u - x0))
+                    for channel in range(3):
+                        c00 = combined[y0 * base_width + x0][channel]
+                        c10 = combined[y0 * base_width + x1][channel]
+                        c01 = combined[y1 * base_width + x0][channel]
+                        c11 = combined[y1 * base_width + x1][channel]
+                        top = c00 * (1.0 - fx) + c10 * fx
+                        bottom = c01 * (1.0 - fx) + c11 * fx
+                        rgb.append(max(0, min(255, int(round(top * (1.0 - fy) + bottom * fy)))))
+            face_records[face_id] = {
+                'shift': shift, 'width': width, 'height': height, 'rgb': bytes(rgb)
+            }
+
+        extension = lightmap_export.build_lightmap_extension_data(
+            len(parsed.faces()), face_records, len(source_lighting)
+        )
+        output_lumps = list(parsed.lumps)
+        output_lumps[bsp.LUMP_LIGHTING] = source_lighting + extension['LIGHTING_APPEND']
+        output_bspx = dict(parsed.bspx_lumps)
+        output_bspx.update({
+            'LMSHIFT': extension['LMSHIFT'],
+            'LMOFFSET': extension['LMOFFSET'],
+            'LMSTYLE': extension['LMSTYLE'],
+            'RGBLIGHTING': source_rgb + extension['RGBLIGHTING_APPEND'],
+        })
+        output_lit = bsp.build_lit_file(output_bspx['RGBLIGHTING'])
+        report = export_validation.validate_export_bytes(
+            source_data, parsed.write(output_lumps, output_bspx), output_lit
+        )
+        self.assertEqual(report['enhanced_lighting_samples'], extension['enhanced_sample_count'])
+        self.assertGreater(report['enhanced_lighting_samples'], 0)
 
     def test_identical_unlit_export_passes(self):
         original = make_test_bsp()
