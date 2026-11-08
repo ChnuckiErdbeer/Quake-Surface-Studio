@@ -6,7 +6,7 @@
 - Higher-resolution atlases replicate each original BSP luxel into a larger pixel block. The normalized `Quake_Lightmap_UV` layout remains unchanged, so all material links and face masks continue to use the same UV mapping.
 - The original imported BSP lightmap is retained as an independent packed snapshot at the selected working resolution. Restore Original and Undo Bake therefore remain dimension-compatible.
 - Classic BSP29 export samples/averages each high-resolution luxel block back into the original BSP lighting lump and QLIT RGB sidecar. The exported BSP retains its original lightmap sample dimensions; high-resolution brush detail is necessarily reduced during this classic export.
-- Atlas packing is constrained to a maximum 4096×4096 working image. At 8×, the base atlas is limited to 512×512; if the map cannot fit, import reports that rather than allocating an oversized image.
+- Atlas packing is constrained to a maximum 2048×2048 working image. At 8×, the base atlas is limited to 256×256; if the map cannot fit, import reports that rather than allocating an oversized image.
 - Direct lightmap baking, Cycles luxel sampling, export, and diagnostics now resolve the working pixel scale from the stored base atlas size and actual image dimensions.
 - Added standalone tests for resolution validation, image limits, coordinate scaling, and exact up/downsampling behavior.
 
