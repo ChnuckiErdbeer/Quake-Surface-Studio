@@ -1,9 +1,9 @@
-"""Pure helpers for exporting higher-density Quake BSPX lightmaps.
+"""Pure helpers for importing and exporting Quake BSPX lightmap layouts.
 
-BSPX LMSHIFT/LMOFFSET/LMSTYLE are used by QuakeSpasm-Spiked and FTE. The
-classic LIGHTING samples remain first in the standard lump; enhanced per-face
-samples are appended and addressed by LMOFFSET. This preserves the original
-dface_t offsets for engines that ignore the extensions.
+DECOUPLED_LM stores one explicit sample grid and two independent world-to-luxel
+vectors per face. Enhanced QSS output retains classic LIGHTING samples at the
+front of the standard lump and appends the rebuilt per-face samples so engines
+that ignore BSPX can use the vanilla BSP29 face lightofs fallback.
 """
 from __future__ import annotations
 
@@ -197,6 +197,139 @@ def sample_face_rgb_at_coordinates(
 
 
 
+
+def parse_decoupled_lightmap_data(payload: bytes, face_count: int):
+    """Parse the BSPX DECOUPLED_LM table (one 40-byte record per BSP face).
+
+    A zero-sized record with offset 0xffffffff marks an unlightmapped face.
+    All other records contain explicit dimensions, a sample offset and two
+    independent world-to-luxel projection vectors.
+    """
+    raw = bytes(payload)
+    count = int(face_count)
+    if count < 0 or len(raw) != count * 40:
+        raise ValueError(
+            f"DECOUPLED_LM must contain exactly {count * 40} bytes "
+            f"({count} records of 40 bytes); found {len(raw)}"
+        )
+    records = []
+    for face_id in range(count):
+        width, height, offset, *vectors = struct.unpack_from("<HHI8f", raw, face_id * 40)
+        if width == 0 and height == 0 and offset == NO_LIGHT_OFFSET:
+            records.append(None)
+            continue
+        if width == 0 or height == 0:
+            raise ValueError(
+                f"DECOUPLED_LM face {face_id} has inconsistent dimensions {width}x{height}"
+            )
+        if offset == NO_LIGHT_OFFSET:
+            raise ValueError(f"DECOUPLED_LM face {face_id} has dimensions but no light offset")
+        if not all(math.isfinite(value) for value in vectors):
+            raise ValueError(f"DECOUPLED_LM face {face_id} has non-finite projection vectors")
+        records.append({
+            "width": int(width),
+            "height": int(height),
+            "offset": int(offset),
+            "lmvecs": tuple(float(value) for value in vectors),
+        })
+    return tuple(records)
+
+
+
+def sample_face_rgb_at_lm_coordinate_pairs(
+    pixels: Sequence[float],
+    image_size: int,
+    working_resolution: int,
+    atlas_x: int,
+    atlas_y: int,
+    gutter: int,
+    pixels_per_luxel: int,
+    coordinates: Sequence[Sequence[float]],
+) -> bytes:
+    """Sample arbitrary (S,T) positions from one atlas island.
+
+    Unlike a separable S/T grid, this accepts a different S and T coordinate
+    for every output pixel. It is required when the imported decoupled axes are
+    rotated or otherwise couple the two texture-space directions.
+    """
+    if image_size <= 0 or working_resolution not in SUPPORTED_RESOLUTIONS:
+        raise ValueError("Invalid image size or working lightmap resolution")
+    if min(atlas_x, atlas_y, gutter) < 0 or pixels_per_luxel <= 0:
+        raise ValueError("Invalid atlas rectangle metadata")
+    if len(pixels) != image_size * image_size * 4:
+        raise ValueError("RGBA buffer dimensions do not match the atlas image")
+    if not coordinates:
+        raise ValueError("At least one arbitrary lightmap coordinate is required")
+    normalized = []
+    for coordinate in coordinates:
+        if len(coordinate) != 2:
+            raise ValueError("Each arbitrary lightmap coordinate must contain S and T")
+        s, t = float(coordinate[0]), float(coordinate[1])
+        if not math.isfinite(s) or not math.isfinite(t):
+            raise ValueError("Arbitrary lightmap coordinates must be finite")
+        normalized.append((s, t))
+
+    pixel_block = int(pixels_per_luxel) * int(working_resolution)
+    origin_x = (int(atlas_x) + int(gutter)) * int(working_resolution)
+    origin_y = (int(atlas_y) + int(gutter)) * int(working_resolution)
+    output = bytearray()
+    for s, t in normalized:
+        pixel_x = origin_x + (s + 0.5) * pixel_block - 0.5
+        pixel_y = image_size - origin_y - (t + 0.5) * pixel_block - 0.5
+        red, green, blue, _alpha = bilinear_sample_rgba(
+            pixels, image_size, image_size, pixel_x, pixel_y
+        )
+        output.extend(
+            max(0, min(255, int(round(channel * 255.0))))
+            for channel in (red, green, blue)
+        )
+    return bytes(output)
+
+def sample_face_rgb_at_lm_coordinates(
+    pixels: Sequence[float],
+    image_size: int,
+    working_resolution: int,
+    atlas_x: int,
+    atlas_y: int,
+    gutter: int,
+    pixels_per_luxel: int,
+    s_coordinates: Sequence[float],
+    t_coordinates: Sequence[float],
+) -> bytes:
+    """Sample an atlas island at arbitrary DECOUPLED_LM luxel coordinates.
+
+    Coordinates are already in sample-space units produced by the face's
+    lmvecs; unlike classic texinfo coordinates, they must not be divided by 16.
+    """
+    if image_size <= 0 or working_resolution not in SUPPORTED_RESOLUTIONS:
+        raise ValueError("Invalid image size or working lightmap resolution")
+    if min(atlas_x, atlas_y, gutter) < 0 or pixels_per_luxel <= 0:
+        raise ValueError("Invalid atlas rectangle metadata")
+    if not s_coordinates or not t_coordinates:
+        raise ValueError("S/T sample coordinates must be non-empty")
+    if len(pixels) != image_size * image_size * 4:
+        raise ValueError("RGBA buffer dimensions do not match the atlas image")
+    coordinates = tuple(float(value) for value in (*s_coordinates, *t_coordinates))
+    if not all(math.isfinite(value) for value in coordinates):
+        raise ValueError("Luxel coordinates must be finite")
+
+    pixel_block = int(pixels_per_luxel) * int(working_resolution)
+    origin_x = (int(atlas_x) + int(gutter)) * int(working_resolution)
+    origin_y = (int(atlas_y) + int(gutter)) * int(working_resolution)
+    output = bytearray()
+    for t in t_coordinates:
+        pixel_y = image_size - origin_y - (float(t) + 0.5) * pixel_block - 0.5
+        for s in s_coordinates:
+            pixel_x = origin_x + (float(s) + 0.5) * pixel_block - 0.5
+            red, green, blue, _alpha = bilinear_sample_rgba(
+                pixels, image_size, image_size, pixel_x, pixel_y
+            )
+            output.extend(
+                max(0, min(255, int(round(channel * 255.0))))
+                for channel in (red, green, blue)
+            )
+    return bytes(output)
+
 def build_decoupled_lightmap_data(faces, texinfos, face_records, face_offsets):
     """Serialize BSPX DECOUPLED_LM records (40 bytes per BSP face).
 
@@ -217,25 +350,33 @@ def build_decoupled_lightmap_data(faces, texinfos, face_records, face_offsets):
             continue
         width = int(record.get("width", 0))
         height = int(record.get("height", 0))
-        shift = int(record.get("shift", -1))
-        s_min = float(record.get("s_min", float("nan")))
-        t_min = float(record.get("t_min", float("nan")))
         if not (1 <= width <= 65535 and 1 <= height <= 65535):
             raise ValueError(f"Face {face_id} has invalid decoupled lightmap dimensions {width}x{height}")
-        if shift < 0 or shift > 4:
-            raise ValueError(f"Face {face_id} has invalid decoupled lightmap shift {shift}")
-        if face[4] < 0 or face[4] >= len(texinfos):
-            raise ValueError(f"Face {face_id} has an invalid source texinfo index")
-        texinfo = texinfos[face[4]]
-        spacing = float(1 << shift)
-        vectors = (
-            float(texinfo[0]) / spacing, float(texinfo[1]) / spacing,
-            float(texinfo[2]) / spacing, (float(texinfo[3]) - s_min) / spacing,
-            float(texinfo[4]) / spacing, float(texinfo[5]) / spacing,
-            float(texinfo[6]) / spacing, (float(texinfo[7]) - t_min) / spacing,
-        )
-        if not all(math.isfinite(value) for value in vectors):
-            raise ValueError(f"Face {face_id} has non-finite decoupled lightmap axes")
+        provided_vectors = record.get("lmvecs")
+        if provided_vectors is not None:
+            if len(provided_vectors) != 8:
+                raise ValueError(f"Face {face_id} DECOUPLED_LM vectors must contain eight floats")
+            vectors = tuple(float(value) for value in provided_vectors)
+            if not all(math.isfinite(value) for value in vectors):
+                raise ValueError(f"Face {face_id} has non-finite decoupled lightmap axes")
+        else:
+            shift = int(record.get("shift", -1))
+            s_min = float(record.get("s_min", float("nan")))
+            t_min = float(record.get("t_min", float("nan")))
+            if shift < 0 or shift > 4:
+                raise ValueError(f"Face {face_id} has invalid decoupled lightmap shift {shift}")
+            if face[4] < 0 or face[4] >= len(texinfos):
+                raise ValueError(f"Face {face_id} has an invalid source texinfo index")
+            texinfo = texinfos[face[4]]
+            spacing = float(1 << shift)
+            vectors = (
+                float(texinfo[0]) / spacing, float(texinfo[1]) / spacing,
+                float(texinfo[2]) / spacing, (float(texinfo[3]) - s_min) / spacing,
+                float(texinfo[4]) / spacing, float(texinfo[5]) / spacing,
+                float(texinfo[6]) / spacing, (float(texinfo[7]) - t_min) / spacing,
+            )
+            if not all(math.isfinite(value) for value in vectors):
+                raise ValueError(f"Face {face_id} has non-finite decoupled lightmap axes")
         output.extend(struct.pack("<HHI8f", width, height, offset, *vectors))
     return bytes(output)
 
@@ -245,11 +386,13 @@ def build_lightmap_extension_data(
     face_records: Mapping[int, Mapping[str, Any]],
     base_sample_count: int,
 ) -> dict[str, bytes | int]:
-    """Build BSPX per-face arrays and appended mono/RGB sample payloads.
+    """Build per-face offsets/styles and appended mono/RGB sample payloads.
 
     face_records maps original BSP face ID to {shift, width, height, rgb}.
-    rgb is exactly width*height RGB triplets in row-major face sample order.
-    Unlit faces receive shift=4, style=255 and LMOFFSET=0xffffffff.
+    RGB is exactly width*height triplets in row-major face sample order.
+    LMOFFSET is retained as an internal offset table for DECOUPLED_LM writing;
+    QSS no longer emits LMSHIFT/LMOFFSET in its enhanced output.
+    Unlit faces receive style=255 and offset=0xffffffff.
     """
     if face_count < 0:
         raise ValueError("Face count cannot be negative")

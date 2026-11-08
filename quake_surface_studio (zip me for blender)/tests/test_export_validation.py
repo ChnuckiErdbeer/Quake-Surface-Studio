@@ -293,5 +293,84 @@ class ExportValidationTests(unittest.TestCase):
             export_validation.validate_export_bytes(original.write(), changed)
 
 
+    def _make_decoupled_export(self, original, face_offset=25, lmvecs=None):
+        faces = original.faces()
+        if lmvecs is None:
+            lmvecs = (1.0 / 16.0, 0.0, 0.0, 0.0, 0.0, 1.0 / 16.0, 0.0, 0.0)
+        record = {
+            "width": 5, "height": 5, "lmvecs": lmvecs,
+            "rgb": bytes((20, 40, 60)) * 25,
+        }
+        decoupled = lightmap_export.build_decoupled_lightmap_data(
+            faces, original.texinfos(), {0: record}, struct.pack("<I", face_offset)
+        )
+        lumps = list(original.lumps)
+        if len(lumps[bsp.LUMP_LIGHTING]) < face_offset:
+            lumps[bsp.LUMP_LIGHTING] += bytes(face_offset - len(lumps[bsp.LUMP_LIGHTING]))
+        lumps[bsp.LUMP_LIGHTING] += bytes(25)
+        rgb = bytes((80, 80, 80)) * face_offset + record["rgb"]
+        encoded = original.write(lumps, bspx_lumps={
+            "DECOUPLED_LM": decoupled,
+            "LMSTYLE": bytes([0]),
+            "RGBLIGHTING": rgb,
+        })
+        return encoded, rgb
+
+    def test_decoupled_lightmap_records_validate_independent_projection(self):
+        original = make_test_bsp(lightmapped=True)
+        encoded, rgb = self._make_decoupled_export(original)
+        report = export_validation.validate_export_bytes(
+            original.write(), encoded, bsp.build_lit_file(rgb)
+        )
+        self.assertEqual(report["enhanced_lighting_samples"], 25)
+        self.assertIn("DECOUPLED_LM", report["bspx_lumps"])
+        self.assertIn("LMSTYLE", report["bspx_lumps"])
+
+    def test_decoupled_lightmap_rejects_out_of_grid_projection(self):
+        original = make_test_bsp(lightmapped=True)
+        lmvecs = (1.0 / 8.0, 0.0, 0.0, 0.0, 0.0, 1.0 / 16.0, 0.0, 0.0)
+        encoded, _rgb = self._make_decoupled_export(original, lmvecs=lmvecs)
+        with self.assertRaisesRegex(bsp.BSPError, "projection falls outside"):
+            export_validation.validate_export_bytes(original.write(), encoded)
+
+    def test_decoupled_lightmap_rejects_sample_overrun(self):
+        original = make_test_bsp(lightmapped=True)
+        faces = original.faces()
+        record = {
+            "width": 5, "height": 5,
+            "lmvecs": (1.0 / 16.0, 0.0, 0.0, 0.0, 0.0, 1.0 / 16.0, 0.0, 0.0),
+            "rgb": bytes(75),
+        }
+        data = lightmap_export.build_decoupled_lightmap_data(
+            faces, original.texinfos(), {0: record}, struct.pack("<I", 26)
+        )
+        lumps = list(original.lumps)
+        lumps[bsp.LUMP_LIGHTING] += bytes(25)
+        encoded = original.write(lumps, bspx_lumps={
+            "DECOUPLED_LM": data, "LMSTYLE": bytes([0]), "RGBLIGHTING": bytes(3 * 50)
+        })
+        with self.assertRaisesRegex(bsp.BSPError, "ends at sample 51"):
+            export_validation.validate_export_bytes(original.write(), encoded)
+
+    def test_preserved_decoupled_layout_allows_appended_classic_fallback(self):
+        original = make_test_bsp(lightmapped=True)
+        source_data, source_rgb = self._make_decoupled_export(original)
+        source = bsp.BSP29(source_data)
+        faces_lump = bsp.replace_face_lightofs(source.lumps[bsp.LUMP_FACES], 0, 50)
+        changed = bytearray(faces_lump)
+        changed[12:16] = bytes((0, 255, 255, 255))
+        lumps = list(source.lumps)
+        lumps[bsp.LUMP_FACES] = bytes(changed)
+        lumps[bsp.LUMP_LIGHTING] += bytes(25)
+        rgb = source_rgb + bytes((30, 60, 90)) * 25
+        bspx = dict(source.bspx_lumps)
+        bspx["RGBLIGHTING"] = rgb
+        report = export_validation.validate_export_bytes(
+            source_data, source.write(lumps, bspx), bsp.build_lit_file(rgb)
+        )
+        self.assertEqual(report["classic_required_samples"], 75)
+        self.assertIn("DECOUPLED_LM", report["bspx_lumps"])
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

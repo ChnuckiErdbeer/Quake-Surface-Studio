@@ -11,9 +11,10 @@ import struct
 from typing import Optional
 
 try:
-    from . import bsp
+    from . import bsp, lightmap_export as lightmap_export_utils
 except ImportError:  # executed as a stand-alone script / unittest module
     import bsp
+    import lightmap_export as lightmap_export_utils
 
 
 _GEOMETRY_LUMPS = (
@@ -113,8 +114,127 @@ def _validate_classic_lightmaps(parsed: bsp.BSP29, label: str) -> int:
     return required_samples
 
 
-def _validate_enhanced_lightmaps(parsed: bsp.BSP29, classic_required: int, base_sample_count: int) -> Optional[int]:
+def _validate_enhanced_lightmaps(
+    parsed: bsp.BSP29,
+    classic_required: int,
+    base_sample_count: int,
+    require_appended: bool = True,
+) -> Optional[int]:
+    """Validate either classic LMSHIFT arrays or DECOUPLED_LM records."""
     extensions = parsed.bspx_lumps
+    if "LMSTYLE16" in extensions:
+        _fail("LMSTYLE16 is not supported; its variable-length face-style table is not implemented")
+    if "DECOUPLED_LM" in extensions:
+        faces = parsed.faces()
+        count = len(faces)
+        try:
+            records = lightmap_export_utils.parse_decoupled_lightmap_data(
+                extensions["DECOUPLED_LM"], count
+            )
+        except ValueError as exc:
+            _fail(f"invalid DECOUPLED_LM data: {exc}")
+        styles_payload = extensions.get("LMSTYLE")
+        if styles_payload is not None and len(styles_payload) != count:
+            _fail(f"LMSTYLE must contain exactly one byte for each of {count} faces")
+        rgb = extensions.get("RGBLIGHTING")
+        if rgb is None or len(rgb) % 3:
+            _fail("DECOUPLED_LM requires a valid RGBLIGHTING BSPX lump")
+        lighting = parsed.lumps[bsp.LUMP_LIGHTING]
+        if len(rgb) != len(lighting) * 3:
+            _fail("DECOUPLED_LM RGBLIGHTING must contain exactly three bytes per LIGHTING sample")
+        rgb_samples = len(rgb) // 3
+        vertices = parsed.vertices()
+        spans = []
+        total_samples = 0
+        for face_index, (face, record) in enumerate(zip(faces, records)):
+            style = (
+                int(styles_payload[face_index])
+                if styles_payload is not None
+                else None
+            )
+            if record is None:
+                if style not in (None, 255):
+                    _fail(f"DECOUPLED_LM face {face_index} is unlit but LMSTYLE declares style {style}")
+                continue
+            if style == 255:
+                _fail(f"DECOUPLED_LM face {face_index} has samples but LMSTYLE marks it unlit")
+            width, height = int(record["width"]), int(record["height"])
+            if width < 1 or height < 1:
+                _fail(f"DECOUPLED_LM face {face_index} has invalid dimensions")
+            active_styles = (
+                [style] if style is not None
+                else [int(value) for value in face[5:9] if int(value) != 255]
+            )
+            if not active_styles:
+                _fail(f"DECOUPLED_LM face {face_index} has samples but no active face style")
+            sample_count = width * height * len(active_styles)
+            offset = int(record["offset"])
+            finish = offset + sample_count
+            if finish > rgb_samples:
+                _fail(
+                    f"DECOUPLED_LM face {face_index} ends at sample {finish}, "
+                    f"but RGBLIGHTING contains only {rgb_samples} samples"
+                )
+            if finish > len(lighting):
+                _fail(
+                    f"DECOUPLED_LM face {face_index} ends at sample {finish}, "
+                    f"but LIGHTING contains only {len(lighting)} samples"
+                )
+            plane_id = int(face[0])
+            planes = parsed.planes()
+            if plane_id < 0 or plane_id >= len(planes):
+                _fail(f"DECOUPLED_LM face {face_index} references invalid plane {plane_id}")
+            vertex_ids = parsed.face_vertex_indices(face)
+            if len(vertex_ids) < 3 or any(index < 0 or index >= len(vertices) for index in vertex_ids):
+                _fail(f"DECOUPLED_LM face {face_index} references invalid vertices")
+            sign = -1.0 if int(face[1]) else 1.0
+            normal = tuple(float(planes[plane_id][i]) * sign for i in range(3))
+            distance = float(planes[plane_id][3]) * sign
+            lmvecs = record["lmvecs"]
+            s_values = [
+                vertices[index][0] * lmvecs[0] + vertices[index][1] * lmvecs[1]
+                + vertices[index][2] * lmvecs[2] + lmvecs[3]
+                for index in vertex_ids
+            ]
+            t_values = [
+                vertices[index][0] * lmvecs[4] + vertices[index][1] * lmvecs[5]
+                + vertices[index][2] * lmvecs[6] + lmvecs[7]
+                for index in vertex_ids
+            ]
+            epsilon = 0.01
+            if (min(s_values) < -epsilon or min(t_values) < -epsilon
+                    or max(s_values) > width - 1 + epsilon
+                    or max(t_values) > height - 1 + epsilon):
+                _fail(
+                    f"DECOUPLED_LM face {face_index} projection falls outside "
+                    f"its {width}x{height} sample grid"
+                )
+            spans.append((offset, finish, face_index))
+            total_samples += sample_count
+
+        if require_appended and spans:
+            first_offset = min(start for start, _end, _face in spans)
+            if first_offset < classic_required:
+                _fail(
+                    f"DECOUPLED_LM appended samples begin at {first_offset}, "
+                    f"before the classic fallback range ending at {classic_required}"
+                )
+            cursor = first_offset
+            for start, finish, face_index in sorted(spans):
+                if start != cursor:
+                    _fail(
+                        f"DECOUPLED_LM face {face_index} starts at sample {start}; "
+                        f"expected contiguous sample offset {cursor} (overlap or gap)"
+                    )
+                cursor = finish
+            if cursor != rgb_samples:
+                _fail(
+                    f"DECOUPLED_LM records consume through sample {cursor}, "
+                    f"but RGBLIGHTING contains {rgb_samples} samples"
+                )
+            return cursor - first_offset
+        return total_samples
+
     if not any(name in extensions for name in ("LMSHIFT", "LMOFFSET", "LMSTYLE")):
         return None
 
@@ -143,47 +263,44 @@ def _validate_enhanced_lightmaps(parsed: bsp.BSP29, classic_required: int, base_
     spans = []
     for face_index, face in enumerate(faces):
         shift = int(shifts[face_index])
-        if shift > 4:
-            _fail(f"face {face_index} has unsupported LMSHIFT value {shift}")
         offset = struct.unpack_from("<I", offsets, face_index * 4)[0]
         style = int(styles[face_index])
+        if shift > 4:
+            _fail(f"face {face_index} has unsupported LMSHIFT value {shift}")
         if offset == _NO_LIGHT_OFFSET or style == 255:
             if offset != _NO_LIGHT_OFFSET or style != 255:
                 _fail(f"face {face_index} has inconsistent no-light metadata")
             continue
-        if offset < classic_required:
-            _fail(
-                f"face {face_index} enhanced lightmap offset {offset} overlaps "
-                f"the classic sample range ending at {classic_required}"
-            )
         width, height = _face_lightmap_dimensions(parsed, face, 1 << shift)
         if width > 256 or height > 256:
             _fail(
                 f"face {face_index} enhanced lightmap is {width}x{height}; "
                 "BSPX LMSHIFT surfaces are limited to 256 luxels per axis"
             )
-        end = offset + width * height
-        if end > rgb_samples:
+        finish = offset + width * height
+        if finish > rgb_samples:
             _fail(
-                f"face {face_index} enhanced lightmap ends at sample {end}, "
+                f"face {face_index} enhanced lightmap ends at sample {finish}, "
                 f"but RGBLIGHTING contains only {rgb_samples} samples"
             )
-        spans.append((offset, end, face_index))
+        spans.append((offset, finish, face_index))
 
-    cursor = base_sample_count
-    for start, end, face_index in sorted(spans):
-        if start != cursor:
+    if require_appended:
+        cursor = base_sample_count
+        for start, finish, face_index in sorted(spans):
+            if start != cursor:
+                _fail(
+                    f"face {face_index} enhanced lightmap starts at sample {start}; "
+                    f"expected contiguous sample offset {cursor} (overlap or gap)"
+                )
+            cursor = finish
+        if cursor != rgb_samples:
             _fail(
-                f"face {face_index} enhanced lightmap starts at sample {start}; "
-                f"expected contiguous sample offset {cursor} (overlap or gap)"
+                f"enhanced RGBLIGHTING has {rgb_samples} samples but face ranges "
+                f"consume {cursor}"
             )
-        cursor = end
-    if cursor != rgb_samples:
-        _fail(
-            f"enhanced RGBLIGHTING has {rgb_samples} samples but face ranges "
-            f"consume {cursor}"
-        )
-    return rgb_samples - base_sample_count
+        return rgb_samples - base_sample_count
+    return sum(end - start for start, end, _face in spans)
 
 
 def validate_export_bytes(
@@ -216,10 +333,12 @@ def validate_export_bytes(
     source_faces = source.faces()
     exported_faces = exported.faces()
     for face_index, (before, after) in enumerate(zip(source_faces, exported_faces)):
-        stable_fields_before = (before[0], before[1], before[2], before[3], before[5:9], before[9])
-        stable_fields_after = (after[0], after[1], after[2], after[3], after[5:9], after[9])
-        if stable_fields_before != stable_fields_after:
-            _fail(f"face {face_index} geometry/light-style offsets changed unexpectedly")
+        stable_geometry_before = (before[0], before[1], before[2], before[3])
+        stable_geometry_after = (after[0], after[1], after[2], after[3])
+        if stable_geometry_before != stable_geometry_after:
+            _fail(f"face {face_index} geometry changed unexpectedly")
+        if "DECOUPLED_LM" not in source.bspx_lumps and before[5:9] != after[5:9]:
+            _fail(f"face {face_index} classic light-style IDs changed unexpectedly")
 
     for name, payload in source.bspx_lumps.items():
         if name in _REWRITABLE_BSPX:
@@ -229,10 +348,18 @@ def validate_export_bytes(
 
     classic_required = _validate_classic_lightmaps(exported, "exported")
     source_rgb = source.bspx_lumps.get('RGBLIGHTING')
-    base_sample_count = len(source.lumps[bsp.LUMP_LIGHTING])
-    if base_sample_count == 0 and source_rgb is not None and len(source_rgb) % 3 == 0:
-        base_sample_count = len(source_rgb) // 3
-    enhanced_samples = _validate_enhanced_lightmaps(exported, classic_required, base_sample_count)
+    base_sample_count = max(
+        len(source.lumps[bsp.LUMP_LIGHTING]),
+        len(source_rgb) // 3 if source_rgb is not None and len(source_rgb) % 3 == 0 else 0,
+    )
+    preserved_decoupled = (
+        source.bspx_lumps.get("DECOUPLED_LM") is not None
+        and exported.bspx_lumps.get("DECOUPLED_LM") == source.bspx_lumps.get("DECOUPLED_LM")
+    )
+    enhanced_samples = _validate_enhanced_lightmaps(
+        exported, classic_required, base_sample_count,
+        require_appended=not preserved_decoupled,
+    )
     rgb_payload = exported.bspx_lumps.get("RGBLIGHTING")
     if rgb_payload is not None and enhanced_samples is None:
         if len(rgb_payload) % 3:

@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils
 
 
-ADDON_VERSION = (0, 15, 5)
+ADDON_VERSION = (0, 16, 0)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -1232,6 +1232,69 @@ def _calc_face_lightmap_extents(positions, texinfo):
     return s_min, t_min, s_max - s_min, t_max - t_min, svec, tvec
 
 
+
+def _qss_decoupled_lightmap_state(parsed, sample_count=None):
+    """Return per-face DECOUPLED_LM records and effective light-style lists.
+
+    DECOUPLED_LM carries dimensions, offsets and independent world-to-luxel
+    vectors. LMSTYLE optionally replaces the classic dface style bytes.
+    """
+    extensions = parsed.bspx_lumps
+    faces = parsed.faces()
+    face_count = len(faces)
+    if 'LMSTYLE16' in extensions:
+        raise bsp.BSPError(
+            "This BSP uses LMSTYLE16, whose variable-length style table is not supported yet."
+        )
+    style_payload = extensions.get('LMSTYLE')
+    if style_payload is not None and len(style_payload) != face_count:
+        raise bsp.BSPError(
+            f"LMSTYLE must contain one byte for each of {face_count} BSP faces."
+        )
+    if 'DECOUPLED_LM' not in extensions:
+        legacy = {'LMSHIFT', 'LMOFFSET'}.intersection(extensions)
+        if legacy:
+            raise bsp.BSPError(
+                "This BSP uses LMSHIFT/LMOFFSET without DECOUPLED_LM. "
+                "That legacy lightmap layout is not supported yet."
+            )
+        records = None
+    else:
+        try:
+            records = lightmap_export_utils.parse_decoupled_lightmap_data(
+                extensions['DECOUPLED_LM'], face_count
+            )
+        except ValueError as exc:
+            raise bsp.BSPError(f"Invalid BSPX DECOUPLED_LM data: {exc}") from exc
+
+    styles_by_face = []
+    for face_id, face in enumerate(faces):
+        if style_payload is not None:
+            style = int(style_payload[face_id])
+            styles = [] if style == 255 else [style]
+        else:
+            styles = [int(value) for value in face[5:9] if int(value) != 255]
+        styles_by_face.append(styles)
+
+    if records is not None and sample_count is not None:
+        available = int(sample_count)
+        for face_id, record in enumerate(records):
+            if record is None:
+                continue
+            styles = styles_by_face[face_id]
+            if not styles:
+                raise bsp.BSPError(
+                    f"DECOUPLED_LM face {face_id} has samples but no active light style."
+                )
+            required = record['width'] * record['height'] * len(styles)
+            end = record['offset'] + required
+            if end > available:
+                raise bsp.BSPError(
+                    f"DECOUPLED_LM face {face_id} references samples {record['offset']}..{end - 1}, "
+                    f"but the available light data contains only {available} samples."
+                )
+    return records, styles_by_face
+
 def _pack_lightmap_rectangles(records, gutter=2, max_atlas_size=2048):
     # Prefer 2x sample blocks for easier painting; fall back to 1:1 if needed.
     ordered = sorted(records, key=lambda r: (-(r['height']), -(r['width']), r['face_id']))
@@ -1269,28 +1332,52 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
     faces = parsed.faces()
     texinfos = parsed.texinfos()
     lighting = (parsed.lumps[bsp.LUMP_LIGHTING] if lighting_data is None else lighting_data)
+    sample_count = max(len(lighting), len(lit_rgb) // 3 if lit_rgb is not None else 0)
+    decoupled_records, styles_by_face = _qss_decoupled_lightmap_state(parsed, sample_count)
     records = []
     positions_lookup = dict(zip(face_ids, positions_by_face))
     for face_id, texinfo_id in zip(face_ids, texinfo_ids):
         if face_id < 0 or face_id >= len(faces) or texinfo_id < 0 or texinfo_id >= len(texinfos):
             continue
         face = faces[face_id]
-        styles = face[5:9]
-        light_offset = face[9]
-        if light_offset < 0 or styles[0] == 255:
+        decoupled = decoupled_records[face_id] if decoupled_records is not None else None
+        if decoupled_records is not None and decoupled is None:
             continue
-        ext = _calc_face_lightmap_extents(positions_lookup[face_id], texinfos[texinfo_id])
-        s_min, t_min, extent_s, extent_t, svec, tvec = ext
-        sample_w = (extent_s >> 4) + 1
-        sample_h = (extent_t >> 4) + 1
-        active_styles = [int(style) for style in styles if style != 255]
+        active_styles = styles_by_face[face_id]
+        if decoupled is not None:
+            light_offset = decoupled['offset']
+            sample_w = decoupled['width']
+            sample_h = decoupled['height']
+            lmvecs = decoupled['lmvecs']
+            svec, tvec = lmvecs[:4], lmvecs[4:8]
+            s_min = t_min = 0.0
+            positions = positions_lookup[face_id]
+            s_values = [p[0] * svec[0] + p[1] * svec[1] + p[2] * svec[2] + svec[3] for p in positions]
+            t_values = [p[0] * tvec[0] + p[1] * tvec[1] + p[2] * tvec[2] + tvec[3] for p in positions]
+            if (min(s_values) < -0.01 or min(t_values) < -0.01
+                    or max(s_values) > sample_w - 1 + 0.01
+                    or max(t_values) > sample_h - 1 + 0.01):
+                raise bsp.BSPError(
+                    f"DECOUPLED_LM face {face_id} projection falls outside its "
+                    f"{sample_w}x{sample_h} sample grid."
+                )
+        else:
+            light_offset = face[9]
+            if light_offset < 0 or not active_styles:
+                continue
+            ext = _calc_face_lightmap_extents(positions_lookup[face_id], texinfos[texinfo_id])
+            s_min, t_min, extent_s, extent_t, svec, tvec = ext
+            sample_w = (extent_s >> 4) + 1
+            sample_h = (extent_t >> 4) + 1
+            lmvecs = None
         style_count = len(active_styles)
         block_size = sample_w * sample_h
-        if not active_styles or light_offset + block_size * style_count > len(lighting):
-            continue
-        # Quake stores one luxel block per active style, contiguously from
-        # lightofs. The previous importer sampled only styles[0], silently
-        # dropping switchable/flickering layers such as style 2.
+        if not active_styles or light_offset + block_size * style_count > sample_count:
+            raise bsp.BSPError(
+                f"Face {face_id} lightmap samples exceed the available LIGHTING/RGBLIGHTING data."
+            )
+        # DECOUPLED_LM changes the sample offset and dimensions; LMSTYLE
+        # optionally replaces the classic dface style list.
         combined_rgb = lighting_utils.combine_style_samples(
             lighting, lit_rgb, light_offset, block_size, active_styles
         )
@@ -1309,6 +1396,7 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
             'styles': active_styles,
             'samples': combined_mono,
             'samples_rgb': combined_rgb,
+            'decoupled_lmvecs': lmvecs,
         })
 
     # Diagnose colour/brightness after summing every active face style.
@@ -1409,10 +1497,17 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
                 )
             for local_index, loop_index in enumerate(loop_indices):
                 p = positions[local_index]
-                s = p[0] * texinfo[0] + p[1] * texinfo[1] + p[2] * texinfo[2] + texinfo[3]
-                t = p[0] * texinfo[4] + p[1] * texinfo[5] + p[2] * texinfo[6] + texinfo[7]
-                lm_s = (s - rec['s_min']) / 16.0
-                lm_t = (t - rec['t_min']) / 16.0
+                if rec.get('decoupled_lmvecs') is not None:
+                    lmvecs = rec['decoupled_lmvecs']
+                    lm_s = p[0] * lmvecs[0] + p[1] * lmvecs[1] + p[2] * lmvecs[2] + lmvecs[3]
+                    lm_t = p[0] * lmvecs[4] + p[1] * lmvecs[5] + p[2] * lmvecs[6] + lmvecs[7]
+                    lm_s = min(max(lm_s, 0.0), rec['width'] - 1.0)
+                    lm_t = min(max(lm_t, 0.0), rec['height'] - 1.0)
+                else:
+                    s = p[0] * texinfo[0] + p[1] * texinfo[1] + p[2] * texinfo[2] + texinfo[3]
+                    t = p[0] * texinfo[4] + p[1] * texinfo[5] + p[2] * texinfo[6] + texinfo[7]
+                    lm_s = (s - rec['s_min']) / 16.0
+                    lm_t = (t - rec['t_min']) / 16.0
                 pixel_x = ax + gutter + (lm_s + 0.5) * scale
                 pixel_y = ay + gutter + (lm_t + 0.5) * scale
                 lm_uv.data[loop_index].uv = (pixel_x / atlas_size, 1.0 - pixel_y / atlas_size)
@@ -1520,23 +1615,18 @@ def _build_enhanced_lightmap_payload(
     source_lighting, source_lit_rgb, face_attrs, resolution,
     base_pixel_scale, base_gutter,
 ):
-    """Append high-density per-face samples and build DECOUPLED_LM/LMSTYLE.
+    """Append enhanced samples and rebuild the per-face DECOUPLED_LM table.
 
-    Classic samples (including reprojected detached-face fallbacks) are already
-    in the leading LIGHTING/RGBLIGHTING region. Enhanced samples are appended
-    after that region and addressed independently from texture texinfo axes.
+    Existing DECOUPLED_LM projections are imported and rebased from their own
+    world-to-luxel vectors. Classic faces continue to derive their original
+    lightmap basis from texinfo. The classic sample region remains at the front
+    of LIGHTING/RGBLIGHTING for engines that ignore BSPX.
     """
-    unsupported = {
-        'LMSHIFT', 'LMOFFSET', 'LMSTYLE', 'LMSTYLE16', 'DECOUPLED_LM'
-    }.intersection(parsed.bspx_lumps)
-    if unsupported:
-        names = ', '.join(sorted(unsupported))
-        raise bsp.BSPError(
-            f"Enhanced export cannot rebase a source BSP that already contains "
-            f"lightmap override(s): {names}. Import support for existing per-face "
-            "lightmap extensions is not implemented yet."
-        )
-
+    sample_count = max(
+        len(source_lighting),
+        len(source_lit_rgb) // 3 if source_lit_rgb is not None else 0,
+    )
+    decoupled_records, styles_by_face = _qss_decoupled_lightmap_state(parsed, sample_count)
     mesh = obj.data
     face_id_attr = face_attrs['qss_bsp_face_id']
     has_attr = face_attrs['qss_lm_has_data']
@@ -1559,28 +1649,56 @@ def _build_enhanced_lightmap_payload(
     face_records = {}
 
     for face_id, face in enumerate(faces):
-        light_offset = int(face[9])
-        styles = tuple(int(value) for value in face[5:9])
-        if light_offset < 0 or styles[0] == 255:
+        decoupled = decoupled_records[face_id] if decoupled_records is not None else None
+        if decoupled_records is not None and decoupled is None:
             continue
-        active_styles = [style for style in styles if style != 255]
+        active_styles = styles_by_face[face_id]
         if not active_styles:
-            raise bsp.BSPError(f"Face {face_id} has a light offset but no active styles.")
-        texinfo_id = int(face[4])
-        if texinfo_id < 0 or texinfo_id >= len(texinfos):
-            raise bsp.BSPError(f"Face {face_id} has an invalid texinfo index for enhanced lightmap export.")
+            continue
         vertex_ids = parsed.face_vertex_indices(face)
         if len(vertex_ids) < 3 or any(index < 0 or index >= len(vertices) for index in vertex_ids):
             raise bsp.BSPError(f"Face {face_id} has invalid vertex references for enhanced lightmap export.")
-
         positions = [vertices[index] for index in vertex_ids]
-        ext = _calc_face_lightmap_extents(positions, texinfos[texinfo_id])
-        base_s_min, base_t_min, base_extent_s, base_extent_t, svec, tvec = ext
-        base_width = (base_extent_s >> 4) + 1
-        base_height = (base_extent_t >> 4) + 1
+
+        if decoupled is not None:
+            light_offset = int(decoupled['offset'])
+            base_width = int(decoupled['width'])
+            base_height = int(decoupled['height'])
+            lmvecs = tuple(float(value) for value in decoupled['lmvecs'])
+            s_values = [
+                p[0] * lmvecs[0] + p[1] * lmvecs[1] + p[2] * lmvecs[2] + lmvecs[3]
+                for p in positions
+            ]
+            t_values = [
+                p[0] * lmvecs[4] + p[1] * lmvecs[5] + p[2] * lmvecs[6] + lmvecs[7]
+                for p in positions
+            ]
+            if (min(s_values) < -0.01 or min(t_values) < -0.01
+                    or max(s_values) > base_width - 1 + 0.01
+                    or max(t_values) > base_height - 1 + 0.01):
+                raise bsp.BSPError(
+                    f"DECOUPLED_LM face {face_id} projection falls outside its "
+                    f"{base_width}x{base_height} sample grid."
+                )
+            texinfo_id = int(face[4])
+            base_s_min = base_t_min = 0
+        else:
+            light_offset = int(face[9])
+            if light_offset < 0:
+                continue
+            texinfo_id = int(face[4])
+            if texinfo_id < 0 or texinfo_id >= len(texinfos):
+                raise bsp.BSPError(f"Face {face_id} has an invalid source texinfo index for enhanced lightmap export.")
+            base_s_min, base_t_min, base_extent_s, base_extent_t, svec, tvec = _calc_face_lightmap_extents(
+                positions, texinfos[texinfo_id]
+            )
+            base_width = (base_extent_s >> 4) + 1
+            base_height = (base_extent_t >> 4) + 1
+            lmvecs = None
+
         block_size = base_width * base_height
-        if light_offset + block_size * len(active_styles) > len(source_lighting):
-            raise bsp.BSPError(f"Face {face_id} source lightmap samples exceed the LIGHTING lump.")
+        if light_offset + block_size * len(active_styles) > sample_count:
+            raise bsp.BSPError(f"Face {face_id} source lightmap samples exceed the LIGHTING/RGBLIGHTING data.")
 
         record = None
         poly_index = polygons_by_face.get(face_id)
@@ -1590,63 +1708,93 @@ def _build_enhanced_lightmap_payload(
             if (stored_width, stored_height) != (base_width, base_height):
                 raise bsp.BSPError(
                     f"Face {face_id} atlas dimensions {stored_width}x{stored_height} do not match "
-                    f"the source BSP's {base_width}x{base_height} classic luxel grid."
+                    f"the source BSP's {base_width}x{base_height} lightmap grid."
                 )
-            s_values = [
-                p[0] * svec[0] + p[1] * svec[1] + p[2] * svec[2] + svec[3]
-                for p in positions
-            ]
-            t_values = [
-                p[0] * tvec[0] + p[1] * tvec[1] + p[2] * tvec[2] + tvec[3]
-                for p in positions
-            ]
             try:
-                shift, s_min, t_min, width, height = lightmap_export_utils.choose_luxel_grid(
-                    s_values, t_values, resolution
-                )
-                rgb_samples = lightmap_export_utils.sample_face_rgb_from_atlas(
-                    image_pixels, image_size, resolution,
-                    int(x_attr.data[poly_index].value),
-                    int(y_attr.data[poly_index].value),
-                    int(base_gutter), int(base_pixel_scale),
-                    int(base_s_min), int(base_t_min),
-                    int(s_min), int(t_min), int(width), int(height),
-                    1 << shift,
-                )
+                if lmvecs is not None:
+                    factor = int(resolution)
+                    while factor > 1 and (
+                        (base_width - 1) * factor + 1 > lightmap_export_utils.MAX_SURFACE_LUXELS
+                        or (base_height - 1) * factor + 1 > lightmap_export_utils.MAX_SURFACE_LUXELS
+                    ):
+                        factor //= 2
+                    width = (base_width - 1) * factor + 1
+                    height = (base_height - 1) * factor + 1
+                    if width > lightmap_export_utils.MAX_SURFACE_LUXELS or height > lightmap_export_utils.MAX_SURFACE_LUXELS:
+                        raise ValueError(
+                            f"source grid {base_width}x{base_height} exceeds the "
+                            f"{lightmap_export_utils.MAX_SURFACE_LUXELS}x{lightmap_export_utils.MAX_SURFACE_LUXELS} limit"
+                        )
+                    sample_s = tuple(index / factor for index in range(width))
+                    sample_t = tuple(index / factor for index in range(height))
+                    scaled_lmvecs = tuple(value * factor for value in lmvecs)
+                    rgb_samples = lightmap_export_utils.sample_face_rgb_at_lm_coordinates(
+                        image_pixels, image_size, resolution,
+                        int(x_attr.data[poly_index].value),
+                        int(y_attr.data[poly_index].value),
+                        int(base_gutter), int(base_pixel_scale),
+                        sample_s, sample_t,
+                    )
+                    record = {
+                        'shift': 4,
+                        'width': width,
+                        'height': height,
+                        'lmvecs': scaled_lmvecs,
+                        'rgb': rgb_samples,
+                    }
+                else:
+                    s_values = [
+                        p[0] * svec[0] + p[1] * svec[1] + p[2] * svec[2] + svec[3]
+                        for p in positions
+                    ]
+                    t_values = [
+                        p[0] * tvec[0] + p[1] * tvec[1] + p[2] * tvec[2] + tvec[3]
+                        for p in positions
+                    ]
+                    shift, s_min, t_min, width, height = lightmap_export_utils.choose_luxel_grid(
+                        s_values, t_values, resolution
+                    )
+                    rgb_samples = lightmap_export_utils.sample_face_rgb_from_atlas(
+                        image_pixels, image_size, resolution,
+                        int(x_attr.data[poly_index].value),
+                        int(y_attr.data[poly_index].value),
+                        int(base_gutter), int(base_pixel_scale),
+                        int(base_s_min), int(base_t_min),
+                        int(s_min), int(t_min), int(width), int(height),
+                        1 << shift,
+                    )
+                    record = {
+                        'shift': shift,
+                        'width': width,
+                        'height': height,
+                        's_min': s_min,
+                        't_min': t_min,
+                        'rgb': rgb_samples,
+                    }
             except ValueError as exc:
                 raise bsp.BSPError(f"Could not sample enhanced lightmap for face {face_id}: {exc}") from exc
-            record = {
-                'shift': shift,
-                'width': width,
-                'height': height,
-                's_min': s_min,
-                't_min': t_min,
-                'rgb': rgb_samples,
-            }
 
         if record is None:
-            # A rare face can lack a paint-atlas island (for example, geometry
-            # skipped by the importer). Keep it valid at classic density using
-            # its original style-combined samples rather than dropping lighting.
+            # A face without an editable atlas island retains its imported
+            # static lighting, including the original independent lmvecs.
             try:
                 original_rgb = lighting_utils.combine_style_samples(
                     source_lighting, source_lit_rgb, light_offset, block_size, active_styles
                 )
             except (ValueError, IndexError) as exc:
                 raise bsp.BSPError(f"Could not recover source lightmap samples for face {face_id}: {exc}") from exc
-            rgb_samples = bytes(
-                channel
-                for sample in original_rgb
-                for channel in sample
-            )
+            rgb_samples = bytes(channel for sample in original_rgb for channel in sample)
             record = {
                 'shift': 4,
                 'width': base_width,
                 'height': base_height,
-                's_min': base_s_min,
-                't_min': base_t_min,
                 'rgb': rgb_samples,
             }
+            if lmvecs is not None:
+                record['lmvecs'] = lmvecs
+            else:
+                record['s_min'] = base_s_min
+                record['t_min'] = base_t_min
         face_records[face_id] = record
 
     try:
@@ -1680,7 +1828,112 @@ def _build_enhanced_lightmap_payload(
 
 
 
-def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None):
+
+def _qss_append_decoupled_classic_fallback(
+    obj, parsed, face_id, face, decoupled, active_styles, texinfos, faces_lump,
+    lighting, lit_rgb, pixels, image_size, resolution,
+    atlas_x, atlas_y, gutter, pixels_per_luxel,
+):
+    """Reproject an editable decoupled face into a vanilla BSP29 fallback grid."""
+    fallback_styles = [int(value) for value in active_styles]
+    if not fallback_styles:
+        return faces_lump
+    if len(fallback_styles) > 4 or any(style < 0 or style >= 255 for style in fallback_styles):
+        raise bsp.BSPError(f"Decoupled face {face_id} has invalid classic fallback style IDs.")
+    texinfo_id = int(face[4])
+    if texinfo_id < 0 or texinfo_id >= len(texinfos):
+        raise bsp.BSPError(f"Decoupled face {face_id} has an invalid output texinfo index.")
+    texinfo = texinfos[texinfo_id]
+    vertex_ids = parsed.face_vertex_indices(face)
+    vertices = parsed.vertices()
+    if len(vertex_ids) < 3 or any(index < 0 or index >= len(vertices) for index in vertex_ids):
+        raise bsp.BSPError(f"Decoupled face {face_id} has invalid vertex references.")
+    positions = [vertices[index] for index in vertex_ids]
+    s_min, t_min, extent_s, extent_t, _svec, _tvec = _calc_face_lightmap_extents(
+        positions, texinfo
+    )
+    width = (extent_s >> 4) + 1
+    height = (extent_t >> 4) + 1
+    if width <= 0 or height <= 0 or width > 256 or height > 256:
+        raise bsp.BSPError(
+            f"Decoupled face {face_id} needs a {width}x{height} classic fallback lightmap; "
+            "the supported per-face limit is 256x256."
+        )
+    planes = parsed.planes()
+    plane_id = int(face[0])
+    if plane_id < 0 or plane_id >= len(planes):
+        raise bsp.BSPError(f"Decoupled face {face_id} references an invalid plane.")
+    plane = planes[plane_id]
+    sign = -1.0 if int(face[1]) else 1.0
+    normal = tuple(float(plane[i]) * sign for i in range(3))
+    distance = float(plane[3]) * sign
+    lmvecs = tuple(float(value) for value in decoupled['lmvecs'])
+    coordinate_pairs = []
+    for sy in range(height):
+        target_t = t_min + sy * 16.0
+        for sx in range(width):
+            target_s = s_min + sx * 16.0
+            point = lighting_utils.solve_texinfo_plane(
+                texinfo[0:3], texinfo[4:7], normal,
+                target_s - float(texinfo[3]),
+                target_t - float(texinfo[7]),
+                distance,
+            )
+            if point is None:
+                raise bsp.BSPError(
+                    f"Decoupled face {face_id} has a singular output texinfo projection; "
+                    "cannot create its classic lightmap fallback."
+                )
+            lm_s = point[0] * lmvecs[0] + point[1] * lmvecs[1] + point[2] * lmvecs[2] + lmvecs[3]
+            lm_t = point[0] * lmvecs[4] + point[1] * lmvecs[5] + point[2] * lmvecs[6] + lmvecs[7]
+            # A rotated or independently edited texture projection can make
+            # the rectangular vanilla lightmap grid extend beyond the source
+            # face's projected polygon at its corners. Those corner luxels are
+            # not sampled on the polygon itself; clamp them to the nearest edge
+            # of the imported lightmap island.
+            coordinate_pairs.append((
+                min(max(lm_s, 0.0), int(decoupled['width']) - 1.0),
+                min(max(lm_t, 0.0), int(decoupled['height']) - 1.0),
+            ))
+    try:
+        rgb_samples = lightmap_export_utils.sample_face_rgb_at_lm_coordinate_pairs(
+            pixels, image_size, resolution,
+            atlas_x, atlas_y, gutter, pixels_per_luxel,
+            coordinate_pairs,
+        )
+    except ValueError as exc:
+        raise bsp.BSPError(
+            f"Could not create classic fallback samples for decoupled face {face_id}: {exc}"
+        ) from exc
+    expected = width * height * 3
+    if len(rgb_samples) != expected:
+        raise bsp.BSPError(f"Decoupled face {face_id} classic fallback sampler returned an invalid block.")
+    mono_samples = bytes(
+        max(0, min(255, int(round(
+            0.2126 * rgb_samples[index]
+            + 0.7152 * rgb_samples[index + 1]
+            + 0.0722 * rgb_samples[index + 2]
+        ))))
+        for index in range(0, len(rgb_samples), 3)
+    )
+    new_lightofs = len(lighting)
+    if new_lightofs > 0x7FFFFFFF:
+        raise bsp.BSPError("Decoupled classic fallback samples exceed the signed BSP29 lightofs range.")
+    faces_lump = bsp.replace_face_lightofs(faces_lump, face_id, new_lightofs)
+    style_bytes = bytes(fallback_styles + [255] * (4 - len(fallback_styles)))
+    face_record_start = face_id * bsp.SIZE_FACE
+    face_record = bytearray(faces_lump)
+    face_record[face_record_start + 12:face_record_start + 16] = style_bytes
+    faces_lump = bytes(face_record)
+    lighting.extend(mono_samples)
+    lit_rgb.extend(rgb_samples)
+    if len(fallback_styles) > 1:
+        lighting.extend(bytes(width * height * (len(fallback_styles) - 1)))
+        lit_rgb.extend(bytes(width * height * (len(fallback_styles) - 1) * 3))
+    return faces_lump
+
+
+def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None, output_texinfo_lump=None):
     """Return (monochrome BSP lighting lump, QLIT v1 sidecar or None)."""
     image_name = obj.get('qss_lightmap_image_name', '')
     lighting_source = parsed.lumps[bsp.LUMP_LIGHTING]
@@ -1724,7 +1977,17 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None):
     faces = parsed.faces()
     faces_lump = bytes(output_faces_lump or parsed.lumps[bsp.LUMP_FACES])
     texinfos = parsed.texinfos()
+    output_texinfo_data = bytes(output_texinfo_lump or parsed.lumps[bsp.LUMP_TEXINFO])
+    if len(output_texinfo_data) % bsp.SIZE_TEXINFO:
+        raise bsp.BSPError("Output texinfo lump has an invalid record size.")
+    output_texinfos = [
+        struct.unpack_from("<8fii", output_texinfo_data, offset)
+        for offset in range(0, len(output_texinfo_data), bsp.SIZE_TEXINFO)
+    ]
     vertices = parsed.vertices()
+    decoupled_records, _styles_by_face = _qss_decoupled_lightmap_state(
+        parsed, max(len(lighting_source), len(source_lit_rgb) // 3 if source_lit_rgb is not None else 0)
+    )
     lighting = bytearray(lighting_source)
     if source_lit_rgb is None:
         lit_rgb = bytearray(channel for sample in lighting for channel in (sample, sample, sample))
@@ -1737,6 +2000,19 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None):
         if face_id < 0 or face_id >= len(faces):
             raise bsp.BSPError(f"Lightmap atlas refers to invalid BSP face {face_id}.")
         face = faces[face_id]
+        decoupled = decoupled_records[face_id] if decoupled_records is not None else None
+        if decoupled is not None:
+            output_face = struct.unpack_from("<Hhihh4Bi", faces_lump, face_id * bsp.SIZE_FACE)
+            faces_lump = _qss_append_decoupled_classic_fallback(
+                obj, parsed, face_id, output_face, decoupled, _styles_by_face[face_id],
+                output_texinfos, faces_lump,
+                lighting, lit_rgb, px, size, resolution,
+                int(x_attr.data[poly_index].value),
+                int(y_attr.data[poly_index].value),
+                int(obj.get('qss_lightmap_gutter', 2)),
+                int(obj.get('qss_lightmap_scale', 1)),
+            )
+            continue
         styles = face[5:9]
         light_offset = face[9]
         if light_offset < 0 or styles[0] == 255:
@@ -1806,6 +2082,10 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None):
         if face_id < 0 or face_id >= len(faces):
             raise bsp.BSPError(f"Detached lightmap refers to invalid BSP face {face_id}.")
         face = faces[face_id]
+        if decoupled_records is not None and decoupled_records[face_id] is not None:
+            # The decoupled face already received a vanilla fallback sampled
+            # through its final output texinfo in the first pass.
+            continue
         light_offset = int(face[9])
         if light_offset < 0 or int(face[5]) == 255:
             continue
@@ -2603,10 +2883,14 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
     lighting_lump, lit_file_data, lightmap_bspx_updates, new_faces_lump = _patch_lightmap_lump(
         obj, parsed, enhanced=(lightmap_export_mode == 'ENHANCED'),
         output_faces_lump=new_faces_lump,
+        output_texinfo_lump=new_texinfo_lump,
     )
     new_lumps[bsp.LUMP_LIGHTING] = lighting_lump
     new_lumps[bsp.LUMP_FACES] = new_faces_lump
     new_bspx_lumps = dict(parsed.bspx_lumps)
+    if lightmap_export_mode == 'ENHANCED':
+        for obsolete_name in ('LMSHIFT', 'LMOFFSET', 'LMSTYLE16'):
+            new_bspx_lumps.pop(obsolete_name, None)
     new_bspx_lumps.update(lightmap_bspx_updates)
     if lit_file_data is not None:
         # BSPX RGBLIGHTING is QLIT v1's RGB payload without the 8-byte header.
@@ -5012,7 +5296,7 @@ def _qss_source_bvh(obj, parsed, unit_scale, flip_z, context):
     return BVHTree.FromPolygons(world_vertices, polygons, all_triangles=False, epsilon=0.0)
 
 
-def _qss_read_source_face_sample(mesh, poly_index, face_id, parsed):
+def _qss_read_source_face_sample(mesh, poly_index, face_id, parsed, sample_count=None):
     """Return original BSP face, plane, texinfo and lightmap atlas metadata safely."""
     required = ('qss_bsp_face_id', 'qss_lm_has_data', 'qss_lm_atlas_x', 'qss_lm_atlas_y',
                 'qss_lm_sample_w', 'qss_lm_sample_h')
@@ -5055,11 +5339,40 @@ def _qss_read_source_face_sample(mesh, poly_index, face_id, parsed):
     vertex_ids = parsed.face_vertex_indices(face, edges, surfedges)
     positions = [vertices[i] for i in vertex_ids]
     texinfo = texinfos[texinfo_id]
-    s_min, t_min, extent_s, extent_t, _svec, _tvec = _calc_face_lightmap_extents(positions, texinfo)
     sample_w = int(_qss_safe_collection_item(attrs['qss_lm_sample_w'].data, poly_index, 'qss_lm_sample_w').value)
     sample_h = int(_qss_safe_collection_item(attrs['qss_lm_sample_h'].data, poly_index, 'qss_lm_sample_h').value)
-    expected_w = (extent_s >> 4) + 1
-    expected_h = (extent_t >> 4) + 1
+    if sample_count is None:
+        source_rgb = parsed.bspx_lumps.get('RGBLIGHTING')
+        sample_count = max(len(parsed.lumps[bsp.LUMP_LIGHTING]), len(source_rgb) // 3 if source_rgb else 0)
+    decoupled_records, styles_by_face = _qss_decoupled_lightmap_state(parsed, sample_count)
+    decoupled = decoupled_records[face_id] if decoupled_records is not None else None
+    if decoupled_records is not None and decoupled is None:
+        return None
+    if decoupled is not None:
+        expected_w, expected_h = decoupled['width'], decoupled['height']
+        s_min = t_min = 0.0
+        lmvecs = decoupled['lmvecs']
+        s_values = [
+            p[0] * lmvecs[0] + p[1] * lmvecs[1] + p[2] * lmvecs[2] + lmvecs[3]
+            for p in positions
+        ]
+        t_values = [
+            p[0] * lmvecs[4] + p[1] * lmvecs[5] + p[2] * lmvecs[6] + lmvecs[7]
+            for p in positions
+        ]
+        if (min(s_values) < -0.01 or min(t_values) < -0.01
+                or max(s_values) > expected_w - 1 + 0.01
+                or max(t_values) > expected_h - 1 + 0.01):
+            raise bsp.BSPError(
+                f'DECOUPLED_LM face {face_id} projection falls outside its {expected_w}x{expected_h} sample grid.'
+            )
+        light_offset = decoupled['offset']
+    else:
+        s_min, t_min, extent_s, extent_t, _svec, _tvec = _calc_face_lightmap_extents(positions, texinfo)
+        expected_w = (extent_s >> 4) + 1
+        expected_h = (extent_t >> 4) + 1
+        lmvecs = None
+        light_offset = int(face[9])
     if sample_w != expected_w or sample_h != expected_h:
         raise bsp.BSPError(
             f'Face {face_id} sample size mismatch: atlas={sample_w}x{sample_h}, BSP extents={expected_w}x{expected_h}. '
@@ -5073,9 +5386,11 @@ def _qss_read_source_face_sample(mesh, poly_index, face_id, parsed):
         'plane_distance': distance,
         's_min': s_min,
         't_min': t_min,
+        'light_offset': light_offset,
+        'decoupled_lmvecs': lmvecs,
         'width': sample_w,
         'height': sample_h,
-        'styles': [int(v) for v in face[5:9] if int(v) != 255],
+        'styles': styles_by_face[face_id],
         'atlas_x': int(_qss_safe_collection_item(attrs['qss_lm_atlas_x'].data, poly_index, 'qss_lm_atlas_x').value),
         'atlas_y': int(_qss_safe_collection_item(attrs['qss_lm_atlas_y'].data, poly_index, 'qss_lm_atlas_y').value),
     }
@@ -5094,6 +5409,15 @@ def _qss_run_ericw_direct_bake(context, obj):
     if not source_path or not os.path.isfile(source_path):
         raise bsp.BSPError('Source BSP is unavailable. Re-import the BSP before a Quake direct bake.')
     parsed = bsp.BSP29.from_file(source_path)
+    source_lit_rgb, _source_lighting_kind = bsp.resolve_rgb_lighting(
+        parsed.bspx_lumps,
+        parsed.lumps[bsp.LUMP_LIGHTING],
+        os.path.splitext(source_path)[0] + '.lit',
+    )
+    light_sample_count = max(
+        len(parsed.lumps[bsp.LUMP_LIGHTING]),
+        len(source_lit_rgb) // 3 if source_lit_rgb is not None else 0,
+    )
     mesh = obj.data
     if len(mesh.polygons) == 0:
         raise bsp.BSPError('The selected QSS mesh has no polygons.')
@@ -5141,22 +5465,32 @@ def _qss_run_ericw_direct_bake(context, obj):
     total_luxels = 0
     for poly_index, poly in enumerate(mesh.polygons):
         face_id = int(_qss_safe_collection_item(face_id_attr.data, poly_index, 'qss_bsp_face_id').value)
-        face_info = _qss_read_source_face_sample(mesh, poly_index, face_id, parsed)
+        face_info = _qss_read_source_face_sample(mesh, poly_index, face_id, parsed, light_sample_count)
         if face_info is None:
             continue
         x0 = face_info['atlas_x'] * resolution + gutter
         y0 = face_info['atlas_y'] * resolution + gutter
         for sy in range(face_info['height']):
             for sx in range(face_info['width']):
-                s_value = face_info['s_min'] + sx * 16.0 - float(face_info['texinfo'][3])
-                t_value = face_info['t_min'] + sy * 16.0 - float(face_info['texinfo'][7])
-                qpoint = lighting_utils.solve_texinfo_plane(
-                    face_info['texinfo'][0:3], face_info['texinfo'][4:7],
-                    face_info['plane_normal'], s_value, t_value,
-                    face_info['plane_distance']
-                )
+                lmvecs = face_info.get('decoupled_lmvecs')
+                if lmvecs is not None:
+                    s_value = float(sx) - float(lmvecs[3])
+                    t_value = float(sy) - float(lmvecs[7])
+                    qpoint = lighting_utils.solve_texinfo_plane(
+                        lmvecs[0:3], lmvecs[4:7],
+                        face_info['plane_normal'], s_value, t_value,
+                        face_info['plane_distance']
+                    )
+                else:
+                    s_value = face_info['s_min'] + sx * 16.0 - float(face_info['texinfo'][3])
+                    t_value = face_info['t_min'] + sy * 16.0 - float(face_info['texinfo'][7])
+                    qpoint = lighting_utils.solve_texinfo_plane(
+                        face_info['texinfo'][0:3], face_info['texinfo'][4:7],
+                        face_info['plane_normal'], s_value, t_value,
+                        face_info['plane_distance']
+                    )
                 if qpoint is None:
-                    raise bsp.BSPError(f'Face {face_id} has singular texture projection axes; cannot locate its luxels.')
+                    raise bsp.BSPError(f'Face {face_id} has singular lightmap projection axes; cannot locate its luxels.')
                 local_normal = Vector(face_info['plane_normal'])
                 if flip_z:
                     local_normal.z = -local_normal.z
@@ -5958,7 +6292,7 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
         description="Classic preserves original BSP29 luxel density; Enhanced adds QuakeSpasm-Spiked/FTE BSPX per-face lightmap resolution",
         items=(
             ('CLASSIC', "Classic BSP29", "Keep the original per-face luxel dimensions for broad engine compatibility"),
-            ('ENHANCED', "Enhanced BSPX (LMSHIFT)", "Append higher-density face lightmaps with LMSHIFT/LMOFFSET/LMSTYLE; requires a supporting engine"),
+            ('ENHANCED', "Enhanced BSPX (DECOUPLED_LM)", "Append higher-density per-face lightmaps with independent DECOUPLED_LM axes and LMSTYLE; requires a supporting engine"),
         ),
         default='CLASSIC',
     )
@@ -5976,7 +6310,7 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
             result = _export_object(context.object, self.filepath, self.lightmap_export_mode)
             path, texture_count, changed_faces, replacements, palette_origin, lit_path = result
             detail = f" | {os.path.basename(lit_path)} written" if lit_path else ""
-            mode_detail = " | Enhanced BSPX lightmaps" if self.lightmap_export_mode == 'ENHANCED' else " | Classic lightmaps"
+            mode_detail = " | Enhanced BSPX DECOUPLED_LM lightmaps" if self.lightmap_export_mode == 'ENHANCED' else " | Classic lightmaps"
             _report(
                 self, 'INFO',
                 f"Exported {os.path.basename(path)} | {texture_count} textures | "
@@ -6921,7 +7255,7 @@ def register():
         )
         bpy.types.Scene.qss_audit_enhanced_export = BoolProperty(
             name="Test Enhanced BSPX export", default=False,
-            description="Attempt Enhanced LMSHIFT export on each imported map where supported",
+            description="Attempt enhanced DECOUPLED_LM lightmap export on each imported map where supported",
         )
         bpy.types.Scene.qss_audit_quake_bake = BoolProperty(
             name="Run Quake direct lightmap bake", default=False,
