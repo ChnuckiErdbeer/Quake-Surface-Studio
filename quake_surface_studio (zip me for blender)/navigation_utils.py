@@ -52,3 +52,21 @@ def mouse_look_deltas(dx, dy, current_pitch, sensitivity=0.0022, pitch_limit=mat
         min(float(pitch_limit), float(current_pitch) - float(dy) * float(sensitivity)),
     )
     return yaw_delta, target_pitch - float(current_pitch)
+
+
+
+def viewport_region_center(region_x, region_y, region_width, region_height):
+    """Return the center of a Blender region in window-relative coordinates."""
+    return (
+        int(region_x) + int(region_width) // 2,
+        int(region_y) + int(region_height) // 2,
+    )
+
+
+def mouse_delta_from_center(mouse_x, mouse_y, center_x, center_y):
+    """Return relative movement from the locked pointer center.
+
+    Cursor-warp feedback events land at the center and therefore yield (0, 0),
+    independent of their delivery order.
+    """
+    return int(mouse_x) - int(center_x), int(mouse_y) - int(center_y)

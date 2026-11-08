@@ -68,6 +68,27 @@ class NavigationEventTests(unittest.TestCase):
         )
         self.assertAlmostEqual(pitch_delta, -limit + math.radians(88.0))
 
+    def test_viewport_center_uses_window_relative_region_origin(self):
+        center = navigation_utils.viewport_region_center(120, 80, 900, 700)
+        self.assertEqual(center, (570, 430))
+
+    def test_mouse_delta_is_measured_from_center(self):
+        dx, dy = navigation_utils.mouse_delta_from_center(582, 421, 570, 430)
+        self.assertEqual((dx, dy), (12, -9))
+
+    def test_center_warp_feedback_has_zero_mouse_delta(self):
+        center = navigation_utils.viewport_region_center(120, 80, 900, 700)
+        self.assertEqual(
+            navigation_utils.mouse_delta_from_center(center[0], center[1], *center),
+            (0, 0),
+        )
+
+    def test_center_is_recalculated_after_region_resize(self):
+        first = navigation_utils.viewport_region_center(120, 80, 900, 700)
+        second = navigation_utils.viewport_region_center(120, 80, 1000, 700)
+        self.assertEqual(first, (570, 430))
+        self.assertEqual(second, (620, 430))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

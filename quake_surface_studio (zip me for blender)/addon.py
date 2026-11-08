@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils
 
 
-ADDON_VERSION = (0, 15, 2)
+ADDON_VERSION = (0, 15, 3)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -2792,7 +2792,9 @@ class QSS_OT_fps_walk(Operator):
         self._session_key = session_key
         self._session = session
         self._keys_down = set()
-        self._last_mouse = (int(event.mouse_x), int(event.mouse_y))
+        self._mouse_center = navigation_utils.viewport_region_center(
+            region.x, region.y, region.width, region.height
+        )
         self._last_time = time.monotonic()
 
         obj = context.object
@@ -2864,13 +2866,42 @@ class QSS_OT_fps_walk(Operator):
             remaining -= normal * into_wall
         return safe_move + remaining
 
+    def _current_mouse_center(self):
+        """Return the 3D window region center in Blender window coordinates."""
+        return navigation_utils.viewport_region_center(
+            self._region.x, self._region.y, self._region.width, self._region.height
+        )
+
+    def _warp_mouse_to_center(self):
+        """Keep the hidden pointer anchored at the viewport center during MMB-look."""
+        center = self._current_mouse_center()
+        self._mouse_center = center
+        try:
+            self._window.cursor_warp(*center)
+        except Exception:
+            pass
+        return center
+
     def _apply_mouse_look(self, event):
-        """Apply incremental quaternion yaw/pitch while keeping the eye point fixed."""
+        """Apply center-relative quaternion look and immediately recenter the pointer."""
         from mathutils import Quaternion, Vector
 
-        dx = int(event.mouse_x) - self._last_mouse[0]
-        dy = int(event.mouse_y) - self._last_mouse[1]
-        self._last_mouse = (int(event.mouse_x), int(event.mouse_y))
+        center = self._current_mouse_center()
+        if center != self._mouse_center:
+            # A viewport resize or layout change moved the anchor. Re-anchor
+            # without interpreting that coordinate shift as mouse input.
+            self._warp_mouse_to_center()
+            return
+
+        dx, dy = navigation_utils.mouse_delta_from_center(
+            event.mouse_x, event.mouse_y, center[0], center[1]
+        )
+
+        # Warp on every movement event, not just at the edge. cursor_warp may
+        # enqueue a synthetic MOUSEMOVE later; its coordinates are at center,
+        # so it naturally produces a zero delta on the next modal callback.
+        self._warp_mouse_to_center()
+
         if dx == 0 and dy == 0:
             return
 
@@ -2903,28 +2934,6 @@ class QSS_OT_fps_walk(Operator):
         )
         self._area.tag_redraw()
 
-        # Recenter only when the pointer reaches the edge of the actual 3D
-        # window region. This avoids unbounded travel without edge-triggered
-        # pitch jumps or an extra camera orientation state.
-        region_left = int(self._region.x)
-        region_bottom = int(self._region.y)
-        region_width = int(self._region.width)
-        region_height = int(self._region.height)
-        if region_width > 8 and region_height > 8 and (
-            event.mouse_x <= region_left + 3
-            or event.mouse_y <= region_bottom + 3
-            or event.mouse_x >= region_left + region_width - 4
-            or event.mouse_y >= region_bottom + region_height - 4
-        ):
-            center = (
-                region_left + region_width // 2,
-                region_bottom + region_height // 2,
-            )
-            try:
-                self._window.cursor_warp(*center)
-                self._last_mouse = center
-            except Exception:
-                pass
 
     def modal(self, context, event):
         try:
@@ -3018,11 +3027,11 @@ class QSS_OT_fps_walk(Operator):
         if event.type == "MIDDLEMOUSE" and event.value == "PRESS":
             if in_viewport:
                 session["looking"] = True
-                self._last_mouse = (int(event.mouse_x), int(event.mouse_y))
                 try:
                     self._window.cursor_modal_set("NONE")
                 except Exception:
                     pass
+                self._warp_mouse_to_center()
                 return {"RUNNING_MODAL"}
             return {"PASS_THROUGH"}
 
