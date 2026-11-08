@@ -130,6 +130,24 @@ def _on_game_folder_changed(self, context):
     _qss_save_config(scene)
 
 
+def _on_external_tool_path_changed(self, context):
+    """Persist external executable/tool paths immediately when edited in the UI."""
+    scene = getattr(context, 'scene', None) if context else None
+    if scene is None:
+        return
+    config = _qss_load_config()
+    config['ericw_tools_dir'] = _qss_abspath(
+        getattr(scene, 'qss_ericw_tools_dir', '') or ''
+    )
+    config['ironwail_executable'] = _qss_abspath(
+        getattr(scene, 'qss_ironwail_executable', '') or ''
+    )
+    config['ironwail_demo'] = _qss_abspath(
+        getattr(scene, 'qss_ironwail_demo', '') or ''
+    )
+    quake_paths.save_config(config, _qss_config_path())
+
+
 def _qss_write_text_report(name, contents):
     report = bpy.data.texts.get(name)
     if report is None:
