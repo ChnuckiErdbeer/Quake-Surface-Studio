@@ -13,6 +13,25 @@ def configure_texture_paint_visibility(image_paint):
     image_paint.use_backface_culling = False
 
 
+def filter_lightmapped_face_indices(selected_indices, lightmap_flags):
+    """Keep unique, in-range selected faces that have imported lightmap samples.
+
+    The order of the user's selection is preserved so the active face can be
+    retained by the caller. Invalid indices are ignored defensively.
+    """
+    flags = tuple(bool(value) for value in lightmap_flags)
+    result = []
+    seen = set()
+    for raw_index in selected_indices:
+        index = int(raw_index)
+        if index in seen or index < 0 or index >= len(flags):
+            continue
+        seen.add(index)
+        if flags[index]:
+            result.append(index)
+    return result
+
+
 def trim_appended_material_slots(materials, original_count):
     """Remove material slots appended after a transaction snapshot.
 
