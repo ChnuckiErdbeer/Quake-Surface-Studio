@@ -3591,6 +3591,11 @@ class QSS_OT_run_map_audit(Operator):
         return bool(context.scene and getattr(context.scene, "qss_game_dir", ""))
 
     def _begin(self, context):
+        self._saved_active = context.view_layer.objects.active
+        self._saved_mode = getattr(self._saved_active, "mode", "OBJECT") if self._saved_active else "OBJECT"
+        if self._saved_active is not None and self._saved_mode != "OBJECT":
+            with context.temp_override(**_qss_audit_context_override(context, self._saved_active)):
+                bpy.ops.object.mode_set(mode="OBJECT")
         game_dir = _qss_abspath(context.scene.qss_game_dir or "")
         self._entries = quake_paths.discover_maps(game_dir)
         if not self._entries:
@@ -3686,6 +3691,17 @@ class QSS_OT_run_map_audit(Operator):
             handle.write(report_text)
         _qss_write_text_report("QSS_Map_Audit_Report", report_text)
         _qss_write_text_report("QSS_Map_Audit_JSON", json.dumps(report, indent=2, ensure_ascii=False, default=str))
+        try:
+            if self._saved_active is not None and bpy.data.objects.get(self._saved_active.name) is not None:
+                context.view_layer.objects.active = self._saved_active
+                if self._saved_mode == "EDIT" and self._saved_active.type == "MESH":
+                    with context.temp_override(**_qss_audit_context_override(context, self._saved_active)):
+                        bpy.ops.object.mode_set(mode="EDIT")
+                elif self._saved_mode == "TEXTURE_PAINT" and self._saved_active.type == "MESH":
+                    with context.temp_override(**_qss_audit_context_override(context, self._saved_active)):
+                        bpy.ops.object.mode_set(mode="TEXTURE_PAINT")
+        except Exception as exc:
+            print(f"QSS audit could not restore the original interaction mode: {exc}")
         self._report_json = report_json
         self._report_text = report_path
         return report
