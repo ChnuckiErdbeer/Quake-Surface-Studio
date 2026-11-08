@@ -288,6 +288,10 @@ def _validate_enhanced_lightmaps(
     if require_appended:
         cursor = base_sample_count
         for start, finish, face_index in sorted(spans):
+            if start < base_sample_count:
+                _fail(
+                    f"face {face_index} enhanced lightmap overlaps the classic sample range"
+                )
             if start != cursor:
                 _fail(
                     f"face {face_index} enhanced lightmap starts at sample {start}; "
