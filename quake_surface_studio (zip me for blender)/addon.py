@@ -74,8 +74,13 @@ def _qss_save_config(scene=None, last_source_bsp=None):
 
 
 def _qss_game_folder_items(self, context):
+    # Blender may evaluate dynamic EnumProperty items during RNA registration,
+    # when context and its Scene are not available yet. Fall back to the
+    # persisted installation root so the configured default is a valid item.
     scene = getattr(context, 'scene', None) if context else None
     root = _qss_abspath(getattr(scene, 'qss_quake_root', '') or '') if scene else ''
+    if not root:
+        root = quake_paths.normalize_quake_root(_qss_load_config().get('quake_root', ''))
     items = quake_paths.discover_game_dirs(root)
     if not items:
         return [('NONE', 'No game folders found', 'Set the Quake installation folder first', 'ERROR', 0)]
@@ -5470,22 +5475,22 @@ def _remove_scene_properties():
 
 
 def _unregister_qss_classes():
-    """Unregister stale QSS classes by their Blender RNA names.
+    """Unregister stale QSS classes by RNA name and current Python class.
 
-    Looking them up on bpy.types is important during upgrades: the class object
-    in this newly imported Python module is not the same object as the class
-    that Blender registered from the previously enabled module.
+    Blender may retain registered classes after an interrupted add-on enable.
+    Resolve the registered RNA class first (it can belong to an older module
+    instance), then also try the current class object as a defensive fallback.
     """
     for cls in reversed(CLASSES):
         old_cls = getattr(bpy.types, cls.__name__, None)
-        if old_cls is None:
-            continue
-        try:
-            bpy.utils.unregister_class(old_cls)
-        except (RuntimeError, TypeError, ValueError):
-            # It may already have been unregistered by Blender or another
-            # cleanup pass. Do not prevent the remaining classes being removed.
-            pass
+        candidates = [old_cls] if old_cls is not None else []
+        if cls not in candidates:
+            candidates.append(cls)
+        for candidate in candidates:
+            try:
+                bpy.utils.unregister_class(candidate)
+            except (RuntimeError, TypeError, ValueError):
+                pass
 
 
 def _cleanup_previous_registration():
@@ -5530,6 +5535,9 @@ def register():
 
         initial_config = _qss_load_config()
         initial_root, initial_game_id, initial_game_dir = _qss_choose_initial_game_settings(initial_config)
+        available_game_ids = [item['id'] for item in quake_paths.discover_game_dirs(initial_root)]
+        if initial_game_id not in available_game_ids:
+            initial_game_id = available_game_ids[0] if available_game_ids else 'NONE'
         bpy.types.Scene.qss_quake_root = StringProperty(
             name="Quake installation folder",
             description="The folder containing id1 and any installed mod folders; selecting id1 itself is also accepted",
