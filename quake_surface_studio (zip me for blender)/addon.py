@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils
 
 
-ADDON_VERSION = (0, 17, 1)
+ADDON_VERSION = (0, 17, 2)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -6822,7 +6822,7 @@ def _qss_tool_keymap(operator_id):
 
 class QSS_WST_player_start(bpy.types.WorkSpaceTool):
     bl_space_type = "VIEW_3D"
-    bl_context_mode = "OBJECT"
+    bl_context_mode = None
     bl_idname = "qss.player_start"
     bl_label = "Go to Player Start"
     bl_description = "Click in the viewport to move to info_player_start"
@@ -6833,7 +6833,7 @@ class QSS_WST_player_start(bpy.types.WorkSpaceTool):
 
 class QSS_WST_focus_object(bpy.types.WorkSpaceTool):
     bl_space_type = "VIEW_3D"
-    bl_context_mode = "OBJECT"
+    bl_context_mode = None
     bl_idname = "qss.focus_face_object"
     bl_label = "Focus Selected Face"
     bl_description = "Click in the viewport to frame the selected face(s)"
@@ -6844,7 +6844,7 @@ class QSS_WST_focus_object(bpy.types.WorkSpaceTool):
 
 class QSS_WST_fps_navigation(bpy.types.WorkSpaceTool):
     bl_space_type = "VIEW_3D"
-    bl_context_mode = "OBJECT"
+    bl_context_mode = None
     bl_idname = "qss.fps_navigation"
     bl_label = "FPS Navigation"
     bl_description = "Click in the viewport to start keyboard navigation; WASD moves and MMB looks"
@@ -6855,7 +6855,7 @@ class QSS_WST_fps_navigation(bpy.types.WorkSpaceTool):
 
 class QSS_WST_focus_edit(bpy.types.WorkSpaceTool):
     bl_space_type = "VIEW_3D"
-    bl_context_mode = "EDIT_MESH"
+    bl_context_mode = None
     bl_idname = "qss.focus_face_edit"
     bl_label = "Focus Selected Face"
     bl_description = "Click in the viewport to frame the selected face(s)"
@@ -6866,7 +6866,7 @@ class QSS_WST_focus_edit(bpy.types.WorkSpaceTool):
 
 class QSS_WST_isolate_faces(bpy.types.WorkSpaceTool):
     bl_space_type = "VIEW_3D"
-    bl_context_mode = "EDIT_MESH"
+    bl_context_mode = None
     bl_idname = "qss.isolate_faces"
     bl_label = "Isolate Selected Faces"
     bl_description = "Hide all unselected BSP faces"
@@ -6877,7 +6877,7 @@ class QSS_WST_isolate_faces(bpy.types.WorkSpaceTool):
 
 class QSS_WST_reveal_faces(bpy.types.WorkSpaceTool):
     bl_space_type = "VIEW_3D"
-    bl_context_mode = "EDIT_MESH"
+    bl_context_mode = None
     bl_idname = "qss.reveal_faces"
     bl_label = "Reveal Hidden Faces"
     bl_description = "Reveal faces hidden in Edit Mode"
@@ -6888,7 +6888,7 @@ class QSS_WST_reveal_faces(bpy.types.WorkSpaceTool):
 
 class QSS_WST_paint_texture(bpy.types.WorkSpaceTool):
     bl_space_type = "VIEW_3D"
-    bl_context_mode = "EDIT_MESH"
+    bl_context_mode = None
     bl_idname = "qss.paint_texture"
     bl_label = "Paint Texture"
     bl_description = "Detach the selected faces and enter Texture Paint"
@@ -6899,7 +6899,7 @@ class QSS_WST_paint_texture(bpy.types.WorkSpaceTool):
 
 class QSS_WST_paint_lightmap(bpy.types.WorkSpaceTool):
     bl_space_type = "VIEW_3D"
-    bl_context_mode = "EDIT_MESH"
+    bl_context_mode = None
     bl_idname = "qss.paint_lightmap"
     bl_label = "Paint Lightmap"
     bl_description = "Enter Lightmap Paint for the selected lightmapped faces"
@@ -6920,45 +6920,35 @@ QSS_WORKSPACE_TOOLS = (
 )
 
 
+def _qss_registered_toolbar_tool_ids():
+    """Return QSS tool identifiers found in Blender's shared 3D View tool list."""
+    try:
+        from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
+        helper = ToolSelectPanelHelper._tool_class_from_space_type("VIEW_3D")
+        if helper is None:
+            return set()
+        definitions = ToolSelectPanelHelper._tools_flatten(helper._tools.get(None, ()))
+        return {
+            item.idname for item in definitions
+            if item is not None and str(getattr(item, "idname", "")).startswith("qss.")
+        }
+    except Exception:
+        return set()
+
+
 def _register_qss_workspace_tools():
-    # Keep every QSS action as its own visible toolbar button. Grouping these
-    # tools hides all but one icon behind Blender's drag-to-expand tool group;
-    # the first QSS icon also resembles the built-in Select tool.
-    tool_groups = (
-        (
-            "OBJECT",
-            (
-                QSS_WST_player_start,
-                QSS_WST_focus_object,
-                QSS_WST_fps_navigation,
-            ),
-        ),
-        (
-            "EDIT_MESH",
-            (
-                QSS_WST_focus_edit,
-                QSS_WST_isolate_faces,
-                QSS_WST_reveal_faces,
-                QSS_WST_paint_texture,
-                QSS_WST_paint_lightmap,
-            ),
-        ),
-    )
-    for context_mode, tools in tool_groups:
-        previous = "builtin.select_box"
-        for index, tool in enumerate(tools):
-            if tool.bl_context_mode != context_mode:
-                raise RuntimeError(
-                    f"QSS tool {tool.bl_idname} has context mode "
-                    f"{tool.bl_context_mode!r}, expected {context_mode!r}."
-                )
-            bpy.utils.register_tool(
-                tool,
-                after={previous},
-                separator=(index == 0),
-                group=False,
-            )
-            previous = tool.bl_idname
+    # Blender 5.2 assembles the 3D View toolbar from the shared _tools[None]
+    # list plus the current mode's list. Put QSS actions in the shared list so
+    # they are visible in Object, Edit and Paint modes alike. Each operator's
+    # poll/validation still enforces the modes in which the action is valid.
+    for index, tool in enumerate(QSS_WORKSPACE_TOOLS):
+        tool.bl_context_mode = None
+        bpy.utils.register_tool(
+            tool,
+            after={"builtin.select_box"} if index == 0 else {QSS_WORKSPACE_TOOLS[index - 1].bl_idname},
+            separator=(index == 0),
+            group=False,
+        )
 
 
 def _unregister_qss_workspace_tools():
@@ -6985,6 +6975,13 @@ class QSS_PT_workspace_main(Panel):
 
         header = layout.row(align=True)
         header.label(text=f"QSS {version}", icon="INFO")
+        toolbar_ids = _qss_registered_toolbar_tool_ids()
+        toolbar_status = layout.row()
+        toolbar_status.alert = len(toolbar_ids) != len(QSS_WORKSPACE_TOOLS)
+        toolbar_status.label(
+            text=f"Viewport tools registered: {len(toolbar_ids)}/{len(QSS_WORKSPACE_TOOLS)}",
+            icon="CHECKMARK" if len(toolbar_ids) == len(QSS_WORKSPACE_TOOLS) else "ERROR",
+        )
         launch = header.row()
         launch.enabled = bool(
             scene.qss_ironwail_executable
