@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import array
 import hashlib
+import json
 from functools import lru_cache
 import math
 import os
@@ -22,10 +23,10 @@ from bpy.types import Operator, Panel
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
 from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils
-from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils
+from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils
 
 
-ADDON_VERSION = (0, 17, 5)
+ADDON_VERSION = (0, 17, 6)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -6354,70 +6355,227 @@ class QSS_OT_apply_light_energy_scale(Operator):
 class QSS_OT_frame_selection(Operator):
     bl_idname = "qss.frame_selection"
     bl_label = "Focus Selected Face(s)"
-    bl_description = "Frame the selected mesh faces in the 3D View (Numpad Period)"
+    bl_description = "Frame the selected BSP faces precisely in the active 3D View"
 
     @classmethod
     def poll(cls, context):
         obj = context.object
-        return bool(obj and obj.type == 'MESH' and obj.get('qss_object_role') == 'quake_bsp29'
-                    and context.mode in {'OBJECT', 'EDIT_MESH'})
+        return bool(
+            obj and obj.type == 'MESH'
+            and obj.get('qss_object_role') == 'quake_bsp29'
+            and context.mode in {'OBJECT', 'EDIT_MESH'}
+        )
 
     def execute(self, context):
-        screen = context.screen
-        for area in screen.areas if screen else []:
-            if area.type != 'VIEW_3D':
-                continue
-            region = next((r for r in area.regions if r.type == 'WINDOW'), None)
-            if region is None:
-                continue
-            try:
-                with context.temp_override(window=context.window, area=area, region=region):
-                    bpy.ops.view3d.view_selected(use_all_regions=False)
-                return {'FINISHED'}
-            except Exception as exc:
-                _report(self, 'ERROR', f"Could not frame selection: {exc}")
-                return {'CANCELLED'}
-        _report(self, 'WARNING', "No 3D View found. Move the mouse over the level viewport and try again.")
-        return {'CANCELLED'}
+        import bmesh
+        from mathutils import Vector
+
+        obj = context.object
+        area = context.area if context.area and context.area.type == 'VIEW_3D' else None
+        if area is None:
+            area = next(
+                (item for item in (context.screen.areas if context.screen else [])
+                 if item.type == 'VIEW_3D'),
+                None,
+            )
+        if area is None:
+            _report(self, 'WARNING', "Focus needs an open 3D View.")
+            return {'CANCELLED'}
+
+        space = area.spaces.active if area.spaces.active and area.spaces.active.type == 'VIEW_3D' else next(
+            (item for item in area.spaces if item.type == 'VIEW_3D'), None
+        )
+        if space is None or space.region_3d is None:
+            _report(self, 'WARNING', "The active 3D View has no usable 3D region.")
+            return {'CANCELLED'}
+
+        try:
+            if context.mode == 'EDIT_MESH':
+                bm = bmesh.from_edit_mesh(obj.data)
+                bm.faces.ensure_lookup_table()
+                selected_faces = [
+                    face for face in bm.faces
+                    if face.select and not face.hide
+                ]
+                if selected_faces:
+                    local_points = [
+                        vertex.co.copy()
+                        for face in selected_faces
+                        for vertex in face.verts
+                    ]
+                    selection_label = f"{len(selected_faces)} selected face(s)"
+                else:
+                    selected_verts = [
+                        vertex for vertex in bm.verts
+                        if vertex.select and not vertex.hide
+                    ]
+                    if not selected_verts:
+                        _report(
+                            self, 'WARNING',
+                            "Select one or more BSP faces in Edit Mode before focusing.",
+                        )
+                        return {'CANCELLED'}
+                    local_points = [vertex.co.copy() for vertex in selected_verts]
+                    selection_label = f"{len(selected_verts)} selected vertex/vertices"
+                world_points = [obj.matrix_world @ point for point in local_points]
+            else:
+                if not obj.select_get():
+                    _report(self, 'WARNING', "Select the BSP object before focusing it.")
+                    return {'CANCELLED'}
+                world_points = [
+                    obj.matrix_world @ Vector(corner)
+                    for corner in obj.bound_box
+                ]
+                selection_label = "BSP object"
+
+            bounds = viewport_utils.bounds_from_points(
+                tuple(point) for point in world_points
+            )
+            space.region_3d.view_location = Vector(bounds["center"])
+            space.region_3d.view_distance = viewport_utils.view_distance_from_bounds(
+                bounds, scale=1.5, minimum=max(0.05, float(obj.get("qss_unit_scale", DEFAULT_QUAKE_UNIT_SCALE)) * 2.0)
+            )
+            # A camera view is not navigable by orbit distance/location. Leave
+            # it deliberately and switch to a normal perspective view for Focus.
+            if space.region_3d.view_perspective == 'CAMERA':
+                space.region_3d.view_perspective = 'PERSP'
+            area.tag_redraw()
+            _report(self, 'INFO', f"Focused {selection_label}.")
+            return {'FINISHED'}
+        except Exception as exc:
+            _report(self, 'ERROR', f"Could not focus the current BSP selection: {exc}")
+            return {'CANCELLED'}
 
 
 class QSS_OT_isolate_faces(Operator):
     bl_idname = "qss.isolate_faces"
-    bl_label = "Isolate Selected Faces"
-    bl_description = "Hide all unselected faces temporarily; use Reveal All to restore them"
+    bl_label = "Toggle Face Isolation"
+    bl_description = "Hide everything except selected BSP faces; click again to restore the previous visibility and selection"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    _snapshot_key = "qss_face_visibility_snapshot"
 
     @classmethod
     def poll(cls, context):
         obj = context.object
-        return bool(obj and obj.type == 'MESH' and obj.get('qss_object_role') == 'quake_bsp29'
-                    and context.mode == 'EDIT_MESH')
+        return bool(
+            obj and obj.type == 'MESH'
+            and obj.get('qss_object_role') == 'quake_bsp29'
+            and context.mode == 'EDIT_MESH'
+        )
 
     def execute(self, context):
         import bmesh
-        bm = bmesh.from_edit_mesh(context.object.data)
-        if not any(face.select for face in bm.faces):
-            _report(self, 'WARNING', "Select the face(s) to isolate first.")
-            return {'CANCELLED'}
-        try:
-            area = context.area if context.area and context.area.type == 'VIEW_3D' else None
-            if area is None:
-                area = next(
-                    (item for item in (context.screen.areas if context.screen else [])
-                     if item.type == 'VIEW_3D'),
-                    None,
+
+        obj = context.object
+        mesh = obj.data
+        bm = bmesh.from_edit_mesh(mesh)
+        bm.verts.ensure_lookup_table()
+        bm.edges.ensure_lookup_table()
+        bm.faces.ensure_lookup_table()
+        bm.verts.index_update()
+        bm.edges.index_update()
+        bm.faces.index_update()
+
+        vertex_count = len(bm.verts)
+        edge_count = len(bm.edges)
+        face_count = len(bm.faces)
+        payload = obj.get(self._snapshot_key, "")
+
+        if visibility_utils.snapshot_is_active(payload):
+            try:
+                hidden_faces, selected_faces = visibility_utils.decode_face_visibility_snapshot(
+                    payload, vertex_count, edge_count, face_count
                 )
-            region = next(
-                (item for item in area.regions if item.type == 'WINDOW'),
-                None,
-            ) if area else None
-            if area is None or region is None:
-                raise RuntimeError("No usable 3D View window region is available.")
-            with context.temp_override(window=context.window, area=area, region=region):
-                bpy.ops.mesh.hide(unselected=True)
+            except ValueError as exc:
+                _report(
+                    self, 'ERROR',
+                    f"Cannot safely restore the previous isolation: {exc} "
+                    "Use Blender's Reveal Hidden (Alt+H), then isolate again.",
+                )
+                return {'CANCELLED'}
+
+            try:
+                # Reveal the temporary isolation first, then re-apply only the
+                # faces that were hidden before QSS isolation began.
+                for face in bm.faces:
+                    face.hide_set(False)
+                for face_index in sorted(hidden_faces):
+                    bm.faces[face_index].hide_set(True)
+
+                # Restore the exact face selection that was active on entry.
+                for face in bm.faces:
+                    if face.select:
+                        face.select_set(False)
+                for face_index in sorted(selected_faces):
+                    bm.faces[face_index].select_set(True)
+                bm.select_flush_mode()
+                bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
+                del obj[self._snapshot_key]
+            except Exception as exc:
+                _report(self, 'ERROR', f"Could not restore face visibility: {exc}")
+                return {'CANCELLED'}
+
+            _report(self, 'INFO', "Face visibility and selection restored.")
             return {'FINISHED'}
-        except Exception as exc:
-            _report(self, 'ERROR', f"Could not isolate faces: {exc}")
+
+        selected_indices = [
+            face.index for face in bm.faces
+            if face.select and not face.hide
+        ]
+        if not selected_indices:
+            _report(self, 'WARNING', "Select one or more visible faces before isolating.")
             return {'CANCELLED'}
+
+        hidden_indices = [
+            face.index for face in bm.faces
+            if face.hide
+        ]
+        try:
+            snapshot = visibility_utils.encode_face_visibility_snapshot(
+                vertex_count,
+                edge_count,
+                face_count,
+                hidden_indices,
+                selected_indices,
+            )
+        except ValueError as exc:
+            _report(self, 'ERROR', str(exc))
+            return {'CANCELLED'}
+
+        try:
+            selected_set = set(selected_indices)
+            for face in bm.faces:
+                if face.index not in selected_set and not face.hide:
+                    face.hide_set(True)
+            bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
+            obj[self._snapshot_key] = snapshot
+        except Exception as exc:
+            # Best-effort rollback: restore only the visibility and selection
+            # recorded immediately before the isolation attempt.
+            try:
+                for face in bm.faces:
+                    face.hide_set(False)
+                for face_index in hidden_indices:
+                    bm.faces[face_index].hide_set(True)
+                for face in bm.faces:
+                    if face.select:
+                        face.select_set(False)
+                for face_index in selected_indices:
+                    bm.faces[face_index].select_set(True)
+                bm.select_flush_mode()
+                bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
+            except Exception:
+                pass
+            _report(self, 'ERROR', f"Could not isolate selected faces: {exc}")
+            return {'CANCELLED'}
+
+        _report(
+            self, 'INFO',
+            f"Isolated {len(selected_indices)} selected face(s). "
+            "Click Toggle Face Isolation again to restore the previous visibility.",
+        )
+        return {'FINISHED'}
 
 
 class QSS_OT_reveal_faces(Operator):
