@@ -1,6 +1,17 @@
-# Quake Surface Studio 0.17.5
+# Quake Surface Studio 0.17.6
+
+## 0.17.6 changes
+
+- Replaces context-sensitive `view3d.view_selected` calls with direct world-space bounds framing. Focus now frames the actual selected BSP faces in Edit Mode, or the BSP object bounds in Object Mode, in the active 3D View.
+- Makes **Isolate Selected Faces** a reversible toggle. QSS records the face visibility and selection state before isolation; pressing the same button again restores the previous hidden faces and selected faces instead of blindly revealing everything.
+- The isolation snapshot is stored on the BSP object and survives saving/reopening the .blend file. If the mesh topology changes while isolation is active, QSS refuses an unsafe restore and explains how to recover with Blender's Reveal Hidden (Alt+H).
+- Removes the redundant QSS Reveal button from the main workflow. Blender's native Reveal Hidden remains available for geometry hidden by other operations.
+- Moves one-shot Player Start, Focus, and Toggle Isolation commands to direct sidebar Quick Actions. They no longer require selecting a left-toolbar tool and clicking an arbitrary point in the viewport.
+- Keeps FPS Navigation, Paint Texture, and Paint Lightmap in the left toolbar; their sidebar actions remain direct command buttons.
+- Adds standalone regression tests for saved/restored visibility snapshots, topology mismatch handling, and world-space focus bounds.
 
 ## 0.17.5 changes
+
 
 - Fixes the 0.17.4 toolbar regression: Blender 5.2 `ToolDef` entries are namedtuples, not ordinary tool groups. The sanitizer now recognizes the actual Blender type before inspecting tuple groups.
 - Preserves Blender's built-in Object, Edit, Texture Paint, Vertex Paint, Weight Paint, Sculpt, and other mode tool definitions without rebuilding or flattening untouched groups.
