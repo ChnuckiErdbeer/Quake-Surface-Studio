@@ -1092,91 +1092,51 @@ def _restore_preview_engine(scene, obj):
         del obj['qss_preview_original_engine']
 
 
+
 def _set_viewport_lighting_mode(context, mode):
-    """Use Eevee Rendered mode for live lights; use unlit Material Preview for BSP lightmaps."""
-    screen = getattr(context, 'screen', None)
+    """Apply Original/Eevee/Cycles/Baked viewport shading."""
+    screen = getattr(context, "screen", None)
     if screen is None:
         return
+    live = mode in {"realtime", "cycles"}
     for area in screen.areas:
-        if area.type != 'VIEW_3D':
+        if area.type != "VIEW_3D":
             continue
         for space in area.spaces:
-            if space.type != 'VIEW_3D':
+            if space.type != "VIEW_3D":
                 continue
             shading = space.shading
-            if mode == 'realtime':
-                shading.type = 'RENDERED'
-                # Blender stores separate switches for Material Preview and
-                # Rendered viewport mode. The previous build changed only the
-                # viewport type, so a saved `use_scene_lights_render=False`
-                # could leave the imported Quake lamps invisible: the viewport
-                # then looked like an unlit/base-texture preview and the energy
-                # slider appeared to do nothing.
-                for prop_name in ('use_scene_lights', 'use_scene_world',
-                                  'use_scene_lights_render', 'use_scene_world_render'):
-                    if hasattr(shading, prop_name):
-                        setattr(shading, prop_name, True)
-            else:
-                shading.type = 'MATERIAL'
-                shading.use_scene_lights = False
-                shading.use_scene_world = False
-                if hasattr(shading, 'use_scene_lights_render'):
-                    shading.use_scene_lights_render = False
-                if hasattr(shading, 'use_scene_world_render'):
-                    shading.use_scene_world_render = False
-
-
-def _hide_non_quake_lights_for_preview(scene):
-    """Ensure Live Lights is illuminated only by lamps imported from this BSP."""
-    for light_obj in scene.objects:
-        if light_obj.type != 'LIGHT':
-            continue
-        if light_obj.get('qss_light_role') in {'quake_entity_light', 'quake_world_sunlight'}:
-            continue
-        if not light_obj.get('qss_hidden_by_live_preview', False):
-            light_obj['qss_restore_hide_viewport'] = bool(light_obj.hide_viewport)
-            light_obj['qss_restore_hide_render'] = bool(light_obj.hide_render)
-            try:
-                light_obj['qss_restore_hide_set'] = bool(light_obj.hide_get())
-            except Exception:
-                light_obj['qss_restore_hide_set'] = False
-            light_obj['qss_hidden_by_live_preview'] = True
-        light_obj.hide_viewport = True
-        light_obj.hide_render = True
-        try:
-            light_obj.hide_set(True)
-        except Exception:
-            pass
-
-
-def _restore_non_quake_lights(scene):
-    """Restore non-QSS light visibility exactly as it was before Live Lights."""
-    for light_obj in scene.objects:
-        if light_obj.type != 'LIGHT' or not light_obj.get('qss_hidden_by_live_preview', False):
-            continue
-        try:
-            light_obj.hide_viewport = bool(light_obj.get('qss_restore_hide_viewport', False))
-            light_obj.hide_render = bool(light_obj.get('qss_restore_hide_render', False))
-            light_obj.hide_set(bool(light_obj.get('qss_restore_hide_set', False)))
-        except Exception:
-            pass
-        for key in ('qss_restore_hide_viewport', 'qss_restore_hide_render',
-                    'qss_restore_hide_set', 'qss_hidden_by_live_preview'):
-            if key in light_obj:
-                del light_obj[key]
+            shading.type = "RENDERED" if mode == "cycles" else "MATERIAL"
+            for name in ("use_scene_lights", "use_scene_world",
+                         "use_scene_lights_render", "use_scene_world_render"):
+                if hasattr(shading, name):
+                    setattr(shading, name, live)
 
 
 def _set_lighting_preview(context, obj, mode):
-    if mode == 'realtime':
-        _set_black_preview_world(context.scene, obj)
+    """Set a map-local lighting preset while keeping source and painted images separate."""
+    if mode not in {"source", "realtime", "cycles", "baked"}:
+        raise bsp.BSPError(f"Unknown QSS lighting mode: {mode}")
+    if mode == "baked" and not _qss_has_baked_lightmap(obj):
+        raise bsp.BSPError("This map has no generated lightmap yet. Bake it first.")
+
+    if mode in {"realtime", "cycles"}:
+        _restore_non_quake_lights(context.scene)
+        _restore_preview_world(context.scene, obj)
         _store_and_enter_eevee_live_engine(context.scene, obj)
-        _hide_non_quake_lights_for_preview(context.scene)
+        if mode == "cycles":
+            context.scene.render.engine = "CYCLES"
+        else:
+            try:
+                context.scene.render.engine = "BLENDER_EEVEE_NEXT"
+            except Exception:
+                context.scene.render.engine = "BLENDER_EEVEE"
         for mat in obj.data.materials:
             if mat is not None:
                 _install_realtime_light_nodes(mat)
-        for light_obj in context.scene.objects:
-            if light_obj.type == 'LIGHT' and light_obj.get('qss_light_role') in {
-                'quake_entity_light', 'quake_world_sunlight'
+        for light_obj in _qss_active_map_objects(context.scene, obj):
+            if light_obj.type == "LIGHT" and light_obj.get("qss_light_role") in {
+                "quake_entity_light", "quake_world_sunlight"
             }:
                 light_obj.hide_viewport = False
                 light_obj.hide_render = False
@@ -1189,15 +1149,12 @@ def _set_lighting_preview(context, obj, mode):
         _restore_non_quake_lights(context.scene)
         _restore_preview_world(context.scene, obj)
         _restore_preview_engine(context.scene, obj)
-        if mode == 'source':
-            source = bpy.data.images.get(obj.get('qss_original_lightmap_backup', ''))
-            if source is None:
-                raise bsp.BSPError('The immutable original BSP lightmap snapshot is missing.')
-            _rebuild_lightmap_preview(obj, image_override=source)
-        else:
-            _rebuild_lightmap_preview(obj)
-    obj['qss_preview_mode'] = mode
+        image = _qss_lightmap_preview_image(obj, mode, for_paint=False)
+        _rebuild_lightmap_preview(obj, image_override=image)
+
+    obj["qss_preview_mode"] = mode
     _set_viewport_lighting_mode(context, mode)
+
 
 
 def _decode_mip0(entry, palette):
@@ -3408,6 +3365,9 @@ class QSS_OT_browse_game_maps(Operator):
             )
             if 'CANCELLED' in result:
                 raise RuntimeError("The QSS BSP importer cancelled the map import.")
+            if 'RUNNING_MODAL' in result:
+                self.report({'INFO'}, "Choose Add or Replace to continue importing the selected map.")
+                return {'FINISHED'}
             imported_obj = context.view_layer.objects.active
             if _qss_is_map_object(imported_obj):
                 imported_obj["qss_game_map_path"] = entry["path"]
@@ -4806,12 +4766,26 @@ class QSS_OT_detach_faces(Operator):
                 plan['new_mat'] = new_mat
 
             stage = 'assign detached materials and normalized UVs'
+            original_material_attr = mesh.attributes.get("qss_original_material_index")
+            if original_material_attr is None:
+                original_material_attr = mesh.attributes.new(name="qss_original_material_index", type="INT", domain="FACE")
+            painted_material_attr = mesh.attributes.get("qss_painted_material_index")
+            if painted_material_attr is None:
+                painted_material_attr = mesh.attributes.new(name="qss_painted_material_index", type="INT", domain="FACE")
+            painted_face_attr = mesh.attributes.get("qss_painted_face")
+            if painted_face_attr is None:
+                painted_face_attr = mesh.attributes.new(name="qss_painted_face", type="INT", domain="FACE")
             last_new_index = -1
             for plan in plans:
                 mesh.materials.append(plan['new_mat'])
                 material_index = len(mesh.materials) - 1
                 poly = mesh.polygons[plan['poly_index']]
+                face_index = int(plan["poly_index"])
+                if not painted_face_attr.data[face_index].value:
+                    original_material_attr.data[face_index].value = int(plan["source_index"])
                 poly.material_index = material_index
+                painted_material_attr.data[face_index].value = int(material_index)
+                painted_face_attr.data[face_index].value = 1
                 for loop_index, uv_value in zip(plan['loop_indices'], plan['uvs']):
                     if loop_index >= len(uv_layer.data):
                         raise bsp.BSPError(
@@ -5104,6 +5078,8 @@ class QSS_OT_activate_lightmap_paint(Operator):
             obj and obj.type == 'MESH'
             and obj.get('qss_object_role') == 'quake_bsp29'
             and obj.get('qss_lightmap_image_name')
+            and obj.get("qss_preview_mode", "source") in {"source", "baked"}
+            and (obj.get("qss_preview_mode", "source") != "baked" or _qss_has_baked_lightmap(obj))
             and context.mode in {'OBJECT', 'EDIT_MESH'}
         )
 
@@ -5164,11 +5140,13 @@ class QSS_OT_activate_lightmap_paint(Operator):
             if 0 <= active_material_index < len(mesh.materials):
                 obj.active_material_index = active_material_index
 
-            image = bpy.data.images.get(obj.get('qss_lightmap_image_name', ''))
-            if image is None:
-                raise bsp.BSPError("The editable lightmap atlas image is missing.")
-            # Repair every material's atlas hookup before painting.
-            _rebuild_lightmap_preview(obj)
+            preview_mode = obj.get("qss_preview_mode", "source")
+            if preview_mode not in {"source", "baked"}:
+                raise bsp.BSPError("Switch to Original or Baked lighting before painting lightmaps.")
+            if preview_mode == "baked" and not _qss_has_baked_lightmap(obj):
+                raise bsp.BSPError("This map has no generated lightmap to paint yet.")
+            image = _qss_lightmap_preview_image(obj, preview_mode, for_paint=True)
+            _rebuild_lightmap_preview(obj, image_override=image)
             mat = obj.active_material
             node = _find_image_node(mat, 'lightmap') if mat else None
             if node is None or node.image != image:
@@ -5852,6 +5830,12 @@ class QSS_OT_bake_scene_lights(Operator):
         return bool(obj and obj.type == 'MESH' and obj.get('qss_object_role') == 'quake_bsp29'
                     and obj.get('qss_light_entity_count', 0) > 0 and obj.get('qss_lightmap_image_name'))
 
+    def invoke(self, context, event):
+        obj = context.object
+        if obj and _qss_has_baked_lightmap(obj):
+            return context.window_manager.invoke_confirm(self, event)
+        return self.execute(context)
+
     def execute(self, context):
         obj = context.object
         scene = context.scene
@@ -5867,8 +5851,12 @@ class QSS_OT_bake_scene_lights(Operator):
         if light_uv is None:
             self.report({'ERROR'}, "The lightmap UV layer is missing; re-import the BSP.")
             return {'CANCELLED'}
-        imported_lights = [o for o in scene.objects if o.type == 'LIGHT' and
-                           o.get('qss_light_role') in {'quake_entity_light', 'quake_world_sunlight'}]
+        imported_lights = [
+            o for o in _qss_active_map_objects(scene, obj)
+            if o.type == 'LIGHT' and o.get('qss_light_role') in {
+                'quake_entity_light', 'quake_world_sunlight'
+            }
+        ]
         if not imported_lights:
             self.report({'ERROR'}, "No imported Quake lights are present in this scene.")
             return {'CANCELLED'}
@@ -6105,6 +6093,14 @@ class QSS_OT_bake_scene_lights(Operator):
             obj['qss_last_bake_bounces'] = bake_bounces
             obj['qss_lightmap_source'] = 'cycles_bake_from_quake_entities'
             obj['qss_lightmap_gradient_baked'] = True
+            obj['qss_baked_lightmap_image_name'] = image.name
+            old_painted_bake = bpy.data.images.get(obj.get("qss_painted_baked_lightmap", ""))
+            if old_painted_bake is not None:
+                try:
+                    bpy.data.images.remove(old_painted_bake, do_unlink=True)
+                except Exception:
+                    pass
+            obj["qss_painted_baked_lightmap"] = ""
             obj['qss_last_bake_backup'] = previous_snapshot.name
             obj['qss_bake_material_count'] = len(material_states)
             obj['qss_bake_light_count'] = updated_lights
@@ -6666,35 +6662,69 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
     filter_glob: StringProperty(default="*.bsp", options={'HIDDEN'})
     lightmap_export_mode: EnumProperty(
         name="Lightmap export",
-        description="Classic preserves original BSP29 luxel density; Enhanced adds QuakeSpasm-Spiked/FTE BSPX per-face lightmap resolution",
+        description="Automatic chooses a suitable format; Both writes Classic and Enhanced variants",
         items=(
-            ('CLASSIC', "Classic BSP29", "Keep the original per-face luxel dimensions for broad engine compatibility"),
-            ('ENHANCED', "Enhanced BSPX (DECOUPLED_LM)", "Append higher-density per-face lightmaps with independent DECOUPLED_LM axes and LMSTYLE; requires a supporting engine"),
+            ('AUTO', "Automatic", "Choose format from the active map's lightmap requirements"),
+            ('CLASSIC', "Classic BSP29", "Broad engine compatibility"),
+            ('ENHANCED', "Enhanced BSPX", "Use DECOUPLED_LM for enhanced engines"),
+            ('BOTH', "Both", "Write _c.bsp and _e.bsp variants"),
         ),
-        default='CLASSIC',
+        default='AUTO',
     )
 
     def invoke(self, context, event):
         obj = context.object
         source = obj.get('qss_source_path', '') if obj else ''
+        mode = str(_qss_config_settings().get("export_mode", "AUTO")).upper()
+        self.lightmap_export_mode = mode if mode in {"AUTO", "CLASSIC", "ENHANCED", "BOTH"} else "AUTO"
         if source:
             root, ext = os.path.splitext(source)
             self.filepath = root + "_surface_studio" + ext
         return ExportHelper.invoke(self, context, event)
 
+    def draw(self, context):
+        self.layout.prop(self, "lightmap_export_mode", text="Format")
+        self.layout.label(text="Automatic selects Enhanced for upscaled or decoupled lightmaps.", icon="INFO")
+        self.layout.label(text="Both writes _c and _e variants.", icon="INFO")
+
     def execute(self, context):
+        obj = context.object
         try:
-            result = _export_object(context.object, self.filepath, self.lightmap_export_mode)
-            path, texture_count, changed_faces, replacements, palette_origin, lit_path = result
-            detail = f" | {os.path.basename(lit_path)} written" if lit_path else ""
-            mode_detail = " | Enhanced BSPX DECOUPLED_LM lightmaps" if self.lightmap_export_mode == 'ENHANCED' else " | Classic lightmaps"
-            _report(
-                self, 'INFO',
-                f"Exported {os.path.basename(path)} | {texture_count} textures | "
-                f"{changed_faces} face reassignment(s) | {replacements} edited shared texture(s)"
-                f"{mode_detail}{detail}."
-            )
-            return {'FINISHED'}
+            mode = self.lightmap_export_mode
+            if mode == "AUTO":
+                mode = "ENHANCED" if (
+                    int(obj.get("qss_lightmap_resolution", 1)) > 1
+                    or float(getattr(context.scene, "qss_decoupled_world_units_per_luxel", 16.0)) < 16.0
+                    or "DECOUPLED_LM" in str(obj.get("qss_bspx_lump_names", ""))
+                ) else "CLASSIC"
+            output = bpy.path.abspath(self.filepath)
+            if mode == "BOTH":
+                root, ext = os.path.splitext(output)
+                ext = ext or ".bsp"
+                classic_result = _export_object(obj, root + "_c" + ext, "CLASSIC")
+                enhanced_result = _export_object(obj, root + "_e" + ext, "ENHANCED")
+                obj["qss_last_export_classic_path"] = classic_result[0]
+                obj["qss_last_export_enhanced_path"] = enhanced_result[0]
+                prefer_enhanced = bool(_qss_config_settings().get("prefer_enhanced_last_export", True))
+                chosen = enhanced_result[0] if prefer_enhanced else classic_result[0]
+                results = (classic_result, enhanced_result)
+                summary = f"Both variants exported: {os.path.basename(classic_result[0])} and {os.path.basename(enhanced_result[0])}"
+            else:
+                result = _export_object(obj, output, mode)
+                chosen = result[0]
+                results = (result,)
+                obj["qss_last_export_classic_path"] = result[0] if mode == "CLASSIC" else ""
+                obj["qss_last_export_enhanced_path"] = result[0] if mode == "ENHANCED" else ""
+                summary = f"Exported {os.path.basename(result[0])} ({mode})"
+            obj["qss_last_export_path"] = chosen
+            obj["qss_last_export_mode"] = mode
+            detail = ""
+            for result in results:
+                lit_path = result[5]
+                if lit_path:
+                    detail += f" | {os.path.basename(lit_path)} written"
+            _report(self, "INFO", summary + detail)
+            return {"FINISHED"}
         except Exception as exc:
             _report(self, 'ERROR', str(exc))
             return {'CANCELLED'}
@@ -7621,6 +7651,17 @@ def _unregister_qss_classes():
     Resolve the registered RNA class first (it can belong to an older module
     instance), then also try the current class object as a defensive fallback.
     """
+    # Remove panels from the pre-v0.18 multi-panel UI which are intentionally retired.
+    for stale_name in (
+        "QSS_PT_texture", "QSS_PT_light_preview", "QSS_PT_imported_lights",
+        "QSS_PT_quake_bake", "QSS_PT_cycles_bake", "QSS_PT_diagnostics", "QSS_PT_export",
+    ):
+        stale_cls = getattr(bpy.types, stale_name, None)
+        if stale_cls is not None:
+            try:
+                bpy.utils.unregister_class(stale_cls)
+            except (RuntimeError, TypeError, ValueError):
+                pass
     # Removed in the persistent FPS-navigation redesign; clean up an older registration.
     legacy_fps = getattr(bpy.types, "QSS_OT_hold_mmb_fps", None)
     if legacy_fps is not None:
@@ -7746,6 +7787,9 @@ def register():
         bpy.types.Scene.qss_audit_timeout = IntProperty(
             name="External tool timeout (seconds)", default=300, min=10, max=7200,
         )
+        initial_lightmap_resolution = str(initial_config.get("import_lightmap_resolution", "1"))
+        if initial_lightmap_resolution not in {"1", "2", "4", "8"}:
+            initial_lightmap_resolution = "1"
         bpy.types.Scene.qss_import_lightmap_resolution = EnumProperty(
             name="Visual lightmap resolution",
             description="Working paint-atlas scale only; does not change the source BSP's luxel density",
@@ -7755,7 +7799,7 @@ def register():
                 ('4', "4×", "Four times the pixels per axis"),
                 ('8', "8×", "Eight times the pixels per axis"),
             ),
-            default="1",
+            default=initial_lightmap_resolution,
         )
         bpy.types.Scene.qss_decoupled_world_units_per_luxel = FloatProperty(
             name="Target world units per luxel",
