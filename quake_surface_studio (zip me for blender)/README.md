@@ -1,4 +1,12 @@
-# Quake Surface Studio 0.17.0
+# Quake Surface Studio 0.17.1
+
+## 0.17.1 changes
+
+- Fixes the Quake Studio viewport toolbar presentation: QSS actions are now separate, individually visible buttons instead of being nested into a single drag-expand group.
+- Registers Object Mode and Edit Mode actions against their own valid selection-tool anchors.
+- Uses Blender's simple WorkSpaceTool left-click keymap format for consistent toolbar invocation.
+
+
 
 ## 0.17.0 changes
 
