@@ -7624,6 +7624,7 @@ class QSS_OT_open_last_export(Operator):
     def poll(cls, context):
         obj = context.object
         executable = _qss_abspath(getattr(context.scene, "qss_ironwail_executable", "") or "")
+        quake_root = _qss_abspath(getattr(context.scene, "qss_quake_root", "") or "")
         path = obj.get("qss_last_export_path", "") if _qss_is_map_object(obj) else ""
         game_dir = _qss_abspath(obj.get("qss_game_dir", "") or getattr(context.scene, "qss_game_dir", "") or "")
         inside_game = False
@@ -7633,7 +7634,8 @@ class QSS_OT_open_last_export(Operator):
                 inside_game = relative != os.pardir and not relative.startswith(os.pardir + os.sep)
             except ValueError:
                 inside_game = False
-        return bool(executable and os.path.isfile(executable) and path and os.path.isfile(path) and inside_game)
+        return bool(executable and os.path.isfile(executable) and quake_root and os.path.isdir(quake_root)
+                    and path and os.path.isfile(path) and inside_game)
 
     def execute(self, context):
         obj = context.object
@@ -7750,7 +7752,9 @@ class QSS_PT_project(Panel):
             except ValueError:
                 launch_inside_game = False
         launch.enabled = bool(_qss_is_map_object(obj) and last_path and os.path.isfile(last_path)
-                               and launch_inside_game and scene.qss_ironwail_executable
+                               and launch_inside_game and scene.qss_quake_root
+                               and os.path.isdir(_qss_abspath(scene.qss_quake_root))
+                               and scene.qss_ironwail_executable
                                and os.path.isfile(_qss_abspath(scene.qss_ironwail_executable)))
         launch.operator(QSS_OT_open_last_export.bl_idname, text="Open Last Export in Ironwail", icon="PLAY")
         maps = _qss_scene_map_collections(scene)
