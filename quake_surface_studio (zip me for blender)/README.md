@@ -1,6 +1,16 @@
-# Quake Surface Studio 0.17.7
+# Quake Surface Studio 0.17.8
 
-## 0.17.7 changes
+## 0.17.8 changes
+
+- Consolidates the 3D View sidebar into one **Quake Studio** tab. The old parallel **Quake** and **Quake Studio** tabs are retired; the workspace home is the single starting point.
+- Replaces the duplicated dashboard with a focused home panel: current map summary, mode-aware quick actions, Ironwail launch, and a simple import-first welcome state.
+- Adds a compact **Quake** menu to the 3D View header for import, focus, noclip Walk, face isolation/reveal, paint setup, export, and workspace access.
+- Adds Quake face-editing actions to the Edit Mesh context menu so focus, isolate/reveal, and paint setup are available where face selection happens.
+- Keeps the left toolbar intentionally limited to persistent Paint Texture and Paint Lightmap tools. One-shot commands remain menus/buttons and do not hijack viewport clicks.
+- Preserves the working native Blender Walk Navigation implementation, including mouse-look, WASD/QE free flight, Shift acceleration, LMB exit, and Esc/RMB cancel.
+- Moves lighting and advanced diagnostics into the same Quake Studio sidebar hierarchy. Existing operator implementations and BSP workflows are unchanged.
+
+## 0.17.7 changes (navigation)
 
 - Replaces QSS's custom timer-driven WASD overlay with Blender 5.2's native **Walk Navigation** operator. QSS no longer maintains a competing camera-navigation modal loop.
 - Provides genuine first-person mouse-look and free-flight movement: **W/A/S/D** move, **Q/E** move vertically, and **Shift** temporarily accelerates. Free flight is enabled to match Quake noclip rather than gravity-based walking.
