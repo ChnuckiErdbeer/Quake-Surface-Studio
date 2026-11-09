@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import array
 import hashlib
-import json
 from functools import lru_cache
 import math
 import os
@@ -6431,14 +6430,14 @@ class QSS_OT_frame_selection(Operator):
             bounds = viewport_utils.bounds_from_points(
                 tuple(point) for point in world_points
             )
+            # A camera view is not navigable by orbit distance/location.
+            # Switch to perspective before assigning the new orbit centre.
+            if space.region_3d.view_perspective == 'CAMERA':
+                space.region_3d.view_perspective = 'PERSP'
             space.region_3d.view_location = Vector(bounds["center"])
             space.region_3d.view_distance = viewport_utils.view_distance_from_bounds(
                 bounds, scale=1.5, minimum=max(0.05, float(obj.get("qss_unit_scale", DEFAULT_QUAKE_UNIT_SCALE)) * 2.0)
             )
-            # A camera view is not navigable by orbit distance/location. Leave
-            # it deliberately and switch to a normal perspective view for Focus.
-            if space.region_3d.view_perspective == 'CAMERA':
-                space.region_3d.view_perspective = 'PERSP'
             area.tag_redraw()
             _report(self, 'INFO', f"Focused {selection_label}.")
             return {'FINISHED'}
@@ -6488,10 +6487,16 @@ class QSS_OT_isolate_faces(Operator):
                     payload, vertex_count, edge_count, face_count
                 )
             except ValueError as exc:
+                # The stored indices no longer map safely to this mesh. Drop
+                # the stale snapshot so the user can Alt+H and start fresh.
+                try:
+                    del obj[self._snapshot_key]
+                except Exception:
+                    pass
                 _report(
                     self, 'ERROR',
                     f"Cannot safely restore the previous isolation: {exc} "
-                    "Use Blender's Reveal Hidden (Alt+H), then isolate again.",
+                    "The stale snapshot was cleared. Use Blender's Reveal Hidden (Alt+H), then isolate again.",
                 )
                 return {'CANCELLED'}
 
