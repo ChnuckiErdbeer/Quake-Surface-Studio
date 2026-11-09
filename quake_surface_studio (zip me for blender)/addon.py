@@ -7626,8 +7626,14 @@ class QSS_OT_open_last_export(Operator):
         executable = _qss_abspath(getattr(context.scene, "qss_ironwail_executable", "") or "")
         path = obj.get("qss_last_export_path", "") if _qss_is_map_object(obj) else ""
         game_dir = _qss_abspath(obj.get("qss_game_dir", "") or getattr(context.scene, "qss_game_dir", "") or "")
-        return bool(executable and os.path.isfile(executable) and path and os.path.isfile(path)
-                    and game_dir and os.path.isdir(game_dir))
+        inside_game = False
+        if path and game_dir and os.path.isdir(game_dir):
+            try:
+                relative = os.path.relpath(os.path.abspath(path), game_dir)
+                inside_game = relative != os.pardir and not relative.startswith(os.pardir + os.sep)
+            except ValueError:
+                inside_game = False
+        return bool(executable and os.path.isfile(executable) and path and os.path.isfile(path) and inside_game)
 
     def execute(self, context):
         obj = context.object
@@ -7735,8 +7741,16 @@ class QSS_PT_project(Panel):
         export_row.operator(QSS_OT_export_bsp.bl_idname, text="Export BSP", icon="EXPORT")
         launch = layout.row()
         last_path = obj.get("qss_last_export_path", "") if _qss_is_map_object(obj) else ""
+        launch_game_dir = _qss_abspath(obj.get("qss_game_dir", "") or scene.qss_game_dir or "") if _qss_is_map_object(obj) else ""
+        launch_inside_game = False
+        if last_path and launch_game_dir and os.path.isdir(launch_game_dir):
+            try:
+                relative_export = os.path.relpath(os.path.abspath(last_path), launch_game_dir)
+                launch_inside_game = relative_export != os.pardir and not relative_export.startswith(os.pardir + os.sep)
+            except ValueError:
+                launch_inside_game = False
         launch.enabled = bool(_qss_is_map_object(obj) and last_path and os.path.isfile(last_path)
-                               and scene.qss_ironwail_executable
+                               and launch_inside_game and scene.qss_ironwail_executable
                                and os.path.isfile(_qss_abspath(scene.qss_ironwail_executable)))
         launch.operator(QSS_OT_open_last_export.bl_idname, text="Open Last Export in Ironwail", icon="PLAY")
         maps = _qss_scene_map_collections(scene)
