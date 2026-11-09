@@ -7693,7 +7693,11 @@ class QSS_PT_project(Panel):
         scene = context.scene
         obj = context.object
         layout.prop(scene, "qss_game_folder", text="Game / Mod")
-        game_ready = bool(scene.qss_game_dir and os.path.isdir(_qss_abspath(scene.qss_game_dir)))
+        game_ready = bool(
+            scene.qss_game_folder != "NONE"
+            and scene.qss_game_dir
+            and os.path.isdir(_qss_abspath(scene.qss_game_dir))
+        )
         browse = layout.row()
         browse.enabled = game_ready
         browse.operator(QSS_OT_browse_game_maps.bl_idname, text="Browse Game Maps", icon="FILEBROWSER")
