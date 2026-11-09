@@ -3053,7 +3053,10 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
     new_texture_for_material = {}
     new_texture_for_image = {}
     replacements = {}
-    for mat in obj.data.materials:
+    used_material_indices = {int(poly.material_index) for poly in mesh.polygons}
+    for material_index, mat in enumerate(obj.data.materials):
+        if material_index not in used_material_indices:
+            continue
         if mat is None or 'qss_texture_index' not in mat:
             continue
         source_texture_id = int(mat.get('qss_texture_index', -2))
