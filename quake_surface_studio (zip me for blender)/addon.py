@@ -7242,6 +7242,16 @@ class QSS_OT_settings(Operator):
     bl_label = "Quake Surface Studio Settings"
     bl_description = "Configure import behaviour, export defaults and map workflow"
 
+    quake_root: StringProperty(
+        name="Quake installation folder",
+        description="Folder containing id1 and your installed mods",
+        subtype="DIR_PATH",
+    )
+    ironwail_executable: StringProperty(
+        name="Ironwail executable",
+        description="Path to the Ironwail executable used by Open Last Export",
+        subtype="FILE_PATH",
+    )
     import_behavior: EnumProperty(
         name="Import behaviour",
         items=(("ASK", "Ask", "Ask whether to add or replace when another map is loaded"),
@@ -7281,6 +7291,8 @@ class QSS_OT_settings(Operator):
 
     def invoke(self, context, event):
         settings = _qss_config_settings()
+        self.quake_root = str(getattr(context.scene, "qss_quake_root", "") or settings.get("quake_root", ""))
+        self.ironwail_executable = str(getattr(context.scene, "qss_ironwail_executable", "") or settings.get("ironwail_executable", ""))
         self.import_behavior = str(settings.get("import_behavior", "ASK")).upper()
         self.export_mode = str(settings.get("export_mode", "AUTO")).upper()
         self.prefer_enhanced_last_export = bool(settings.get("prefer_enhanced_last_export", True))
@@ -7297,10 +7309,14 @@ class QSS_OT_settings(Operator):
             self.rebake_behavior = "ASK"
         if self.lighting_mode_storage not in {"PER_MAP", "GLOBAL"}:
             self.lighting_mode_storage = "PER_MAP"
-        return context.window_manager.invoke_props_dialog(self, width=460)
+        return context.window_manager.invoke_props_dialog(self, width=560)
 
     def draw(self, context):
         layout = self.layout
+        layout.label(text="Game installation", icon="FILE_FOLDER")
+        layout.prop(self, "quake_root")
+        layout.prop(self, "ironwail_executable")
+        layout.separator()
         layout.label(text="Project workflow defaults", icon="PREFERENCES")
         layout.prop(self, "import_behavior")
         layout.prop(self, "export_mode")
@@ -7316,7 +7332,11 @@ class QSS_OT_settings(Operator):
     def execute(self, context):
         settings = _qss_load_config()
         previous_lighting_storage = str(settings.get("lighting_mode_storage", "PER_MAP")).upper()
+        normalized_root = quake_paths.normalize_quake_root(_qss_abspath(self.quake_root or ""))
+        ironwail_path = _qss_abspath(self.ironwail_executable or "")
         settings.update({
+            "quake_root": normalized_root,
+            "ironwail_executable": ironwail_path,
             "import_behavior": self.import_behavior,
             "export_mode": self.export_mode,
             "prefer_enhanced_last_export": bool(self.prefer_enhanced_last_export),
@@ -7330,6 +7350,8 @@ class QSS_OT_settings(Operator):
                 active_obj.get("qss_preview_mode", "source") if _qss_is_map_object(active_obj) else "source"
             )
         try:
+            context.scene.qss_quake_root = normalized_root
+            context.scene.qss_ironwail_executable = ironwail_path
             quake_paths.save_config(settings, _qss_config_path())
             context.scene.qss_import_lightmap_resolution = self.import_lightmap_resolution
             self.report({"INFO"}, "Quake Surface Studio settings saved.")
