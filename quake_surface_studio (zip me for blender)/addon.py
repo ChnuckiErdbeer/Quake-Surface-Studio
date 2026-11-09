@@ -1237,6 +1237,10 @@ def _set_viewport_lighting_mode(context, mode):
                              "use_scene_lights_render", "use_scene_world_render"):
                     if hasattr(shading, name):
                         setattr(shading, name, live)
+                try:
+                    area.tag_redraw()
+                except Exception:
+                    pass
 
 
 def _qss_apply_base_texture_visibility(obj):
@@ -7707,7 +7711,9 @@ class QSS_OT_toggle_painted_textures(Operator):
                 target = int(painted.data[index].value) if enabled else int(original.data[index].value)
                 if 0 <= target < len(mesh.materials):
                     poly.material_index = target
-                source_uv = painted_uv if enabled else original_uv
+                # On disable, rebuild the canonical Quake projection from BSP texinfo
+                # above; use that repaired active layer rather than the stale first-detach snapshot.
+                source_uv = painted_uv if enabled else active_uv
                 for loop_index in poly.loop_indices:
                     active_uv.data[loop_index].uv = source_uv.data[loop_index].uv
         obj["qss_painted_textures_enabled"] = enabled
