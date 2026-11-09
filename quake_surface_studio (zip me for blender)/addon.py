@@ -6790,7 +6790,6 @@ class QSS_OT_open_workspace(Operator):
                     if space.type == "VIEW_3D":
                         space.show_region_toolbar = True
                         space.show_region_ui = True
-        workspace.object_mode = "OBJECT"
         self.report(
             {"INFO"},
             "Created Quake Studio workspace." if created else "Switched to Quake Studio workspace."
@@ -7038,6 +7037,85 @@ class QSS_PT_workspace_main(Panel):
             lighting.operator(QSS_OT_refresh_lightmap_preview.bl_idname, text="Refresh Preview", icon="FILE_REFRESH")
         else:
             lighting.label(text="Import a BSP with lightmaps to access painting and bake tools.", icon="INFO")
+
+
+class QSS_PT_workspace_lighting(Panel):
+    bl_label = "Lighting Controls"
+    bl_idname = "QSS_PT_workspace_lighting"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Quake Studio"
+    bl_parent_id = "QSS_PT_workspace_main"
+    bl_order = 40
+    bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context):
+        return _qss_is_map_object(context.object)
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        obj = context.object
+
+        preview = layout.box()
+        preview.label(text="LIGHTING PREVIEW", icon="SHADING_RENDERED")
+        row = preview.row(align=True)
+        row.operator(QSS_OT_preview_source_lightmaps.bl_idname, text="Original")
+        row.operator(QSS_OT_preview_bsp_lightmaps.bl_idname, text="Working")
+        row.operator(QSS_OT_preview_imported_lights.bl_idname, text="Live")
+        preview.prop(scene, "qss_light_energy_scale", text="Live light scale")
+        row = preview.row(align=True)
+        row.operator(QSS_OT_apply_light_energy_scale.bl_idname, text="Apply Scale")
+        row.operator(QSS_OT_calibrate_lights_to_source.bl_idname, text="Match Source")
+        preview.operator(QSS_OT_refresh_lightmap_preview.bl_idname, text="Refresh Preview", icon="FILE_REFRESH")
+
+        quake = layout.box()
+        quake.label(text="QUAKE DIRECT LIGHTMAP", icon="LIGHT")
+        quake.operator(QSS_OT_quake_direct_bake.bl_idname, text="Bake Quake Direct Lighting", icon="RENDER_STILL")
+        quake.prop(scene, "qss_quake_bake_shadows", text="Ray-traced visibility")
+        quake.prop(scene, "qss_quake_bake_gate", text="Contribution gate")
+        quake.prop(scene, "qss_bake_match_source", text="Match source average")
+        quake.prop(scene, "qss_bake_output_scale", text="Output brightness")
+        row = quake.row(align=True)
+        row.operator(QSS_OT_undo_last_bake.bl_idname, text="Undo Last Bake")
+        row.operator(QSS_OT_restore_original_lightmap.bl_idname, text="Restore Original")
+
+        cycles = layout.box()
+        cycles.label(text="CYCLES PBR BAKE · EXPERIMENTAL", icon="NODE_MATERIAL")
+        cycles.prop(scene, "qss_bake_bounces", text="Diffuse bounces")
+        cycles.operator(QSS_OT_bake_scene_lights.bl_idname, text="Cycles Path-Traced Bake")
+
+        lamps = layout.box()
+        lamps.label(text="IMPORTED QUAKE LIGHT ENTITIES", icon="OUTLINER_OB_LIGHT")
+        quake_lamps = [
+            item for item in scene.objects
+            if item.type == "LIGHT"
+            and item.get("qss_light_role") in {"quake_entity_light", "quake_world_sunlight"}
+        ]
+        if not quake_lamps:
+            lamps.label(text="No imported Quake lights.", icon="INFO")
+        for lamp in quake_lamps:
+            box = lamps.box()
+            box.label(text=f"{lamp.name} · {float(lamp.data.energy):.3g} W", icon="LIGHT_POINT")
+            row = box.row(align=True)
+            for key, label in (
+                ("qss_quake_light_delay", "delay"),
+                ("qss_quake_light_style", "style"),
+                ("qss_quake_wait", "wait"),
+                ("qss_quake_anglescale", "anglescale"),
+            ):
+                if key in lamp:
+                    row.prop(lamp, f'["{key}"]', text=label)
+            if "qss_quake_falloff" in lamp:
+                box.prop(lamp, '["qss_quake_falloff"]', text="_falloff")
+            if lamp.get("qss_quake_style_was_inferred"):
+                row = box.row()
+                row.alert = True
+                row.label(text="Style recovered from malformed empty key", icon="ERROR")
+
+        layout.label(text=f"Source calibration: {obj.get('qss_light_energy_calibration', 1.0):.4g}×")
+        layout.label(text="delay 4 is a non-additive local-minlight clamp.", icon="INFO")
 
 
 class QSS_PT_workspace_advanced(Panel):
@@ -7578,6 +7656,7 @@ CLASSES = (
     QSS_OT_run_blender_selftest,
     QSS_OT_export_bsp,
     QSS_PT_workspace_main,
+    QSS_PT_workspace_lighting,
     QSS_PT_workspace_advanced,
     QSS_PT_main,
     QSS_PT_project,
