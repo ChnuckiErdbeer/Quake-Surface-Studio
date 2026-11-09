@@ -2998,7 +2998,7 @@ class QSS_OT_fps_walk(Operator):
             return {"CANCELLED"}
 
         try:
-            settings = _configure_quake_walk_speed(context, context.object)
+            _configure_quake_walk_speed(context, context.object)
             # Sidebar buttons execute in the UI region. Blender's native
             # view3d.walk operator must run in the 3D View's WINDOW region.
             with context.temp_override(
@@ -6864,17 +6864,6 @@ class QSS_WST_focus_object(bpy.types.WorkSpaceTool):
     bl_keymap = _qss_tool_keymap(QSS_OT_frame_selection.bl_idname)
 
 
-class QSS_WST_fps_navigation(bpy.types.WorkSpaceTool):
-    bl_space_type = "VIEW_3D"
-    bl_context_mode = None
-    bl_idname = "qss.fps_navigation"
-    bl_label = "FPS Navigation"
-    bl_description = "Start Blender Walk Navigation: mouse-look, WASD/QE free flight; LMB exits, Esc or RMB cancels"
-    bl_icon = "ops.view3d.walk"
-    bl_operator = QSS_OT_fps_walk.bl_idname
-    bl_keymap = _qss_tool_keymap(QSS_OT_fps_walk.bl_idname)
-
-
 class QSS_WST_focus_edit(bpy.types.WorkSpaceTool):
     bl_space_type = "VIEW_3D"
     bl_context_mode = None
@@ -6930,11 +6919,9 @@ class QSS_WST_paint_lightmap(bpy.types.WorkSpaceTool):
     bl_keymap = _qss_tool_keymap(QSS_OT_activate_lightmap_paint.bl_idname)
 
 
-# The left toolbar is for persistent viewport tools only. One-shot actions
-# (Focus, Player Start, Toggle Isolation) are direct sidebar operators so they
-# don't require an unrelated click somewhere in the viewport.
+# Only persistent painting tools occupy the left toolbar. Navigation and
+# one-shot commands run directly from the sidebar and do not hijack selection.
 QSS_WORKSPACE_TOOLS = (
-    QSS_WST_fps_navigation,
     QSS_WST_paint_texture,
     QSS_WST_paint_lightmap,
 )
@@ -7022,9 +7009,6 @@ def _register_qss_workspace_tools():
     _unregister_qss_workspace_tools()
 
     tool_groups = (
-        ("OBJECT", (
-            QSS_WST_fps_navigation,
-        )),
         ("EDIT_MESH", (
             QSS_WST_paint_texture,
             QSS_WST_paint_lightmap,
@@ -7398,7 +7382,7 @@ class QSS_PT_main(Panel):
         layout.label(text=f"Version {'.'.join(str(part) for part in ADDON_VERSION)}", icon='INFO')
         layout.operator(QSS_OT_open_workspace.bl_idname, text="Open Quake Studio Workspace", icon="WINDOW")
         layout.label(
-            text="First-person controls: mouse-look + WASD; LMB exits, Esc/RMB cancels.",
+            text="Walk mode is started from the sidebar, not kept as a toolbar tool.",
             icon='VIEW_PAN',
         )
         layout.use_property_split = True
@@ -7967,8 +7951,26 @@ def _unregister_qss_classes():
 
 
 def _cleanup_previous_registration():
-    # Navigation now runs entirely inside Blender's native Walk operator;
-    # QSS no longer owns modal timers or per-window navigation sessions.
+    # Stop any legacy QSS modal navigation session left by v0.17.6 or earlier.
+    # globals().get keeps fresh installs independent of that removed state.
+    legacy_sessions = globals().get("_qss_fps_navigation_sessions", {})
+    for session in tuple(legacy_sessions.values()):
+        timer = session.get("timer")
+        window_manager = session.get("window_manager")
+        if timer is not None and window_manager is not None:
+            try:
+                window_manager.event_timer_remove(timer)
+            except Exception:
+                pass
+        try:
+            session["area"].header_text_set(None)
+            session["area"].tag_redraw()
+        except Exception:
+            pass
+        session["timer"] = None
+        session["finished"] = True
+    legacy_sessions.clear()
+
     _remove_qss_keymaps()
     _unregister_qss_workspace_tools()
     _remove_scene_properties()

@@ -6,7 +6,7 @@
 - Provides genuine first-person mouse-look and free-flight movement: **W/A/S/D** move, **Q/E** move vertically, and **Shift** temporarily accelerates. Free flight is enabled to match Quake noclip rather than gravity-based walking.
 - Makes exit behaviour explicit and reliable: **LMB confirms and exits**; **Esc or RMB cancels and restores the starting view**. There is no persistent QSS navigation session or separate stop toggle to get stuck in.
 - Maps the QSS Quake-units/second speed and fast multiplier into Blender's native Walk Navigation preferences using the imported BSP's unit scale.
-- Leaves Blender's ordinary viewport navigation and MMB orbit untouched outside the native Walk session. The QSS toolbar and sidebar both start the same native operator.
+- Leaves Blender's ordinary viewport navigation and MMB orbit untouched outside the native Walk session. FPS navigation is a direct sidebar action, not a persistent toolbar tool, so exiting returns to the previously selected viewport tool and ordinary clicks cannot relaunch Walk accidentally.
 - Adds standalone tests for Quake-to-Blender navigation speed conversion and preference bounds.
 
 ## 0.17.6 changes
