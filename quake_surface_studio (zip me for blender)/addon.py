@@ -4936,6 +4936,28 @@ class QSS_OT_detach_faces(Operator):
             return {'CANCELLED'}
 
 
+def _qss_current_paint_image(context):
+    settings = getattr(getattr(context, "scene", None), "tool_settings", None)
+    image_paint = getattr(settings, "image_paint", None) if settings else None
+    image = getattr(image_paint, "canvas", None) if image_paint else None
+    if image is None and settings is not None:
+        paint_mode = getattr(settings, "paint_mode", None)
+        image = getattr(paint_mode, "canvas_image", None) if paint_mode else None
+    return image
+
+
+def _qss_is_lightmap_paint_image(obj, image):
+    if obj is None or image is None:
+        return False
+    names = {
+        obj.get("qss_original_lightmap_backup", ""),
+        obj.get("qss_lightmap_image_name", ""),
+        obj.get("qss_painted_original_lightmap", ""),
+        obj.get("qss_painted_baked_lightmap", ""),
+    }
+    return image.name in names
+
+
 def _selected_edit_face_material(obj):
     """Return the active selected edit-face material, or the first selected one."""
     import bmesh
@@ -4959,43 +4981,54 @@ class QSS_OT_activate_paint(Operator):
         obj = context.object
         if not (obj and obj.type == 'MESH' and obj.get('qss_object_role') == 'quake_bsp29'):
             return False
+        if context.mode == 'TEXTURE_PAINT':
+            return True
         if context.mode == 'EDIT_MESH':
             try:
                 index = _selected_edit_face_material(obj)
                 return index is not None and 0 <= index < len(obj.data.materials) and _find_image(obj.data.materials[index]) is not None
             except Exception:
                 return False
-        return bool(
-            context.mode == 'OBJECT' and obj.active_material
-            and _find_image(obj.active_material)
-        )
+        return bool(context.mode == 'OBJECT' and obj.active_material and _find_image(obj.active_material))
 
     def execute(self, context):
         obj = context.object
+        if context.mode == 'TEXTURE_PAINT':
+            current_image = _qss_current_paint_image(context)
+            if not _qss_is_lightmap_paint_image(obj, current_image):
+                bpy.ops.object.mode_set(mode='OBJECT')
+                self.report({'INFO'}, "Texture Paint mode closed.")
+                return {'FINISHED'}
+            bpy.ops.object.mode_set(mode='OBJECT')
+
         if context.mode == 'EDIT_MESH':
             import bmesh
             bm = bmesh.from_edit_mesh(obj.data)
-            selected_material_indices = {
-                int(face.material_index) for face in bm.faces if face.select
-            }
+            selected_faces = [face for face in bm.faces if face.select]
+            if not selected_faces:
+                _report(self, 'WARNING', "Select one or more faces in Edit Mode first.")
+                return {'CANCELLED'}
+            marker = obj.data.attributes.get("qss_painted_face")
+            already_detached = bool(marker and all(
+                face.index < len(marker.data) and marker.data[face.index].value
+                for face in selected_faces
+            ))
             selected_image_keys = set()
-            for material_index in selected_material_indices:
+            for face in selected_faces:
+                material_index = int(face.material_index)
                 if material_index < 0 or material_index >= len(obj.data.materials):
                     _report(self, 'ERROR', f"Selected face uses invalid material slot {material_index}.")
                     return {'CANCELLED'}
-                selected_material = obj.data.materials[material_index]
-                selected_image = _find_image(selected_material, 'base_texture') if selected_material else None
-                if selected_image is None:
-                    _report(self, 'ERROR', "A selected face has no base texture image; paint selection was not changed.")
+                material = obj.data.materials[material_index]
+                image = _find_image(material, "base_texture") if material else None
+                if image is None:
+                    _report(self, 'ERROR', "A selected face has no base texture image.")
                     return {'CANCELLED'}
-                selected_image_keys.add(selected_image.as_pointer())
-            if len(selected_image_keys) > 1:
-                _report(
-                    self, 'ERROR',
-                    "Selected faces use different paint images. Select one detached face at a time, "
-                    "or detach the faces together to create a shared paint atlas.",
-                )
-                return {'CANCELLED'}
+                selected_image_keys.add(image.as_pointer())
+            if not already_detached or len(selected_image_keys) > 1:
+                result = bpy.ops.qss.detach_selected_faces()
+                if "CANCELLED" in result:
+                    return {"CANCELLED"}
             selected_material_index = _selected_edit_face_material(obj)
             if selected_material_index is None:
                 _report(self, 'WARNING', "Select a face in Edit Mode first.")
@@ -5085,11 +5118,18 @@ class QSS_OT_activate_lightmap_paint(Operator):
             and obj.get('qss_lightmap_image_name')
             and obj.get("qss_preview_mode", "source") in {"source", "baked"}
             and (obj.get("qss_preview_mode", "source") != "baked" or _qss_has_baked_lightmap(obj))
-            and context.mode in {'OBJECT', 'EDIT_MESH'}
+            and context.mode in {'OBJECT', 'EDIT_MESH', 'TEXTURE_PAINT'}
         )
 
     def execute(self, context):
         obj = context.object
+        if context.mode == 'TEXTURE_PAINT':
+            current_image = _qss_current_paint_image(context)
+            if _qss_is_lightmap_paint_image(obj, current_image):
+                bpy.ops.object.mode_set(mode='OBJECT')
+                self.report({'INFO'}, "Lightmap Paint mode closed.")
+                return {'FINISHED'}
+            bpy.ops.object.mode_set(mode='OBJECT')
         mesh = obj.data
         active_face_index = None
         try:
@@ -7476,12 +7516,22 @@ class QSS_PT_lighting(Panel):
                 selected_faces = any(face.select for face in bmesh.from_edit_mesh(obj.data).faces)
             except Exception:
                 selected_faces = False
+        elif context.mode == "TEXTURE_PAINT":
+            selected_faces = True
         paint = layout.row(align=True)
         paint.enabled = selected_faces
-        paint.operator(QSS_OT_activate_paint.bl_idname, text="Paint Texture", icon="BRUSH_DATA")
+        current_paint_image = _qss_current_paint_image(context) if context.mode == "TEXTURE_PAINT" else None
+        is_lightmap_paint = _qss_is_lightmap_paint_image(obj, current_paint_image)
+        paint.operator(
+            QSS_OT_activate_paint.bl_idname, text="Paint Texture", icon="BRUSH_DATA",
+            depress=(context.mode == "TEXTURE_PAINT" and not is_lightmap_paint),
+        )
         light_paint = paint.row()
         light_paint.enabled = selected_faces and mode in {"source", "baked"} and (mode != "baked" or _qss_has_baked_lightmap(obj))
-        light_paint.operator(QSS_OT_activate_lightmap_paint.bl_idname, text="Paint Lightmap", icon="TPAINT_HLT")
+        light_paint.operator(
+            QSS_OT_activate_lightmap_paint.bl_idname, text="Paint Lightmap", icon="TPAINT_HLT",
+            depress=(context.mode == "TEXTURE_PAINT" and is_lightmap_paint),
+        )
 
         row = layout.row()
         row.enabled = context.mode == "OBJECT" and _qss_has_painted_texture_faces(obj)
