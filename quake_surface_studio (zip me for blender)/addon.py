@@ -22,7 +22,7 @@ from bpy.types import Operator, Panel
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
 from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils
-from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils
+from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils
 
 
 ADDON_VERSION = (0, 17, 3)
@@ -6945,12 +6945,11 @@ QSS_WORKSPACE_TOOLS = (
 
 
 def _qss_remove_workspace_tool_definitions():
-    """Remove QSS tools and repair malformed groups left by earlier releases.
+    """Remove stale QSS tools and sanitize every Blender 3D View tool list.
 
-    Blender tool lists allow either a ToolDef or a one-level tuple of ToolDefs.
-    Earlier QSS builds accidentally nested those tuples. Flatten nested groups
-    while retaining their non-QSS tools, and remove all QSS ToolDefs before
-    registering the corrected mode-specific entries.
+    Earlier releases could leave nested groups and malformed values behind.
+    Blender's draw code expects ToolDef objects, one-level tuple groups, and
+    None separators; strings or arbitrary objects are not valid toolbar items.
     """
     try:
         from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
@@ -6958,53 +6957,29 @@ def _qss_remove_workspace_tool_definitions():
         if helper is None:
             return
 
-        def collect_group_members(item, output):
-            if item is None:
-                return
-            if isinstance(item, tuple):
-                for child in item:
-                    collect_group_members(child, output)
-                return
-            if not str(getattr(item, "idname", "")).startswith("qss."):
-                output.append(item)
+        discarded_types = {}
+        for context_mode, entries in tuple(helper._tools.items()):
+            normalized, discarded = toolbar_utils.normalize_tool_entries(entries)
+            if isinstance(entries, list):
+                entries[:] = normalized
+            else:
+                helper._tools[context_mode] = normalized
 
-        def normalize(entries):
-            cleaned = []
-            for item in entries:
-                if item is None:
-                    cleaned.append(None)
-                elif isinstance(item, tuple):
-                    members = []
-                    collect_group_members(item, members)
-                    if len(members) == 1:
-                        cleaned.append(members[0])
-                    elif len(members) > 1:
-                        # Blender's toolbar supports one tuple level only.
-                        cleaned.append(tuple(members))
-                elif not str(getattr(item, "idname", "")).startswith("qss."):
-                    cleaned.append(item)
+            for item in discarded:
+                item_type = type(item).__name__
+                discarded_types[item_type] = discarded_types.get(item_type, 0) + 1
 
-            # Keep top-level separators only; remove duplicate and edge separators.
-            result = []
-            for item in cleaned:
-                if item is None and (not result or result[-1] is None):
-                    continue
-                result.append(item)
-            while result and result[0] is None:
-                result.pop(0)
-            while result and result[-1] is None:
-                result.pop()
-            return result
-
-        for entries in helper._tools.values():
-            entries[:] = normalize(entries)
+        if discarded_types:
+            summary = ", ".join(
+                f"{count} {item_type}" for item_type, count in sorted(discarded_types.items())
+            )
+            print(f"QSS: removed unsupported viewport toolbar entries ({summary}).")
     except Exception as exc:
         print(f"QSS: could not clean old viewport tool definitions: {exc}")
 
 
-
 def _qss_registered_toolbar_tool_ids():
-    """Return QSS tool identifiers from every 3D View mode list."""
+    """Return valid QSS tool identifiers from every 3D View mode list."""
     try:
         from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
         helper = ToolSelectPanelHelper._tool_class_from_space_type("VIEW_3D")
@@ -7012,8 +6987,8 @@ def _qss_registered_toolbar_tool_ids():
             return set()
         identifiers = set()
         for definitions in helper._tools.values():
-            for item in ToolSelectPanelHelper._tools_flatten(definitions):
-                identifier = str(getattr(item, "idname", "")) if item is not None else ""
+            for item in toolbar_utils.iter_tooldefs(definitions):
+                identifier = toolbar_utils.tooldef_idname(item)
                 if identifier.startswith("qss."):
                     identifiers.add(identifier)
         return identifiers
