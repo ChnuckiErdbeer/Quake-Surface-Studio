@@ -67,6 +67,9 @@ _QSS_CONFIG_DEFAULTS = {
     "export_mode": "AUTO",
     "prefer_enhanced_last_export": True,
     "import_lightmap_resolution": "1",
+    "rebake_behavior": "ASK",
+    "lighting_mode_storage": "PER_MAP",
+    "global_lighting_mode": "source",
 }
 
 
@@ -328,7 +331,15 @@ def _qss_activate_map_collection(scene, name, context=None):
 
     if map_object is not None and context is not None:
         try:
-            _set_lighting_preview(context, map_object, map_object.get("qss_preview_mode", "source"))
+            settings = _qss_config_settings()
+            if str(settings.get("lighting_mode_storage", "PER_MAP")).upper() == "GLOBAL":
+                preview_mode = str(settings.get("global_lighting_mode", "source"))
+                if preview_mode not in {"source", "realtime", "cycles", "baked"}:
+                    preview_mode = "source"
+                map_object["qss_preview_mode"] = preview_mode
+            else:
+                preview_mode = map_object.get("qss_preview_mode", "source")
+            _set_lighting_preview(context, map_object, preview_mode)
         except Exception as exc:
             print(f"QSS: could not restore lighting for {map_object.name}: {exc}")
     return map_object
@@ -6003,7 +6014,8 @@ class QSS_OT_bake_scene_lights(Operator):
 
     def invoke(self, context, event):
         obj = context.object
-        if obj and _qss_has_baked_lightmap(obj):
+        settings = _qss_config_settings()
+        if obj and _qss_has_baked_lightmap(obj) and str(settings.get("rebake_behavior", "ASK")).upper() == "ASK":
             return context.window_manager.invoke_confirm(self, event)
         return self.execute(context)
 
@@ -7212,6 +7224,18 @@ class QSS_OT_settings(Operator):
         default="AUTO",
     )
     prefer_enhanced_last_export: BoolProperty(name="Prefer Enhanced when opening a Both export", default=True)
+    rebake_behavior: EnumProperty(
+        name="Re-bake an existing lightmap",
+        items=(("ASK", "Ask", "Confirm before replacing the generated lightmap"),
+               ("OVERWRITE", "Overwrite", "Replace the generated lightmap without another confirmation")),
+        default="ASK",
+    )
+    lighting_mode_storage: EnumProperty(
+        name="Lighting mode memory",
+        items=(("PER_MAP", "Per map", "Each imported map remembers its own lighting mode"),
+               ("GLOBAL", "Global", "Use one lighting mode for every imported map")),
+        default="PER_MAP",
+    )
     import_lightmap_resolution: EnumProperty(
         name="Default working lightmap resolution",
         items=(("1", "1× · Original", "Original packed atlas resolution"),
@@ -7226,6 +7250,8 @@ class QSS_OT_settings(Operator):
         self.import_behavior = str(settings.get("import_behavior", "ASK")).upper()
         self.export_mode = str(settings.get("export_mode", "AUTO")).upper()
         self.prefer_enhanced_last_export = bool(settings.get("prefer_enhanced_last_export", True))
+        self.rebake_behavior = str(settings.get("rebake_behavior", "ASK")).upper()
+        self.lighting_mode_storage = str(settings.get("lighting_mode_storage", "PER_MAP")).upper()
         self.import_lightmap_resolution = str(settings.get("import_lightmap_resolution", "1"))
         if self.import_behavior not in {"ASK", "ADD", "REPLACE"}:
             self.import_behavior = "ASK"
@@ -7233,6 +7259,10 @@ class QSS_OT_settings(Operator):
             self.export_mode = "AUTO"
         if self.import_lightmap_resolution not in {"1", "2", "4", "8"}:
             self.import_lightmap_resolution = "1"
+        if self.rebake_behavior not in {"ASK", "OVERWRITE"}:
+            self.rebake_behavior = "ASK"
+        if self.lighting_mode_storage not in {"PER_MAP", "GLOBAL"}:
+            self.lighting_mode_storage = "PER_MAP"
         return context.window_manager.invoke_props_dialog(self, width=460)
 
     def draw(self, context):
@@ -7242,6 +7272,11 @@ class QSS_OT_settings(Operator):
         layout.prop(self, "export_mode")
         layout.prop(self, "prefer_enhanced_last_export")
         layout.prop(self, "import_lightmap_resolution")
+        layout.separator()
+        layout.label(text="Lighting workflow", icon="LIGHT")
+        layout.prop(self, "lighting_mode_storage")
+        layout.prop(self, "rebake_behavior")
+        layout.label(text="Cycles is the supported bake backend; Eevee uses this same low-priority test path.", icon="INFO")
         layout.label(text="Only QSS map collections are replaced. Other scene content is preserved.", icon="INFO")
 
     def execute(self, context):
@@ -7251,7 +7286,14 @@ class QSS_OT_settings(Operator):
             "export_mode": self.export_mode,
             "prefer_enhanced_last_export": bool(self.prefer_enhanced_last_export),
             "import_lightmap_resolution": self.import_lightmap_resolution,
+            "rebake_behavior": self.rebake_behavior,
+            "lighting_mode_storage": self.lighting_mode_storage,
         })
+        if self.lighting_mode_storage == "GLOBAL" and str(settings.get("lighting_mode_storage", "PER_MAP")).upper() != "GLOBAL":
+            active_obj = context.object
+            settings["global_lighting_mode"] = (
+                active_obj.get("qss_preview_mode", "source") if _qss_is_map_object(active_obj) else "source"
+            )
         try:
             quake_paths.save_config(settings, _qss_config_path())
             context.scene.qss_import_lightmap_resolution = self.import_lightmap_resolution
@@ -7317,6 +7359,10 @@ class QSS_OT_set_lighting_mode(Operator):
             return {"CANCELLED"}
         try:
             _set_lighting_preview(context, obj, self.mode)
+            settings = _qss_load_config()
+            if str(settings.get("lighting_mode_storage", "PER_MAP")).upper() == "GLOBAL":
+                settings["global_lighting_mode"] = self.mode
+                quake_paths.save_config(settings, _qss_config_path())
             return {"FINISHED"}
         except Exception as exc:
             self.report({"ERROR"}, f"Could not change lighting mode: {exc}")
@@ -7693,6 +7739,8 @@ class QSS_PT_lighting(Panel):
         bake = layout.row()
         bake.enabled = mode in {"realtime", "cycles"} and obj.get("qss_light_entity_count", 0) > 0
         bake.operator(QSS_OT_bake_scene_lights.bl_idname, text="Bake Lightmap", icon="RENDER_STILL")
+        if mode == "realtime":
+            layout.label(text="Eevee preview selected; baking currently uses the Cycles backend.", icon="INFO")
         if obj.get("qss_last_quake_bake_error"):
             row = layout.row()
             row.alert = True
