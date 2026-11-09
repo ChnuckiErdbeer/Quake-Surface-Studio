@@ -138,6 +138,46 @@ def _qss_make_map_collection(context, obj, source_path):
     return collection
 
 
+def _qss_migrate_legacy_map_collections(scene):
+    """Wrap pre-v0.18 imported BSP objects and entity collections in map roots."""
+    if scene is None:
+        return
+    for obj in list(scene.objects):
+        if not _qss_is_map_object(obj) or obj.get("qss_map_collection", ""):
+            continue
+        source_path = obj.get("qss_source_path", "") or obj.name
+        stem = os.path.splitext(os.path.basename(source_path))[0] or obj.name
+        root = bpy.data.collections.new(f"QSS_Map_{stem}")
+        root["qss_map_collection"] = True
+        root["qss_source_path"] = os.path.abspath(source_path) if os.path.isabs(source_path) else str(source_path)
+        scene.collection.children.link(root)
+        for parent in list(obj.users_collection):
+            parent.objects.unlink(obj)
+        root.objects.link(obj)
+        obj["qss_map_collection"] = root.name
+        if "qss_preview_mode" not in obj:
+            obj["qss_preview_mode"] = "source"
+        if "qss_painted_textures_enabled" not in obj:
+            obj["qss_painted_textures_enabled"] = True
+        if "qss_painted_lightmaps_enabled" not in obj:
+            obj["qss_painted_lightmaps_enabled"] = True
+        entity_name = obj.get("qss_light_collection", "")
+        entity_collection = bpy.data.collections.get(entity_name) if entity_name else None
+        if entity_collection is not None and entity_collection != root:
+            for parent in list(bpy.data.collections):
+                try:
+                    if entity_collection in parent.children:
+                        parent.children.unlink(entity_collection)
+                except Exception:
+                    pass
+            try:
+                if entity_collection in scene.collection.children:
+                    scene.collection.children.unlink(entity_collection)
+            except Exception:
+                pass
+            root.children.link(entity_collection)
+
+
 def _qss_remove_map_collection(scene, name):
     collection = bpy.data.collections.get(name) if name else None
     if collection is None or not collection.get("qss_map_collection", False):
@@ -6732,8 +6772,14 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
         mode = str(_qss_config_settings().get("export_mode", "AUTO")).upper()
         self.lightmap_export_mode = mode if mode in {"AUTO", "CLASSIC", "ENHANCED", "BOTH"} else "AUTO"
         if source:
-            root, ext = os.path.splitext(source)
-            self.filepath = root + "_surface_studio" + ext
+            virtual_path = str(obj.get("qss_game_map_path", "") or "")
+            game_dir = _qss_abspath(getattr(context.scene, "qss_game_dir", "") or "")
+            if virtual_path and game_dir:
+                relative_root, ext = os.path.splitext(virtual_path.replace("/", os.sep))
+                self.filepath = os.path.join(game_dir, relative_root + "_surface_studio" + (ext or ".bsp"))
+            else:
+                root, ext = os.path.splitext(source)
+                self.filepath = root + "_surface_studio" + ext
         return ExportHelper.invoke(self, context, event)
 
     def draw(self, context):
@@ -7929,6 +7975,18 @@ def register():
             try:
                 scene.qss_game_folder = initial_game_id
                 scene.qss_game_dir = initial_game_dir
+                _qss_migrate_legacy_map_collections(scene)
+                existing_maps = _qss_scene_map_collections(scene)
+                active_obj = getattr(getattr(bpy.context, "view_layer", None), "objects", None)
+                active_obj = getattr(active_obj, "active", None) if active_obj is not None else None
+                active_collection_name = (
+                    active_obj.get("qss_map_collection", "")
+                    if _qss_is_map_object(active_obj) else
+                    (existing_maps[0].name if existing_maps else "__QSS_NO_MAP__")
+                )
+                scene.qss_active_map_collection = active_collection_name
+                if active_collection_name != "__QSS_NO_MAP__":
+                    _qss_activate_map_collection(scene, active_collection_name, bpy.context)
             finally:
                 _qss_config_update_depth = False
     except Exception:
