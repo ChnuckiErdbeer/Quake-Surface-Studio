@@ -7483,7 +7483,6 @@ def register():
                 scene.qss_game_dir = initial_game_dir
             finally:
                 _qss_config_update_depth = False
-        _qss_register_ui_menus()
     except Exception:
         # Blender can leave a partially registered add-on behind when register()
         # raises. Roll back everything created in this attempt before propagating.
