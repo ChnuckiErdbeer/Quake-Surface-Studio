@@ -1228,19 +1228,22 @@ def _set_viewport_lighting_mode(context, mode):
         for area in target_screen.areas:
             if area.type != "VIEW_3D":
                 continue
-            for space in area.spaces:
-                if space.type != "VIEW_3D":
-                    continue
-                shading = space.shading
-                shading.type = "RENDERED" if mode == "cycles" else "MATERIAL"
-                for name in ("use_scene_lights", "use_scene_world",
-                             "use_scene_lights_render", "use_scene_world_render"):
-                    if hasattr(shading, name):
-                        setattr(shading, name, live)
-                try:
-                    area.tag_redraw()
-                except Exception:
-                    pass
+            # The active SpaceView3D is the one Blender actually draws. Updating
+            # inactive spaces in area.spaces alone can leave the visible viewport
+            # in Solid shading after a file-browser import.
+            space = area.spaces.active
+            if space is None or space.type != "VIEW_3D":
+                continue
+            shading = space.shading
+            shading.type = "RENDERED" if mode == "cycles" else "MATERIAL"
+            for name in ("use_scene_lights", "use_scene_world",
+                         "use_scene_lights_render", "use_scene_world_render"):
+                if hasattr(shading, name):
+                    setattr(shading, name, live)
+            try:
+                area.tag_redraw()
+            except Exception:
+                pass
 
 
 def _qss_apply_base_texture_visibility(obj):
