@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils
 
 
-ADDON_VERSION = (0, 17, 4)
+ADDON_VERSION = (0, 17, 5)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -6945,26 +6945,25 @@ QSS_WORKSPACE_TOOLS = (
 
 
 def _qss_remove_workspace_tool_definitions():
-    """Remove stale QSS tools and sanitize every Blender 3D View tool list.
+    """Remove stale QSS definitions without damaging Blender's own tool lists.
 
-    Earlier releases could leave nested groups and malformed values behind.
-    Blender's draw code expects ToolDef objects, one-level tuple groups, and
-    None separators; strings or arbitrary objects are not valid toolbar items.
+    Blender 5.2 ToolDef objects are namedtuples, so they must be identified
+    before tuple groups are inspected. Context-dependent callables in the
+    built-in paint and selection lists are also intentional and must survive.
     """
     try:
-        from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
+        from bl_ui.space_toolsystem_common import ToolSelectPanelHelper, ToolDef
         helper = ToolSelectPanelHelper._tool_class_from_space_type("VIEW_3D")
         if helper is None:
             return
 
         discarded_types = {}
         for context_mode, entries in tuple(helper._tools.items()):
-            normalized, discarded = toolbar_utils.normalize_tool_entries(entries)
-            if isinstance(entries, list):
+            normalized, discarded = toolbar_utils.normalize_tool_entries(
+                entries, ToolDef
+            )
+            if normalized != entries:
                 entries[:] = normalized
-            else:
-                helper._tools[context_mode] = normalized
-
             for item in discarded:
                 item_type = type(item).__name__
                 discarded_types[item_type] = discarded_types.get(item_type, 0) + 1
@@ -6973,23 +6972,23 @@ def _qss_remove_workspace_tool_definitions():
             summary = ", ".join(
                 f"{count} {item_type}" for item_type, count in sorted(discarded_types.items())
             )
-            print(f"QSS: removed unsupported viewport toolbar entries ({summary}).")
+            print(f"QSS: removed malformed viewport toolbar entries ({summary}).")
     except Exception as exc:
         print(f"QSS: could not clean old viewport tool definitions: {exc}")
 
 
 def _qss_registered_toolbar_tool_ids():
-    """Return valid QSS tool identifiers from every 3D View mode list."""
+    """Return registered QSS ToolDef identifiers from every 3D View mode list."""
     try:
-        from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
+        from bl_ui.space_toolsystem_common import ToolSelectPanelHelper, ToolDef
         helper = ToolSelectPanelHelper._tool_class_from_space_type("VIEW_3D")
         if helper is None:
             return set()
         identifiers = set()
         for definitions in helper._tools.values():
-            for item in toolbar_utils.iter_tooldefs(definitions):
-                identifier = toolbar_utils.tooldef_idname(item)
-                if identifier.startswith("qss."):
+            for item in toolbar_utils.iter_tooldefs(definitions, ToolDef):
+                identifier = toolbar_utils.tooldef_idname(item, ToolDef)
+                if identifier and identifier.startswith("qss."):
                     identifiers.add(identifier)
         return identifiers
     except Exception:
@@ -6997,11 +6996,12 @@ def _qss_registered_toolbar_tool_ids():
 
 
 def _register_qss_workspace_tools():
-    # Register each QSS tool as a plain ToolDef at the end of its mode list.
-    # Do not use register_tool(after=...) here: several Blender selection tools
-    # live inside tuple groups, and inserting after a member can create a nested
-    # tuple which breaks Blender's toolbar drawing code.
-    _qss_remove_workspace_tool_definitions()
+    """Register QSS tools through Blender's public WorkSpaceTool API.
+
+    Always unregister the previous QSS definitions first. This also removes
+    their generated add-on keymaps, so the Refresh action is idempotent.
+    """
+    _unregister_qss_workspace_tools()
 
     tool_groups = (
         ("OBJECT", (
@@ -7024,13 +7024,19 @@ def _register_qss_workspace_tools():
         raise RuntimeError("Blender's 3D View toolbar helper is unavailable.")
 
     for context_mode, tools in tool_groups:
-        entries = helper._tools.setdefault(context_mode, [])
-        if entries and entries[-1] is not None:
-            entries.append(None)
-        for tool in tools:
+        if context_mode not in helper._tools:
+            raise RuntimeError(
+                f"Blender's 3D View toolbar has no {context_mode} tool list."
+            )
+        for index, tool in enumerate(tools):
             tool.bl_context_mode = context_mode
-            bpy.utils.register_tool(tool)
-
+            # Blender creates one normal top-level separator before each
+            # QSS mode section. No manual list insertion or tuple grouping.
+            bpy.utils.register_tool(
+                tool,
+                separator=(index == 0),
+                group=False,
+            )
 
 
 def _unregister_qss_workspace_tools():
