@@ -2,12 +2,17 @@
 
 ## 0.17.5 changes
 
-- Fixes the 0.17.4 toolbar regression: Blender 5.2 ToolDef entries are namedtuples, not ordinary tool groups. The sanitizer now recognizes the actual ToolDef type before inspecting tuples.
+- Fixes the 0.17.4 toolbar regression: Blender 5.2 `ToolDef` entries are namedtuples, not ordinary tool groups. The sanitizer now recognizes the actual Blender type before inspecting tuple groups.
 - Preserves Blender's built-in Object, Edit, Texture Paint, Vertex Paint, Weight Paint, Sculpt, and other mode tool definitions without rebuilding or flattening untouched groups.
-- Preserves top-level dynamic tool generators used by built-in context-sensitive tools, including paint-mode selection tools.
-- Repairs only stale QSS entries and malformed/nested data; leaves valid native ToolDef groups and callable generators in their original order.
-- Uses Blender's register_tool/unregister_tool lifecycle consistently. Refresh unregisters previous QSS tools and generated keymaps before registering them once, with a normal separator between built-in and QSS tools.
-- Adds regression coverage for actual namedtuple ToolDef behavior, built-in groups, dynamic generators, malformed strings, stale QSS entries, and safe iteration.
+- Preserves the top-level dynamic tool generators used by built-in context-sensitive tools, including Texture Paint selection tools.
+- Repairs only stale QSS entries and genuinely malformed/nested data; valid native ToolDef groups and dynamic generators keep their original structure and order.
+- Registers QSS tools through Blender's `register_tool` / `unregister_tool` lifecycle. Refresh removes previous QSS tool definitions and generated keymaps before registering them once.
+- Adds one-click **Quick Actions** to the Quake Studio sidebar for commands such as Player Start, Focus, Isolate, Reveal, FPS Navigation, Paint Texture, and Paint Lightmap. The left toolbar remains a tool selector: select a QSS tool there, then click in the 3D View to run it.
+- Makes Isolate and Reveal work from either the viewport toolbar or the sidebar by explicitly invoking their mesh operators in the 3D View window region.
+- Detects when a running Blender session has already lost its built-in toolbar definitions and displays a restart warning.
+- Adds regression tests for Blender's namedtuple ToolDef behavior, unchanged built-in groups, dynamic tool generators, stale QSS tools, malformed entries, and safe iteration.
+
+**Upgrade note:** v0.17.4 could already have damaged the in-memory built-in toolbar lists. A full Blender restart after installing v0.17.5 is required to reload Blender's original tool definitions; disabling/re-enabling the add-on alone cannot reconstruct deleted built-in tools.
 
 ## 0.17.4 changes
 
