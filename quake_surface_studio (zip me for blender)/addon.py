@@ -339,6 +339,17 @@ def _qss_activate_map_collection(scene, name, context=None):
                 map_object["qss_preview_mode"] = preview_mode
             else:
                 preview_mode = map_object.get("qss_preview_mode", "source")
+            if preview_mode not in {"source", "realtime", "cycles", "baked"}:
+                preview_mode = "source"
+            if preview_mode == "baked" and not _qss_has_baked_lightmap(map_object):
+                preview_mode = "source"
+                map_object["qss_preview_mode"] = "source"
+                if str(settings.get("lighting_mode_storage", "PER_MAP")).upper() == "GLOBAL":
+                    settings["global_lighting_mode"] = "source"
+                    try:
+                        quake_paths.save_config(settings, _qss_config_path())
+                    except Exception:
+                        pass
             _set_lighting_preview(context, map_object, preview_mode)
         except Exception as exc:
             print(f"QSS: could not restore lighting for {map_object.name}: {exc}")
