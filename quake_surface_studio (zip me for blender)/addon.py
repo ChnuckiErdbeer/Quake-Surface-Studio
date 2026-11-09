@@ -66,6 +66,7 @@ _QSS_CONFIG_DEFAULTS = {
     "import_behavior": "ASK",
     "export_mode": "AUTO",
     "prefer_enhanced_last_export": True,
+    "import_lightmap_resolution": "1",
 }
 
 
@@ -3244,6 +3245,7 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
         default='ADD', options={'HIDDEN'}
     )
     _qss_import_prompted: BoolProperty(default=False, options={'HIDDEN'})
+    game_map_path: StringProperty(default="", options={'HIDDEN'})
 
     def invoke(self, context, event):
         self.game_dir = context.scene.qss_game_dir
@@ -3298,6 +3300,8 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
             )
             context.scene.qss_game_dir = game_dir
             context.scene.qss_quake_unit_scale = float(self.unit_scale)
+            if self.game_map_path:
+                obj["qss_game_map_path"] = self.game_map_path
             _qss_save_config(context.scene, last_source_bsp=source_path)
             _qss_activate_map_collection(context.scene, obj.get("qss_map_collection", ""), context)
             if policy == "REPLACE" and old_active_name and old_active_name != obj.get("qss_map_collection", ""):
@@ -3362,6 +3366,7 @@ class QSS_OT_browse_game_maps(Operator):
                 game_dir=context.scene.qss_game_dir,
                 unit_scale=context.scene.qss_quake_unit_scale,
                 lightmap_resolution=context.scene.qss_import_lightmap_resolution,
+                game_map_path=entry["path"],
             )
             if 'CANCELLED' in result:
                 raise RuntimeError("The QSS BSP importer cancelled the map import.")
