@@ -79,6 +79,22 @@ def _qss_config_settings():
     return values
 
 
+def _qss_last_export_path(obj):
+    if not _qss_is_map_object(obj):
+        return ""
+    if obj.get("qss_last_export_mode") == "BOTH":
+        settings = _qss_config_settings()
+        preferred = "qss_last_export_enhanced_path" if settings.get("prefer_enhanced_last_export", True) else "qss_last_export_classic_path"
+        alternate = "qss_last_export_classic_path" if preferred.endswith("enhanced_path") else "qss_last_export_enhanced_path"
+        for key in (preferred, alternate, "qss_last_export_path"):
+            candidate = obj.get(key, "")
+            if candidate and os.path.isfile(candidate):
+                return candidate
+        return ""
+    candidate = obj.get("qss_last_export_path", "")
+    return candidate if candidate and os.path.isfile(candidate) else ""
+
+
 def _qss_scene_map_collections(scene):
     found = []
 
@@ -7625,7 +7641,7 @@ class QSS_OT_open_last_export(Operator):
         obj = context.object
         executable = _qss_abspath(getattr(context.scene, "qss_ironwail_executable", "") or "")
         quake_root = _qss_abspath(getattr(context.scene, "qss_quake_root", "") or "")
-        path = obj.get("qss_last_export_path", "") if _qss_is_map_object(obj) else ""
+        path = _qss_last_export_path(obj)
         game_dir = _qss_abspath(obj.get("qss_game_dir", "") or getattr(context.scene, "qss_game_dir", "") or "")
         inside_game = False
         if path and game_dir and os.path.isdir(game_dir):
@@ -7639,13 +7655,10 @@ class QSS_OT_open_last_export(Operator):
 
     def execute(self, context):
         obj = context.object
-        settings = _qss_config_settings()
-        path = obj.get("qss_last_export_path", "")
-        if obj.get("qss_last_export_mode") == "BOTH":
-            key = "qss_last_export_enhanced_path" if settings.get("prefer_enhanced_last_export", True) else "qss_last_export_classic_path"
-            preferred = obj.get(key, "")
-            if preferred and os.path.isfile(preferred):
-                path = preferred
+        path = _qss_last_export_path(obj)
+        if not path:
+            self.report({"ERROR"}, "No existing export is available for this map.")
+            return {"CANCELLED"}
         try:
             game_dir = _qss_abspath(obj.get("qss_game_dir", "") or context.scene.qss_game_dir)
             relative = os.path.relpath(os.path.abspath(path), game_dir)
@@ -7744,7 +7757,7 @@ class QSS_PT_project(Panel):
         export_row.enabled = _qss_is_map_object(obj) and context.mode == "OBJECT"
         export_row.operator(QSS_OT_export_bsp.bl_idname, text="Export BSP", icon="EXPORT")
         launch = layout.row()
-        last_path = obj.get("qss_last_export_path", "") if _qss_is_map_object(obj) else ""
+        last_path = _qss_last_export_path(obj)
         launch_game_dir = _qss_abspath(obj.get("qss_game_dir", "") or scene.qss_game_dir or "") if _qss_is_map_object(obj) else ""
         launch_inside_game = False
         if last_path and launch_game_dir and os.path.isdir(launch_game_dir):
