@@ -1,4 +1,13 @@
-# Quake Surface Studio 0.17.1
+# Quake Surface Studio 0.17.2
+
+## 0.17.2 changes
+
+- Moves QSS viewport actions into Blender 5.2's shared 3D View toolbar tool list so they are available in Object, Edit and Paint modes.
+- Removes stale QSS toolbar definitions from previous add-on module instances and migrates tools left in old mode-specific lists by earlier 0.17.x builds.
+- Displays a toolbar registration count in the Quake Studio panel to distinguish registration failures from viewport display issues.
+- Keeps mode safety in the underlying QSS operators; actions that require Edit Mode or an imported BSP still validate those requirements.
+
+
 
 ## 0.17.1 changes
 
