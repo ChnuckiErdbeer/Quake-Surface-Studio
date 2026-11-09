@@ -6797,6 +6797,30 @@ class QSS_OT_open_workspace(Operator):
         return {"FINISHED"}
 
 
+class QSS_OT_refresh_viewport_tools(Operator):
+    bl_idname = "qss.refresh_viewport_tools"
+    bl_label = "Refresh QSS Viewport Tools"
+    bl_description = "Rebuild the QSS toolbar entries and redraw Blender viewports"
+
+    def execute(self, context):
+        try:
+            _register_qss_workspace_tools()
+            for window in context.window_manager.windows:
+                for screen in window.screens:
+                    for area in screen.areas:
+                        area.tag_redraw()
+            count = len(_qss_registered_toolbar_tool_ids())
+            if count != len(QSS_WORKSPACE_TOOLS):
+                raise RuntimeError(
+                    f"Blender registered {count} of {len(QSS_WORKSPACE_TOOLS)} QSS tools."
+                )
+            self.report({"INFO"}, f"Refreshed {count} QSS viewport tools.")
+            return {"FINISHED"}
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not refresh QSS viewport tools: {exc}")
+            return {"CANCELLED"}
+
+
 class QSS_OT_paint_texture_selected_faces(Operator):
     bl_idname = "qss.paint_texture_selected_faces"
     bl_label = "Paint Texture"
@@ -7016,6 +7040,11 @@ class QSS_PT_workspace_main(Panel):
         toolbar_status.label(
             text=f"Viewport tools registered: {len(toolbar_ids)}/{len(QSS_WORKSPACE_TOOLS)}",
             icon="CHECKMARK" if len(toolbar_ids) == len(QSS_WORKSPACE_TOOLS) else "ERROR",
+        )
+        toolbar_status.operator(
+            QSS_OT_refresh_viewport_tools.bl_idname,
+            text="Refresh",
+            icon="FILE_REFRESH",
         )
         launch = header.row()
         launch.enabled = bool(
@@ -7688,6 +7717,7 @@ class QSS_PT_export(Panel):
 CLASSES = (
     QSS_OT_import_bsp,
     QSS_OT_open_workspace,
+    QSS_OT_refresh_viewport_tools,
     QSS_OT_paint_texture_selected_faces,
     QSS_OT_browse_game_maps,
     QSS_OT_validate_bsp_export,
