@@ -3281,6 +3281,56 @@ class QSS_OT_player_start(Operator):
         return {'CANCELLED'}
 
 
+
+class QSS_OT_confirm_import(Operator):
+    bl_idname = "qss.confirm_import"
+    bl_label = "Import BSP into Project"
+    bl_description = "Choose whether to add the map or replace the active QSS map"
+
+    filepath: StringProperty(subtype="FILE_PATH", options={"HIDDEN"})
+    game_dir: StringProperty(subtype="DIR_PATH", options={"HIDDEN"})
+    game_map_path: StringProperty(options={"HIDDEN"})
+    unit_scale: FloatProperty(default=DEFAULT_QUAKE_UNIT_SCALE, min=0.0001, max=10.0, options={"HIDDEN"})
+    flip_z: BoolProperty(default=False, options={"HIDDEN"})
+    lightmap_resolution: EnumProperty(
+        items=(("1", "1×", "Original working atlas resolution"),
+               ("2", "2×", "Double working atlas resolution"),
+               ("4", "4×", "Four times working atlas resolution"),
+               ("8", "8×", "Eight times working atlas resolution")),
+        default="1", options={"HIDDEN"},
+    )
+    import_action: EnumProperty(
+        name="Import behaviour",
+        items=(("ADD", "Add as new map", "Keep existing maps in their own collections"),
+               ("REPLACE", "Replace active map", "Remove only the active QSS map after the new import succeeds")),
+        default="ADD",
+    )
+
+    def invoke(self, context, event):
+        self.import_action = "ADD"
+        return context.window_manager.invoke_props_dialog(self, width=500)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="A map is already loaded. What should QSS do with it?")
+        layout.prop(self, "import_action", expand=True)
+        layout.label(text="Add preserves existing maps. Replace removes only the active QSS map.", icon="INFO")
+
+    def execute(self, context):
+        result = bpy.ops.qss.import_bsp(
+            "EXEC_DEFAULT",
+            filepath=self.filepath,
+            game_dir=self.game_dir,
+            game_map_path=self.game_map_path,
+            unit_scale=self.unit_scale,
+            flip_z=self.flip_z,
+            lightmap_resolution=self.lightmap_resolution,
+            import_action=self.import_action,
+            skip_import_prompt=True,
+        )
+        return {"CANCELLED"} if "CANCELLED" in result else {"FINISHED"}
+
+
 class QSS_OT_import_bsp(Operator, ImportHelper):
     bl_idname = "qss.import_bsp"
     bl_label = "Import Quake BSP29"
@@ -3312,7 +3362,7 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
                ('REPLACE', "Replace active map", "Replace only the active QSS map collection")),
         default='ADD', options={'HIDDEN'}
     )
-    _qss_import_prompted: BoolProperty(default=False, options={'HIDDEN'})
+    skip_import_prompt: BoolProperty(default=False, options={'HIDDEN'})
     game_map_path: StringProperty(default="", options={'HIDDEN'})
 
     def invoke(self, context, event):
@@ -3335,11 +3385,17 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
         existing_maps = _qss_scene_map_collections(context.scene)
         old_active_name = getattr(context.scene, "qss_active_map_collection", "")
         policy = str(settings.get("import_behavior", "ASK")).upper()
-        if existing_maps and policy == "ASK" and not self._qss_import_prompted:
-            self._qss_import_prompted = True
-            self.import_action = "ADD"
-            return context.window_manager.invoke_props_dialog(self, width=500)
-        if self._qss_import_prompted:
+        if existing_maps and policy == "ASK" and not self.skip_import_prompt:
+            return bpy.ops.qss.confirm_import(
+                "INVOKE_DEFAULT",
+                filepath=self.filepath,
+                game_dir=self.game_dir,
+                game_map_path=self.game_map_path,
+                unit_scale=self.unit_scale,
+                flip_z=self.flip_z,
+                lightmap_resolution=self.lightmap_resolution,
+            )
+        if self.skip_import_prompt:
             policy = self.import_action
         if policy not in {"ADD", "REPLACE"}:
             policy = "ADD"
@@ -7722,7 +7778,7 @@ class QSS_PT_stats(Panel):
 
 
 CLASSES = (
-    QSS_OT_import_bsp, QSS_OT_browse_game_maps, QSS_OT_validate_bsp_export,
+    QSS_OT_confirm_import, QSS_OT_import_bsp, QSS_OT_browse_game_maps, QSS_OT_validate_bsp_export,
     QSS_OT_scan_game_maps, QSS_OT_run_python_tests, QSS_OT_run_map_audit,
     QSS_OT_launch_ironwail, QSS_OT_open_last_export, QSS_OT_open_config_text,
     QSS_OT_settings, QSS_OT_change_lightmap_resolution, QSS_OT_set_lighting_mode,
