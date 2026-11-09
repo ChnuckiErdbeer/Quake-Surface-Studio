@@ -7124,13 +7124,11 @@ class QSS_WST_paint_lightmap(bpy.types.WorkSpaceTool):
     bl_keymap = _qss_tool_keymap(QSS_OT_activate_lightmap_paint.bl_idname)
 
 
+# The left toolbar is for persistent viewport tools only. One-shot actions
+# (Focus, Player Start, Toggle Isolation) are direct sidebar operators so they
+# don't require an unrelated click somewhere in the viewport.
 QSS_WORKSPACE_TOOLS = (
-    QSS_WST_player_start,
-    QSS_WST_focus_object,
     QSS_WST_fps_navigation,
-    QSS_WST_focus_edit,
-    QSS_WST_isolate_faces,
-    QSS_WST_reveal_faces,
     QSS_WST_paint_texture,
     QSS_WST_paint_lightmap,
 )
@@ -7219,14 +7217,9 @@ def _register_qss_workspace_tools():
 
     tool_groups = (
         ("OBJECT", (
-            QSS_WST_player_start,
-            QSS_WST_focus_object,
             QSS_WST_fps_navigation,
         )),
         ("EDIT_MESH", (
-            QSS_WST_focus_edit,
-            QSS_WST_isolate_faces,
-            QSS_WST_reveal_faces,
             QSS_WST_paint_texture,
             QSS_WST_paint_lightmap,
         )),
@@ -7331,7 +7324,7 @@ class QSS_PT_workspace_main(Panel):
                 )
                 row.operator(
                     QSS_OT_frame_selection.bl_idname,
-                    text="Focus",
+                    text="Focus BSP",
                     icon="VIEWZOOM",
                 )
                 fps_row = actions.row()
@@ -7347,19 +7340,27 @@ class QSS_PT_workspace_main(Panel):
                 row = actions.row(align=True)
                 row.operator(
                     QSS_OT_frame_selection.bl_idname,
-                    text="Focus",
+                    text="Focus Selected Faces",
                     icon="VIEWZOOM",
                 )
-                row.operator(
+                isolation_active = visibility_utils.snapshot_is_active(
+                    obj.get("qss_face_visibility_snapshot", "")
+                )
+                toggle = row.operator(
                     QSS_OT_isolate_faces.bl_idname,
-                    text="Isolate",
+                    text="Restore Visibility" if isolation_active else "Isolate Selected Faces",
                     icon="HIDE_OFF",
                 )
-                row.operator(
-                    QSS_OT_reveal_faces.bl_idname,
-                    text="Reveal",
-                    icon="RESTRICT_VIEW_OFF",
-                )
+                if isolation_active:
+                    actions.label(
+                        text="Isolation is active. Click Restore Visibility to return to the previous hidden/selected faces.",
+                        icon="INFO",
+                    )
+                else:
+                    actions.label(
+                        text="Isolation is a toggle; the previous visibility and face selection are restored on the next click.",
+                        icon="INFO",
+                    )
                 row = actions.row(align=True)
                 row.operator(
                     QSS_OT_paint_texture_selected_faces.bl_idname,
