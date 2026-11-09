@@ -221,6 +221,12 @@ def _qss_activate_map_collection(scene, name, context=None):
     global _qss_map_switch_depth
     if scene is None:
         return None
+    if context is not None and getattr(context, "mode", "OBJECT") != "OBJECT":
+        try:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        except Exception as exc:
+            print(f"QSS: could not leave the current mode before switching maps: {exc}")
+            return None
     collection = next((item for item in _qss_scene_map_collections(scene) if item.name == name), None)
     if collection is None:
         return None
@@ -7474,14 +7480,18 @@ class QSS_PT_project(Panel):
         maps = _qss_scene_map_collections(scene)
         if maps:
             layout.separator()
-            layout.prop(scene, "qss_active_map_collection", text="Loaded Map")
+            active_map_row = layout.row()
+            active_map_row.enabled = context.mode == "OBJECT"
+            active_map_row.prop(scene, "qss_active_map_collection", text="Loaded Map")
         else:
             layout.label(text="No imported maps yet.", icon="INFO")
         if _qss_is_map_object(obj):
             box = layout.box()
             row = box.row(align=True)
             row.label(text=f"Lightmap Resolution: {int(obj.get('qss_lightmap_resolution', 1))}×")
-            row.operator(QSS_OT_change_lightmap_resolution.bl_idname, text="Change")
+            change = row.row()
+            change.enabled = context.mode == "OBJECT"
+            change.operator(QSS_OT_change_lightmap_resolution.bl_idname, text="Change")
             box.label(text=f"Source: {os.path.basename(obj.get('qss_source_path', ''))}", icon="FILE")
         else:
             layout.label(text="Import a BSP to enable export and lighting controls.", icon="INFO")
@@ -7530,7 +7540,10 @@ class QSS_PT_lighting(Panel):
             depress=(context.mode == "TEXTURE_PAINT" and not is_lightmap_paint),
         )
         light_paint = paint.row()
-        light_paint.enabled = selected_faces and mode in {"source", "baked"} and (mode != "baked" or _qss_has_baked_lightmap(obj))
+        light_paint.enabled = selected_faces and (
+            context.mode == "TEXTURE_PAINT"
+            or (mode in {"source", "baked"} and (mode != "baked" or _qss_has_baked_lightmap(obj)))
+        )
         light_paint.operator(
             QSS_OT_activate_lightmap_paint.bl_idname, text="Paint Lightmap", icon="TPAINT_HLT",
             depress=(context.mode == "TEXTURE_PAINT" and is_lightmap_paint),
