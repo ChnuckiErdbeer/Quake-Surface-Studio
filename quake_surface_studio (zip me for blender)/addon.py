@@ -3373,12 +3373,7 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
         return ImportHelper.invoke(self, context, event)
 
     def draw(self, context):
-        if self._qss_import_prompted:
-            self.layout.label(text="A map is already loaded. What should QSS do with it?")
-            self.layout.prop(self, "import_action", expand=True)
-            self.layout.label(text="Add preserves existing maps; Replace removes only the active QSS map.", icon="INFO")
-        else:
-            self.layout.label(text="Uses the active Game / Mod and QSS project defaults.")
+        self.layout.label(text="Uses the active Game / Mod and QSS project defaults.")
 
     def execute(self, context):
         settings = _qss_config_settings()
