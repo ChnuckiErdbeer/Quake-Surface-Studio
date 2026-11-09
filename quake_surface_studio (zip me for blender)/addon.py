@@ -6399,9 +6399,23 @@ class QSS_OT_isolate_faces(Operator):
             _report(self, 'WARNING', "Select the face(s) to isolate first.")
             return {'CANCELLED'}
         try:
-            bpy.ops.mesh.hide(unselected=True)
+            area = context.area if context.area and context.area.type == 'VIEW_3D' else None
+            if area is None:
+                area = next(
+                    (item for item in (context.screen.areas if context.screen else [])
+                     if item.type == 'VIEW_3D'),
+                    None,
+                )
+            region = next(
+                (item for item in area.regions if item.type == 'WINDOW'),
+                None,
+            ) if area else None
+            if area is None or region is None:
+                raise RuntimeError("No usable 3D View window region is available.")
+            with context.temp_override(window=context.window, area=area, region=region):
+                bpy.ops.mesh.hide(unselected=True)
             return {'FINISHED'}
-        except RuntimeError as exc:
+        except Exception as exc:
             _report(self, 'ERROR', f"Could not isolate faces: {exc}")
             return {'CANCELLED'}
 
@@ -6419,9 +6433,23 @@ class QSS_OT_reveal_faces(Operator):
 
     def execute(self, context):
         try:
-            bpy.ops.mesh.reveal(select=False)
+            area = context.area if context.area and context.area.type == 'VIEW_3D' else None
+            if area is None:
+                area = next(
+                    (item for item in (context.screen.areas if context.screen else [])
+                     if item.type == 'VIEW_3D'),
+                    None,
+                )
+            region = next(
+                (item for item in area.regions if item.type == 'WINDOW'),
+                None,
+            ) if area else None
+            if area is None or region is None:
+                raise RuntimeError("No usable 3D View window region is available.")
+            with context.temp_override(window=context.window, area=area, region=region):
+                bpy.ops.mesh.reveal(select=False)
             return {'FINISHED'}
-        except RuntimeError as exc:
+        except Exception as exc:
             _report(self, 'ERROR', f"Could not reveal faces: {exc}")
             return {'CANCELLED'}
 
@@ -6849,7 +6877,7 @@ class QSS_WST_player_start(bpy.types.WorkSpaceTool):
     bl_context_mode = None
     bl_idname = "qss.player_start"
     bl_label = "Go to Player Start"
-    bl_description = "Click in the viewport to move to info_player_start"
+    bl_description = "Select this tool, then click the 3D View to move to info_player_start"
     bl_icon = "ops.generic.select"
     bl_operator = QSS_OT_player_start.bl_idname
     bl_keymap = _qss_tool_keymap(QSS_OT_player_start.bl_idname)
@@ -6860,7 +6888,7 @@ class QSS_WST_focus_object(bpy.types.WorkSpaceTool):
     bl_context_mode = None
     bl_idname = "qss.focus_face_object"
     bl_label = "Focus Selected Face"
-    bl_description = "Click in the viewport to frame the selected face(s)"
+    bl_description = "Select this tool, then click the 3D View to frame the current selection"
     bl_icon = "ops.view3d.view_selected"
     bl_operator = QSS_OT_frame_selection.bl_idname
     bl_keymap = _qss_tool_keymap(QSS_OT_frame_selection.bl_idname)
@@ -6871,7 +6899,7 @@ class QSS_WST_fps_navigation(bpy.types.WorkSpaceTool):
     bl_context_mode = None
     bl_idname = "qss.fps_navigation"
     bl_label = "FPS Navigation"
-    bl_description = "Click in the viewport to start keyboard navigation; WASD moves and MMB looks"
+    bl_description = "Select this tool, then click the 3D View to start keyboard navigation; WASD moves and MMB looks"
     bl_icon = "ops.view3d.walk"
     bl_operator = QSS_OT_fps_walk.bl_idname
     bl_keymap = _qss_tool_keymap(QSS_OT_fps_walk.bl_idname)
@@ -6893,7 +6921,7 @@ class QSS_WST_isolate_faces(bpy.types.WorkSpaceTool):
     bl_context_mode = None
     bl_idname = "qss.isolate_faces"
     bl_label = "Isolate Selected Faces"
-    bl_description = "Hide all unselected BSP faces"
+    bl_description = "Select this tool, then click the 3D View to hide all unselected BSP faces"
     bl_icon = "ops.mesh.hide"
     bl_operator = QSS_OT_isolate_faces.bl_idname
     bl_keymap = _qss_tool_keymap(QSS_OT_isolate_faces.bl_idname)
@@ -6904,7 +6932,7 @@ class QSS_WST_reveal_faces(bpy.types.WorkSpaceTool):
     bl_context_mode = None
     bl_idname = "qss.reveal_faces"
     bl_label = "Reveal Hidden Faces"
-    bl_description = "Reveal faces hidden in Edit Mode"
+    bl_description = "Select this tool, then click the 3D View to reveal hidden faces"
     bl_icon = "ops.mesh.reveal"
     bl_operator = QSS_OT_reveal_faces.bl_idname
     bl_keymap = _qss_tool_keymap(QSS_OT_reveal_faces.bl_idname)
@@ -6915,7 +6943,7 @@ class QSS_WST_paint_texture(bpy.types.WorkSpaceTool):
     bl_context_mode = None
     bl_idname = "qss.paint_texture"
     bl_label = "Paint Texture"
-    bl_description = "Detach the selected faces and enter Texture Paint"
+    bl_description = "Select this tool, then click the 3D View to detach selected faces and enter Texture Paint"
     bl_icon = "ops.paint.texture_paint"
     bl_operator = QSS_OT_paint_texture_selected_faces.bl_idname
     bl_keymap = _qss_tool_keymap(QSS_OT_paint_texture_selected_faces.bl_idname)
@@ -6926,7 +6954,7 @@ class QSS_WST_paint_lightmap(bpy.types.WorkSpaceTool):
     bl_context_mode = None
     bl_idname = "qss.paint_lightmap"
     bl_label = "Paint Lightmap"
-    bl_description = "Enter Lightmap Paint for the selected lightmapped faces"
+    bl_description = "Select this tool, then click the 3D View to enter Lightmap Paint for selected lightmapped faces"
     bl_icon = "ops.paint.image"
     bl_operator = QSS_OT_activate_lightmap_paint.bl_idname
     bl_keymap = _qss_tool_keymap(QSS_OT_activate_lightmap_paint.bl_idname)
@@ -7078,6 +7106,10 @@ class QSS_PT_workspace_main(Panel):
             text="Refresh",
             icon="FILE_REFRESH",
         )
+        layout.label(
+            text="Toolbar icons select a tool; left-click the 3D View to run it.",
+            icon="INFO",
+        )
         launch = header.row()
         launch.enabled = bool(
             scene.qss_ironwail_executable
@@ -7094,6 +7126,68 @@ class QSS_PT_workspace_main(Panel):
             row.label(text=f"{len(obj.data.polygons)} faces", icon="FACESEL")
             row.label(text=f"{len(obj.data.materials)} materials", icon="MATERIAL")
             row.label(text=f"{obj.get('qss_light_entity_count', 0)} lights", icon="LIGHT")
+
+            actions = layout.box()
+            actions.label(text="QUICK ACTIONS", icon="TOOL_SETTINGS")
+            if context.mode == "OBJECT":
+                row = actions.row(align=True)
+                row.operator(
+                    QSS_OT_player_start.bl_idname,
+                    text="Player Start",
+                    icon="PIVOT_CURSOR",
+                )
+                row.operator(
+                    QSS_OT_frame_selection.bl_idname,
+                    text="Focus",
+                    icon="VIEWZOOM",
+                )
+                actions.operator(
+                    QSS_OT_fps_walk.bl_idname,
+                    text="Start / Stop FPS Navigation",
+                    icon="WALK",
+                )
+            elif context.mode == "EDIT_MESH":
+                row = actions.row(align=True)
+                row.operator(
+                    QSS_OT_frame_selection.bl_idname,
+                    text="Focus",
+                    icon="VIEWZOOM",
+                )
+                row.operator(
+                    QSS_OT_isolate_faces.bl_idname,
+                    text="Isolate",
+                    icon="HIDE_OFF",
+                )
+                row.operator(
+                    QSS_OT_reveal_faces.bl_idname,
+                    text="Reveal",
+                    icon="RESTRICT_VIEW_OFF",
+                )
+                row = actions.row(align=True)
+                row.operator(
+                    QSS_OT_paint_texture_selected_faces.bl_idname,
+                    text="Paint Texture",
+                    icon="TPAINT_HLT",
+                )
+                row.operator(
+                    QSS_OT_activate_lightmap_paint.bl_idname,
+                    text="Paint Lightmap",
+                    icon="IMAGE",
+                )
+            elif context.mode == "TEXTURE_PAINT":
+                actions.label(
+                    text="Use Blender's standard paint tools in the left toolbar.",
+                    icon="BRUSH_DATA",
+                )
+                actions.label(
+                    text="Return to Edit Mode to select faces and start another QSS paint setup.",
+                    icon="INFO",
+                )
+            else:
+                actions.label(
+                    text=f"QSS quick actions are not assigned to {context.mode}.",
+                    icon="INFO",
+                )
         else:
             layout.label(text="No imported Quake BSP selected.", icon="INFO")
 
