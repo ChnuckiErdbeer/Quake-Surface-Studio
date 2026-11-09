@@ -7926,7 +7926,7 @@ class QSS_PT_stats(Panel):
         lighting.label(text=f"Generated bake: {'Available' if _qss_has_baked_lightmap(obj) else 'Not baked'}")
         diagnostics = layout.box()
         diagnostics.label(text="EXPORT & DIAGNOSTICS", icon="EXPORT")
-        last_export = obj.get("qss_last_export_path", "")
+        last_export = _qss_last_export_path(obj)
         diagnostics.label(text=f"Last export: {os.path.basename(last_export) if last_export else 'Not exported'}")
         diagnostics.label(text=f"Format: {obj.get('qss_last_export_mode', '—')}")
         for key, label in (("qss_wad_unresolved", "WAD not found"),
