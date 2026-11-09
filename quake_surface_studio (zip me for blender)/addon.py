@@ -6983,497 +6983,584 @@ def _qss_is_map_object(obj):
     return bool(obj and obj.type == 'MESH' and obj.get('qss_object_role') == 'quake_bsp29')
 
 
+
+class QSS_OT_settings(Operator):
+    bl_idname = "qss.settings"
+    bl_label = "Quake Surface Studio Settings"
+    bl_description = "Configure import behaviour, export defaults and map workflow"
+
+    import_behavior: EnumProperty(
+        name="Import behaviour",
+        items=(("ASK", "Ask", "Ask whether to add or replace when another map is loaded"),
+               ("ADD", "Add", "Always add imported maps as separate collections"),
+               ("REPLACE", "Replace", "Replace the active QSS map after a successful import")),
+        default="ASK",
+    )
+    export_mode: EnumProperty(
+        name="Default export format",
+        items=(("AUTO", "Automatic", "Choose Classic or Enhanced from map requirements"),
+               ("CLASSIC", "Classic", "Always default to Classic BSP29"),
+               ("ENHANCED", "Enhanced", "Always default to Enhanced BSPX"),
+               ("BOTH", "Both", "Always default to exporting both variants")),
+        default="AUTO",
+    )
+    prefer_enhanced_last_export: BoolProperty(name="Prefer Enhanced when opening a Both export", default=True)
+    import_lightmap_resolution: EnumProperty(
+        name="Default working lightmap resolution",
+        items=(("1", "1× · Original", "Original packed atlas resolution"),
+               ("2", "2×", "Twice the pixels per axis"),
+               ("4", "4×", "Four times the pixels per axis"),
+               ("8", "8×", "Eight times the pixels per axis")),
+        default="1",
+    )
+
+    def invoke(self, context, event):
+        settings = _qss_config_settings()
+        self.import_behavior = str(settings.get("import_behavior", "ASK")).upper()
+        self.export_mode = str(settings.get("export_mode", "AUTO")).upper()
+        self.prefer_enhanced_last_export = bool(settings.get("prefer_enhanced_last_export", True))
+        self.import_lightmap_resolution = str(settings.get("import_lightmap_resolution", "1"))
+        if self.import_behavior not in {"ASK", "ADD", "REPLACE"}:
+            self.import_behavior = "ASK"
+        if self.export_mode not in {"AUTO", "CLASSIC", "ENHANCED", "BOTH"}:
+            self.export_mode = "AUTO"
+        if self.import_lightmap_resolution not in {"1", "2", "4", "8"}:
+            self.import_lightmap_resolution = "1"
+        return context.window_manager.invoke_props_dialog(self, width=460)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="Project workflow defaults", icon="PREFERENCES")
+        layout.prop(self, "import_behavior")
+        layout.prop(self, "export_mode")
+        layout.prop(self, "prefer_enhanced_last_export")
+        layout.prop(self, "import_lightmap_resolution")
+        layout.label(text="Only QSS map collections are replaced. Other scene content is preserved.", icon="INFO")
+
+    def execute(self, context):
+        settings = _qss_load_config()
+        settings.update({
+            "import_behavior": self.import_behavior,
+            "export_mode": self.export_mode,
+            "prefer_enhanced_last_export": bool(self.prefer_enhanced_last_export),
+            "import_lightmap_resolution": self.import_lightmap_resolution,
+        })
+        try:
+            quake_paths.save_config(settings, _qss_config_path())
+            context.scene.qss_import_lightmap_resolution = self.import_lightmap_resolution
+            self.report({"INFO"}, "Quake Surface Studio settings saved.")
+            return {"FINISHED"}
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not save QSS settings: {exc}")
+            return {"CANCELLED"}
+
+
+class QSS_OT_open_config_text(Operator):
+    bl_idname = "qss.open_config_text"
+    bl_label = "Open Config File in Text Editor"
+    bl_description = "Open QSS config.json in a separate Blender window for direct editing"
+
+    def execute(self, context):
+        path = _qss_config_path()
+        if not os.path.isfile(path):
+            quake_paths.save_config(_qss_load_config(), path)
+        try:
+            bpy.ops.wm.window_new()
+            windows = list(context.window_manager.windows)
+            target_window = windows[-1] if windows else context.window
+            target_area = next(
+                (area for area in target_window.screen.areas if area.type == "VIEW_3D"),
+                max(target_window.screen.areas, key=lambda area: area.width * area.height),
+            )
+            text = next(
+                (item for item in bpy.data.texts if bpy.path.abspath(item.filepath) == path),
+                None,
+            )
+            if text is None:
+                text = bpy.data.texts.load(path, internal=False)
+            target_area.type = "TEXT_EDITOR"
+            target_area.spaces.active.text = text
+            self.report({"INFO"}, "QSS config.json opened in a separate Blender window.")
+            return {"FINISHED"}
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not open config.json in a separate editor window: {exc}")
+            return {"CANCELLED"}
+
+
+class QSS_OT_set_lighting_mode(Operator):
+    bl_idname = "qss.set_lighting_mode"
+    bl_label = "Set Lighting Preview"
+    bl_options = {"INTERNAL"}
+    mode: EnumProperty(
+        name="Lighting mode",
+        items=(("source", "Original", "Display imported BSP lightmaps"),
+               ("realtime", "Eevee", "Preview scene lights in Material Preview"),
+               ("cycles", "Cycles", "Preview scene lights in Cycles"),
+               ("baked", "Baked", "Display the generated lightmap")),
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return _qss_is_map_object(context.object)
+
+    def execute(self, context):
+        obj = context.object
+        if self.mode == "baked" and not _qss_has_baked_lightmap(obj):
+            self.report({"WARNING"}, "Bake a lightmap for this map before selecting Baked.")
+            return {"CANCELLED"}
+        try:
+            _set_lighting_preview(context, obj, self.mode)
+            return {"FINISHED"}
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not change lighting mode: {exc}")
+            return {"CANCELLED"}
+
+
+class QSS_OT_toggle_painted_textures(Operator):
+    bl_idname = "qss.toggle_painted_textures"
+    bl_label = "Toggle Painted Textures"
+    bl_description = "Switch detached face textures between original and painted material versions"
+
+    @classmethod
+    def poll(cls, context):
+        return _qss_is_map_object(context.object) and context.mode == "OBJECT" and _qss_has_painted_texture_faces(context.object)
+
+    def execute(self, context):
+        obj = context.object
+        mesh = obj.data
+        original = mesh.attributes.get("qss_original_material_index")
+        painted = mesh.attributes.get("qss_painted_material_index")
+        marker = mesh.attributes.get("qss_painted_face")
+        if not all((original, painted, marker)):
+            self.report({"WARNING"}, "This map has no detached painted textures.")
+            return {"CANCELLED"}
+        enabled = not bool(obj.get("qss_painted_textures_enabled", True))
+        for poly in mesh.polygons:
+            index = poly.index
+            if marker.data[index].value:
+                target = int(painted.data[index].value) if enabled else int(original.data[index].value)
+                if 0 <= target < len(mesh.materials):
+                    poly.material_index = target
+        obj["qss_painted_textures_enabled"] = enabled
+        mesh.update()
+        self.report({"INFO"}, f"Painted textures {'enabled' if enabled else 'disabled'}.")
+        return {"FINISHED"}
+
+
+class QSS_OT_toggle_painted_lightmaps(Operator):
+    bl_idname = "qss.toggle_painted_lightmaps"
+    bl_label = "Toggle Painted Lightmaps"
+    bl_description = "Switch between the active lightmap source and its painted override"
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        return bool(_qss_is_map_object(obj) and context.mode == "OBJECT"
+                    and obj.get("qss_preview_mode", "source") in {"source", "baked"}
+                    and (obj.get("qss_preview_mode", "source") != "baked" or _qss_has_baked_lightmap(obj)))
+
+    def execute(self, context):
+        obj = context.object
+        mode = obj.get("qss_preview_mode", "source")
+        key = "qss_painted_original_lightmap" if mode == "source" else "qss_painted_baked_lightmap"
+        if not obj.get(key, ""):
+            self.report({"WARNING"}, "Paint a lightmap first; no painted override exists for this source.")
+            return {"CANCELLED"}
+        enabled = not bool(obj.get("qss_painted_lightmaps_enabled", True))
+        obj["qss_painted_lightmaps_enabled"] = enabled
+        try:
+            _set_lighting_preview(context, obj, mode)
+        except Exception as exc:
+            obj["qss_painted_lightmaps_enabled"] = not enabled
+            self.report({"ERROR"}, f"Could not switch painted lightmaps: {exc}")
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Painted lightmaps {'enabled' if enabled else 'disabled'}.")
+        return {"FINISHED"}
+
+
+def _qss_rebuild_map_lightmap_resolution(obj, resolution):
+    source_path = bpy.path.abspath(obj.get("qss_source_path", ""))
+    if not source_path or not os.path.isfile(source_path):
+        raise bsp.BSPError("The source BSP is unavailable; cannot rebuild its lightmap atlas.")
+    parsed = bsp.BSP29.from_file(source_path)
+    mesh = obj.data
+    face_ids_attr = mesh.attributes.get("qss_bsp_face_id")
+    texinfo_attr = mesh.attributes.get("qss_bsp_texinfo_id")
+    if not face_ids_attr or not texinfo_attr or len(face_ids_attr.data) != len(mesh.polygons) or len(texinfo_attr.data) != len(mesh.polygons):
+        raise bsp.BSPError("BSP face metadata is missing or stale; re-import this map.")
+    unit_scale = max(1e-8, float(obj.get("qss_unit_scale", DEFAULT_QUAKE_UNIT_SCALE)))
+    flip_z = bool(obj.get("qss_flip_z", False))
+    face_ids = [int(item.value) for item in face_ids_attr.data]
+    texinfo_ids = [int(item.value) for item in texinfo_attr.data]
+    positions_by_face = []
+    for poly in mesh.polygons:
+        positions = []
+        for vertex_index in poly.vertices:
+            co = mesh.vertices[vertex_index].co
+            z = -float(co.z) if flip_z else float(co.z)
+            positions.append((float(co.x) / unit_scale, float(co.y) / unit_scale, z / unit_scale))
+        positions_by_face.append(positions)
+    source_lit_path = os.path.splitext(source_path)[0] + ".lit"
+    source_lit_rgb, _ = bsp.resolve_rgb_lighting(parsed.bspx_lumps, parsed.lumps[bsp.LUMP_LIGHTING], source_lit_path)
+    atlas_lighting = parsed.lumps[bsp.LUMP_LIGHTING]
+    if not atlas_lighting and source_lit_rgb is not None:
+        atlas_lighting = bsp.rgb_lighting_to_luminance(source_lit_rgb)
+
+    old_names = (
+        obj.get("qss_lightmap_image_name", ""),
+        obj.get("qss_original_lightmap_backup", ""),
+        obj.get("qss_painted_original_lightmap", ""),
+        obj.get("qss_painted_baked_lightmap", ""),
+    )
+    lm_uv = mesh.uv_layers.get("Quake_Lightmap_UV")
+    if lm_uv is not None:
+        mesh.uv_layers.remove(lm_uv)
+    for name in ("qss_lm_has_data", "qss_lm_atlas_x", "qss_lm_atlas_y", "qss_lm_sample_w", "qss_lm_sample_h"):
+        attr = mesh.attributes.get(name)
+        if attr is not None:
+            mesh.attributes.remove(attr)
+    _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by_face,
+                          source_lit_rgb, lighting_data=atlas_lighting, resolution=int(resolution))
+    obj["qss_painted_original_lightmap"] = ""
+    obj["qss_painted_baked_lightmap"] = ""
+    obj["qss_lightmap_gradient_baked"] = False
+    obj["qss_lightmap_source"] = "source_bsp"
+    for name in old_names:
+        image = bpy.data.images.get(name) if name else None
+        if image is not None and image.users == 0:
+            try:
+                bpy.data.images.remove(image, do_unlink=True)
+            except Exception:
+                pass
+
+
+class QSS_OT_change_lightmap_resolution(Operator):
+    bl_idname = "qss.change_lightmap_resolution"
+    bl_label = "Change Lightmap Resolution"
+    bl_description = "Rebuild the active map's working lightmap atlas at a different resolution"
+    resolution: EnumProperty(
+        name="Working resolution",
+        items=(("1", "1× · Original", "Original packed atlas resolution"),
+               ("2", "2×", "Twice the pixels per axis"),
+               ("4", "4×", "Four times the pixels per axis"),
+               ("8", "8×", "Eight times the pixels per axis")),
+        default="1",
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return _qss_is_map_object(context.object) and context.mode == "OBJECT"
+
+    def invoke(self, context, event):
+        self.resolution = str(context.object.get("qss_lightmap_resolution", 1))
+        return context.window_manager.invoke_props_dialog(self, width=460)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "resolution")
+        layout.label(text="Rebuilds the atlas from the original BSP source.", icon="INFO")
+        layout.label(text="Existing generated and painted lightmaps for this map are discarded.", icon="ERROR")
+        layout.label(text="Painted textures and geometry edits are preserved.", icon="INFO")
+
+    def execute(self, context):
+        obj = context.object
+        if str(obj.get("qss_lightmap_resolution", 1)) == self.resolution:
+            self.report({"INFO"}, "The active map already uses this lightmap resolution.")
+            return {"CANCELLED"}
+        try:
+            _qss_rebuild_map_lightmap_resolution(obj, int(self.resolution))
+            _set_lighting_preview(context, obj, "source")
+            self.report({"INFO"}, f"Lightmap atlas rebuilt at {self.resolution}×.")
+            return {"FINISHED"}
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not rebuild lightmap atlas: {exc}")
+            return {"CANCELLED"}
+
+
+class QSS_OT_open_last_export(Operator):
+    bl_idname = "qss.open_last_export"
+    bl_label = "Open Last Export in Ironwail"
+    bl_description = "Launch Ironwail with the last successful BSP export for the active map"
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        executable = _qss_abspath(getattr(context.scene, "qss_ironwail_executable", "") or "")
+        path = obj.get("qss_last_export_path", "") if _qss_is_map_object(obj) else ""
+        game_dir = _qss_abspath(getattr(context.scene, "qss_game_dir", "") or "")
+        return bool(executable and os.path.isfile(executable) and path and os.path.isfile(path)
+                    and game_dir and os.path.isdir(game_dir))
+
+    def execute(self, context):
+        obj = context.object
+        settings = _qss_config_settings()
+        path = obj.get("qss_last_export_path", "")
+        if obj.get("qss_last_export_mode") == "BOTH":
+            key = "qss_last_export_enhanced_path" if settings.get("prefer_enhanced_last_export", True) else "qss_last_export_classic_path"
+            preferred = obj.get(key, "")
+            if preferred and os.path.isfile(preferred):
+                path = preferred
+        try:
+            game_dir = _qss_abspath(context.scene.qss_game_dir)
+            relative = os.path.relpath(os.path.abspath(path), game_dir)
+            if relative == os.pardir or relative.startswith(os.pardir + os.sep):
+                raise RuntimeError("The last export is outside the active Game / Mod folder. Export inside the game directory to launch it in Ironwail.")
+            command = external_tools.build_ironwail_command(
+                _qss_abspath(context.scene.qss_ironwail_executable),
+                _qss_abspath(context.scene.qss_quake_root), game_dir,
+                map_path=relative.replace(os.sep, "/"), developer_mode=True)
+            log_root = bpy.utils.user_resource("DATAFILES", path=os.path.join("qss", "ironwail_logs"), create=True)
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            log_dir = os.path.join(log_root, f"Ironwail_{stamp}")
+            os.makedirs(log_dir, exist_ok=True)
+            log_path = os.path.join(log_dir, "process_output.log")
+            pid = external_tools.launch_process(command, cwd=log_dir, log_path=log_path)
+            self.report({"INFO"}, f"Ironwail launched with {os.path.basename(path)} (PID {pid}).")
+            return {"FINISHED"}
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not open last export: {exc}")
+            return {"CANCELLED"}
+
+
+
 class QSS_PT_main(Panel):
     bl_label = "Quake Surface Studio"
     bl_idname = "QSS_PT_main"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
     bl_category = "Quake"
     bl_order = 0
 
     def draw(self, context):
         layout = self.layout
-        layout.label(text=f"Version {'.'.join(str(part) for part in ADDON_VERSION)}", icon='INFO')
-        layout.use_property_split = True
-        import_box = layout.box()
-        import_box.label(text="START HERE · PROJECT", icon='FILE_3D')
-        import_box.operator(QSS_OT_import_bsp.bl_idname, text="Import Quake BSP…", icon='IMPORT')
+        row = layout.row(align=True)
+        row.label(text=f"v{'.'.join(str(part) for part in ADDON_VERSION)}", icon="INFO")
+        row.operator(QSS_OT_settings.bl_idname, text="", icon="PREFERENCES")
+        row.operator(QSS_OT_open_config_text.bl_idname, text="", icon="TEXT")
         obj = context.object
         if _qss_is_map_object(obj):
-            summary = layout.box()
-            summary.label(text=os.path.basename(obj.get('qss_source_path', obj.name)), icon='FILE_3D')
-            grid = summary.grid_flow(columns=2, even_columns=True, even_rows=True, align=True)
-            grid.label(text=f"{len(obj.data.polygons)} faces", icon='FACESEL')
-            grid.label(text=f"{len(obj.data.materials)} materials", icon='MATERIAL')
-            grid.label(text=f"{obj.get('qss_light_entity_count', 0)} lights", icon='LIGHT')
-            grid.label(text=f"{obj.get('qss_lightmap_faces', 0)} lit faces", icon='IMAGE')
-            status = summary.row()
-            if obj.get('qss_last_quake_bake_error'):
-                status.alert = True
-                status.label(text="Last Quake bake failed · open 05 Diagnostics", icon='ERROR')
-            elif obj.get('qss_lightmap_source') == 'quake_direct_cpu_bake':
-                status.label(text="Quake direct lightmap active", icon='CHECKMARK')
-            else:
-                status.label(text="BSP loaded · choose a workflow section", icon='CHECKMARK')
-            layout.label(text="WORKFLOW", icon='SORT_ASC')
-            layout.label(text="01 Project  →  02 Navigate  →  03 Paint  →  04 Light  →  05 Test  →  06 Export", icon='INFO')
+            layout.label(text=os.path.basename(obj.get("qss_source_path", obj.name)), icon="FILE_3D")
+            layout.label(text=f"{len(obj.data.polygons)} faces · {len(obj.data.materials)} materials · {obj.get('qss_light_entity_count', 0)} lights")
         else:
-            layout.label(text="Select an imported BSP29 mesh to access its tools.", icon='INFO')
-
-
-class QSS_PT_project(Panel):
-    bl_label = "01 · Project & Source"
-    bl_idname = "QSS_PT_project"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "Quake"
-    bl_parent_id = "QSS_PT_main"
-    bl_order = 10
-    bl_options = {'DEFAULT_CLOSED'}
-
-    def draw_header(self, context):
-        self.layout.label(text="", icon='FILE_FOLDER')
-
-    def draw(self, context):
-        layout = self.layout
-        obj = context.object
-        scene = context.scene
-        project_box = layout.box()
-        project_box.label(text="QUAKE INSTALLATION & MOD", icon='FILE_FOLDER')
-        project_box.prop(scene, 'qss_quake_root', text="Installation folder")
-        project_box.prop(scene, 'qss_game_folder', text="Game / Mod")
-        project_box.operator(QSS_OT_browse_game_maps.bl_idname, text="Browse Game Maps…", icon='FILEBROWSER')
-        project_box.operator(QSS_OT_scan_game_maps.bl_idname, text="Validate Maps in Active Game", icon='CHECKMARK')
-        tools_box = layout.box()
-        tools_box.label(text="EXTERNAL TOOLS", icon='CONSOLE')
-        tools_box.prop(scene, 'qss_ericw_tools_dir', text="ericw-tools folder")
-        tools_box.prop(scene, 'qss_ironwail_executable', text="Ironwail executable")
-        tools_box.prop(scene, 'qss_ironwail_demo', text="Demo (.dem)")
-        launch = tools_box.row()
-        launch.enabled = bool(scene.qss_ironwail_executable and os.path.isfile(_qss_abspath(scene.qss_ironwail_executable)))
-        launch.operator(QSS_OT_launch_ironwail.bl_idname, text="Launch Ironwail…", icon='PLAY')
-        if scene.qss_ericw_tools_dir:
-            found_tools = [name for name, path in external_tools.discover_tools(_qss_abspath(scene.qss_ericw_tools_dir)).items() if path]
-            tools_box.label(text="Found: " + (", ".join(found_tools) if found_tools else "no ericw executables"), icon='INFO')
-            light_row = tools_box.row()
-            light_row.enabled = bool(external_tools.resolve_tool(_qss_abspath(scene.qss_ericw_tools_dir), "light"))
-            light_row.operator(
-                QSS_OT_generate_decoupled_lightmaps.bl_idname,
-                text="Generate Decoupled Lightmaps…",
-                icon="LIGHT",
-            )
-        tests_box = layout.box()
-        tests_box.label(text="TESTING & BSP VALIDATION", icon='EXPERIMENTAL')
-        tests_box.operator(QSS_OT_validate_bsp_export.bl_idname, text="Validate Exported BSP…", icon='CHECKMARK')
-        tests_box.operator(QSS_OT_run_python_tests.bl_idname, text="Run QSS Python Test Suite", icon='PLAY')
-        audit_options = tests_box.box()
-        audit_options.label(text="FULL MAP AUDIT OPTIONS", icon='EXPERIMENTAL')
-        audit_options.prop(scene, 'qss_audit_timeout')
-        audit_options.prop(scene, 'qss_audit_ericw_light')
-        audit_options.prop(scene, 'qss_audit_ericw_compile')
-        audit_options.prop(scene, 'qss_audit_quake_bake')
-        audit_options.prop(scene, 'qss_audit_cycles_bake')
-        audit_options.prop(scene, 'qss_audit_enhanced_export')
-        tests_box.operator(QSS_OT_run_map_audit.bl_idname, text="Run Full Game Map Audit", icon='EXPERIMENTAL')
-        tests_box.label(text="Works without an imported map; uses the active game folder.", icon='INFO')
-        tests_box.label(text="Reports are written to Blender's Text Editor datablocks.", icon='INFO')
-        if not _qss_is_map_object(obj):
-            layout.label(text="No Quake BSP selected.", icon='INFO')
-            return
-        layout.label(text=os.path.basename(obj.get('qss_source_path', 'BSP29')), icon='FILE')
-        grid = layout.grid_flow(columns=2, even_columns=True, even_rows=True, align=True)
-        grid.label(text=f"Faces: {obj.get('qss_total_bsp_faces', len(obj.data.polygons))}")
-        grid.label(text=f"Lights: {obj.get('qss_light_entity_count', 0)}")
-        grid.label(text=f"Materials: {len(obj.data.materials)}")
-        grid.label(text=f"Unit: {obj.get('qss_unit_scale', DEFAULT_QUAKE_UNIT_SCALE):.5g} m")
-        layout.label(text=f"Textures: {obj.get('qss_texture_embedded_count', 0)} embedded / "
-                          f"{obj.get('qss_texture_wad_count', 0)} WAD / {obj.get('qss_texture_loose_count', 0)} loose")
-        if obj.get('qss_bspx_lump_names'):
-            layout.label(text=f"BSPX: {obj.get('qss_bspx_lump_names', '')[:100]}", icon='FILE_TEXT')
-        for key, text in (
-            ('qss_missing_texture_names', 'Missing textures: '),
-            ('qss_wad_unresolved', 'WAD not found: '),
-            ('qss_wad_failures', 'WAD read issue: '),
-        ):
-            if obj.get(key):
-                row = layout.row()
-                row.alert = True
-                row.label(text=text + str(obj.get(key))[:80], icon='ERROR')
-        if obj.get('qss_texture_white_count', 0):
-            layout.label(text=f"White fallbacks: {obj.get('qss_texture_white_count', 0)}", icon='INFO')
+            layout.label(text="Select or import a Quake BSP to begin.", icon="INFO")
 
 
 class QSS_PT_navigation(Panel):
-    bl_label = "02 · Navigation & Selection"
+    bl_label = "NAVIGATION"
     bl_idname = "QSS_PT_navigation"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Quake"
+    bl_parent_id = "QSS_PT_main"
+    bl_order = 10
+
+    @classmethod
+    def poll(cls, context):
+        return _qss_is_map_object(context.object)
+
+    def draw(self, context):
+        obj = context.object
+        layout = self.layout
+        layout.operator(QSS_OT_fps_walk.bl_idname, text="WASD Mode", icon="VIEW_PAN")
+        row = layout.row()
+        row.enabled = bool(obj.get("qss_has_player_start"))
+        row.operator(QSS_OT_player_start.bl_idname, text="Move to Player Start", icon="EMPTY_AXIS")
+
+
+class QSS_PT_project(Panel):
+    bl_label = "MAIN"
+    bl_idname = "QSS_PT_project"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
     bl_category = "Quake"
     bl_parent_id = "QSS_PT_main"
     bl_order = 20
-    bl_options = {'DEFAULT_CLOSED'}
-
-    @classmethod
-    def poll(cls, context):
-        return _qss_is_map_object(context.object)
-
-    def draw_header(self, context):
-        self.layout.label(text="", icon='VIEW3D')
 
     def draw(self, context):
         layout = self.layout
-        layout.use_property_split = True
+        scene = context.scene
         obj = context.object
-        frame = layout.box()
-        frame.label(text="VIEWPORT & SELECTION", icon='VIEW3D')
-        frame.operator(QSS_OT_frame_selection.bl_idname, icon='VIEWZOOM')
-        row = frame.row(align=True)
-        row.operator(QSS_OT_isolate_faces.bl_idname, icon='HIDE_OFF')
-        row.operator(QSS_OT_reveal_faces.bl_idname, icon='HIDE_ON')
-        frame.operator(QSS_OT_optimize_clipping.bl_idname, icon='MOD_PHYSICS')
-        player = layout.box()
-        player.label(text="FIRST-PERSON NAVIGATION", icon='ORIENTATION_VIEW')
-        if obj.get('qss_has_player_start'):
-            player.operator(QSS_OT_player_start.bl_idname, icon='EMPTY_AXIS')
-        player.operator(
-            QSS_OT_fps_walk.bl_idname,
-            text="Start Quake Walk (Noclip)",
-            icon='VIEW_PAN',
-        )
-        player.prop(context.scene, 'qss_nav_speed_quake', text="Speed (Quake u/s)")
-        player.prop(context.scene, 'qss_nav_fast_factor', text="Fast multiplier")
-        player.label(text=f"Clip: {obj.get('qss_view_clip_start', 0.01):.3g} / {obj.get('qss_view_clip_end', 1000):.3g}")
-        if obj.get('qss_flip_z'):
-            row = player.row()
-            row.alert = True
-            row.label(text="Imported with inverted Z axis", icon='INFO')
-        player.label(text="Mouse movement = look · WASD = fly · Q/E = vertical")
-        player.label(text="LMB confirms/exits · Esc or RMB cancels")
-
-
-class QSS_PT_texture(Panel):
-    bl_label = "03 · Texture Workshop"
-    bl_idname = "QSS_PT_texture"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "Quake"
-    bl_parent_id = "QSS_PT_main"
-    bl_order = 30
-    bl_options = {'DEFAULT_CLOSED'}
-
-    @classmethod
-    def poll(cls, context):
-        return _qss_is_map_object(context.object)
-
-    def draw_header(self, context):
-        self.layout.label(text="", icon='IMAGE')
-
-    def draw(self, context):
-        layout = self.layout
-        obj = context.object
-        selected = 0
-        if context.mode == 'EDIT_MESH':
-            try:
-                import bmesh
-                selected = sum(1 for face in bmesh.from_edit_mesh(obj.data).faces if face.select)
-            except Exception:
-                selected = 0
+        layout.prop(scene, "qss_game_folder", text="Game / Mod")
+        layout.operator(QSS_OT_browse_game_maps.bl_idname, text="Browse Game Maps", icon="FILEBROWSER")
+        row = layout.row(align=True)
+        row.operator(QSS_OT_import_bsp.bl_idname, text="Import BSP", icon="IMPORT")
+        export_row = row.row(align=True)
+        export_row.enabled = _qss_is_map_object(obj) and context.mode == "OBJECT"
+        export_row.operator(QSS_OT_export_bsp.bl_idname, text="Export BSP", icon="EXPORT")
+        launch = layout.row()
+        last_path = obj.get("qss_last_export_path", "") if _qss_is_map_object(obj) else ""
+        launch.enabled = bool(_qss_is_map_object(obj) and last_path and os.path.isfile(last_path)
+                               and scene.qss_ironwail_executable
+                               and os.path.isfile(_qss_abspath(scene.qss_ironwail_executable)))
+        launch.operator(QSS_OT_open_last_export.bl_idname, text="Open Last Export in Ironwail", icon="PLAY")
+        maps = _qss_scene_map_collections(scene)
+        if maps:
+            layout.separator()
+            layout.prop(scene, "qss_active_map_collection", text="Loaded Map")
         else:
-            selected = sum(1 for poly in obj.data.polygons if poly.select)
-        layout.use_property_split = True
-        workshop = layout.box()
-        workshop.label(text="FACE MATERIAL WORKSHOP", icon='FACESEL')
-        workshop.label(text=f"Selected faces: {selected}", icon='RESTRICT_SELECT_OFF')
-        workshop.operator(QSS_OT_detach_faces.bl_idname, icon='DUPLICATE')
-        active_mat = obj.active_material
-        if active_mat and 'qss_export_name' in active_mat:
-            workshop.prop(active_mat, '["qss_export_name"]', text="BSP texture name")
-        workshop.operator(QSS_OT_activate_paint.bl_idname, icon='BRUSH_DATA')
-        workshop.label(text="Detach creates a face-local 0–1 paint canvas.", icon='INFO')
+            layout.label(text="No imported maps yet.", icon="INFO")
+        if _qss_is_map_object(obj):
+            box = layout.box()
+            row = box.row(align=True)
+            row.label(text=f"Lightmap Resolution: {int(obj.get('qss_lightmap_resolution', 1))}×")
+            row.operator(QSS_OT_change_lightmap_resolution.bl_idname, text="Change")
+            box.label(text=f"Source: {os.path.basename(obj.get('qss_source_path', ''))}", icon="FILE")
+        else:
+            layout.label(text="Import a BSP to enable export and lighting controls.", icon="INFO")
 
 
 class QSS_PT_lighting(Panel):
-    bl_label = "04 · Lighting Studio"
+    bl_label = "LIGHTING"
     bl_idname = "QSS_PT_lighting"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
     bl_category = "Quake"
     bl_parent_id = "QSS_PT_main"
-    bl_order = 40
-    bl_options = {'DEFAULT_CLOSED'}
-
-    @classmethod
-    def poll(cls, context):
-        return _qss_is_map_object(context.object)
-
-    def draw_header(self, context):
-        self.layout.label(text="", icon='LIGHT')
-
-    def draw(self, context):
-        obj = context.object
-        layout = self.layout
-        layout.use_property_split = True
-        row = layout.row(align=True)
-        row.label(text=f"Entity lights: {obj.get('qss_light_entity_count', 0)}")
-        row.label(text=f"Bounce: {obj.get('qss_world_bounce', 0)}")
-        if obj.get('qss_lightmap_image_name'):
-            layout.label(text=f"RGB source: {obj.get('qss_source_lighting_source', 'Monochrome')}")
-            layout.label(text=f"Lightmapped faces: {obj.get('qss_lightmap_faces', 0)} / {obj.get('qss_total_bsp_faces', len(obj.data.polygons))}")
-            layout.label(text=f"RGB chromatic faces: {obj.get('qss_lit_chromatic_faces', 0)} / {obj.get('qss_lit_rgb_faces', 0)}")
-            layout.label(text=f"Working atlas: {obj.get('qss_lightmap_atlas_size', 0) * obj.get('qss_lightmap_resolution', 1)} px · {obj.get('qss_lightmap_resolution', 1)}×")
-            paint_box = layout.box()
-            paint_box.label(text="LIGHTMAP PAINT", icon='BRUSH_DATA')
-            paint_box.operator(QSS_OT_activate_lightmap_paint.bl_idname, icon='TPAINT_HLT')
-            paint_box.label(text="Select one or more faces in Edit Mode first.", icon='INFO')
-            paint_box.label(text="Painting is masked to selected lightmapped faces.")
-
-
-class QSS_PT_light_preview(Panel):
-    bl_label = "A · Reference / Live / Baked"
-    bl_idname = "QSS_PT_light_preview"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "Quake"
-    bl_parent_id = "QSS_PT_lighting"
-    bl_order = 10
-    bl_options = {'DEFAULT_CLOSED'}
-
-    def draw_header(self, context):
-        self.layout.label(text="", icon='SHADING_RENDERED')
-
-    def draw(self, context):
-        obj = context.object
-        layout = self.layout
-        original = layout.box()
-        original.label(text="01 · ORIGINAL REFERENCE", icon='IMAGE_DATA')
-        original.operator(QSS_OT_preview_source_lightmaps.bl_idname, text="1 · Original BSP Lightmap", icon='IMAGE_DATA')
-        live = layout.box()
-        live.label(text="02 · INTERACTIVE LIGHTING", icon='LIGHT')
-        live.operator(QSS_OT_preview_imported_lights.bl_idname, text="2 · Live Lights", icon='LIGHT')
-        baked = layout.box()
-        baked.label(text="03 · EDITED LIGHTMAP", icon='RENDER_STILL')
-        baked.operator(QSS_OT_preview_bsp_lightmaps.bl_idname, text="3 · Baked / Working", icon='RENDER_STILL')
-        layout.operator(QSS_OT_refresh_lightmap_preview.bl_idname, icon='FILE_REFRESH')
-        layout.prop(context.scene, 'qss_light_energy_scale', text="Live light scale")
-        layout.operator(QSS_OT_apply_light_energy_scale.bl_idname, icon='LIGHT')
-        layout.operator(QSS_OT_calibrate_lights_to_source.bl_idname, icon='DRIVER')
-        layout.label(text=f"Source calibration: {obj.get('qss_light_energy_calibration', 1.0):.4g}×")
-        layout.label(text="The live preview uses Blender's physical inverse-square lamp model.", icon='INFO')
-
-
-class QSS_PT_imported_lights(Panel):
-    bl_label = "B · Quake Light Entities"
-    bl_idname = "QSS_PT_imported_lights"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "Quake"
-    bl_parent_id = "QSS_PT_lighting"
-    bl_order = 20
-    bl_options = {'DEFAULT_CLOSED'}
-
-    def draw_header(self, context):
-        self.layout.label(text="", icon='OUTLINER_OB_LIGHT')
-
-    def draw(self, context):
-        layout = self.layout
-        obj = context.object
-        lamps = [o for o in context.scene.objects if o.type == 'LIGHT' and
-                 o.get('qss_light_role') in {'quake_entity_light', 'quake_world_sunlight'}]
-        if not lamps:
-            layout.label(text="No imported Quake lights.", icon='INFO')
-            return
-        for lamp in lamps:
-            box = layout.box()
-            box.label(text=f"{lamp.name} · {float(lamp.data.energy):.3g} W", icon='LIGHT_POINT')
-            row = box.row(align=True)
-            if 'qss_quake_light_delay' in lamp:
-                row.prop(lamp, '["qss_quake_light_delay"]', text="delay")
-            if 'qss_quake_light_style' in lamp:
-                row.prop(lamp, '["qss_quake_light_style"]', text="style")
-            row = box.row(align=True)
-            if 'qss_quake_wait' in lamp:
-                row.prop(lamp, '["qss_quake_wait"]', text="wait")
-            if 'qss_quake_anglescale' in lamp:
-                row.prop(lamp, '["qss_quake_anglescale"]', text="anglescale")
-            if 'qss_quake_falloff' in lamp:
-                box.prop(lamp, '["qss_quake_falloff"]', text="_falloff")
-            if lamp.get('qss_quake_style_was_inferred'):
-                row = box.row()
-                row.alert = True
-                row.label(text="Style recovered from malformed empty key", icon='ERROR')
-        layout.label(text="delay 4 is a non-additive local-minlight clamp.", icon='INFO')
-
-
-class QSS_PT_quake_bake(Panel):
-    bl_label = "C · Quake Direct Lightmap Solver"
-    bl_idname = "QSS_PT_quake_bake"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "Quake"
-    bl_parent_id = "QSS_PT_lighting"
     bl_order = 30
-    bl_options = {'DEFAULT_CLOSED'}
 
-    def draw_header(self, context):
-        self.layout.label(text="", icon='RENDER_STILL')
+    @classmethod
+    def poll(cls, context):
+        return _qss_is_map_object(context.object)
 
     def draw(self, context):
         obj = context.object
         layout = self.layout
-        hero = layout.box()
-        hero.label(text="QUAKE-SPACE RGB LUXEL SOLVER", icon='LIGHT_HEMI')
-        hero.operator(QSS_OT_quake_direct_bake.bl_idname, text="Bake Quake Direct Lighting", icon='RENDER_STILL')
-        options = layout.box()
-        options.label(text="SOLVER OPTIONS", icon='PREFERENCES')
-        options.prop(context.scene, 'qss_quake_bake_shadows', text="Ray-traced visibility")
-        options.prop(context.scene, 'qss_quake_bake_gate', text="Contribution gate")
-        options.prop(context.scene, 'qss_bake_match_source', text="Match source average")
-        options.prop(context.scene, 'qss_bake_output_scale', text="Output brightness")
-        if obj.get('qss_last_quake_bake_luxels'):
-            layout.label(text=f"Luxels lit: {obj.get('qss_last_quake_bake_lit_luxels', 0)} / {obj.get('qss_last_quake_bake_luxels', 0)}")
-            layout.label(text=f"Shadow rays: {obj.get('qss_last_quake_bake_ray_tests', 0)} / blocked {obj.get('qss_last_quake_bake_occluded', 0)}")
-            layout.label(text=f"Delay modes: {obj.get('qss_last_quake_bake_modes', '')}")
-        if obj.get('qss_last_quake_bake_error'):
-            box = layout.box()
-            box.alert = True
-            box.label(text=str(obj.get('qss_last_quake_bake_error'))[:100], icon='ERROR')
-        layout.operator(QSS_OT_undo_last_bake.bl_idname, icon='LOOP_BACK')
-        layout.operator(QSS_OT_restore_original_lightmap.bl_idname, icon='BACK')
-        layout.label(text="Direct point/spot; delay 0–5; hard visibility.", icon='INFO')
-        layout.label(text="No radiosity, dirt, deviance/area samples or sky sunlight yet.", icon='INFO')
+        mode = obj.get("qss_preview_mode", "source")
+        row = layout.row(align=True)
+        for value, label in (("source", "Original"), ("realtime", "Eevee"),
+                             ("cycles", "Cycles"), ("baked", "Baked")):
+            button = row.row(align=True)
+            button.enabled = value != "baked" or _qss_has_baked_lightmap(obj)
+            op = button.operator(QSS_OT_set_lighting_mode.bl_idname, text=label, depress=(mode == value))
+            op.mode = value
+
+        selected_faces = False
+        if context.mode == "EDIT_MESH":
+            try:
+                import bmesh
+                selected_faces = any(face.select for face in bmesh.from_edit_mesh(obj.data).faces)
+            except Exception:
+                selected_faces = False
+        paint = layout.row(align=True)
+        paint.enabled = selected_faces
+        paint.operator(QSS_OT_activate_paint.bl_idname, text="Paint Texture", icon="BRUSH_DATA")
+        light_paint = paint.row()
+        light_paint.enabled = selected_faces and mode in {"source", "baked"} and (mode != "baked" or _qss_has_baked_lightmap(obj))
+        light_paint.operator(QSS_OT_activate_lightmap_paint.bl_idname, text="Paint Lightmap", icon="TPAINT_HLT")
+
+        row = layout.row()
+        row.enabled = context.mode == "OBJECT" and _qss_has_painted_texture_faces(obj)
+        row.operator(QSS_OT_toggle_painted_textures.bl_idname,
+                     text="Painted Textures: " + ("ON" if obj.get("qss_painted_textures_enabled", True) else "OFF"),
+                     depress=bool(obj.get("qss_painted_textures_enabled", True)))
+
+        mode_has_paint = bool(obj.get("qss_painted_original_lightmap", "")) if mode == "source" else bool(obj.get("qss_painted_baked_lightmap", ""))
+        row = layout.row()
+        row.enabled = context.mode == "OBJECT" and mode in {"source", "baked"} and mode_has_paint
+        row.operator(QSS_OT_toggle_painted_lightmaps.bl_idname,
+                     text="Painted Lightmaps: " + ("ON" if obj.get("qss_painted_lightmaps_enabled", True) else "OFF"),
+                     depress=bool(obj.get("qss_painted_lightmaps_enabled", True)))
+
+        bake = layout.row()
+        bake.enabled = mode in {"realtime", "cycles"} and obj.get("qss_light_entity_count", 0) > 0
+        bake.operator(QSS_OT_bake_scene_lights.bl_idname, text="Bake Lightmap", icon="RENDER_STILL")
+        if obj.get("qss_last_quake_bake_error"):
+            row = layout.row()
+            row.alert = True
+            row.label(text=str(obj.get("qss_last_quake_bake_error"))[:100], icon="ERROR")
+        if obj.get("qss_last_bake_luxel_mean") is not None:
+            layout.label(text=f"Last bake mean: {float(obj.get('qss_last_bake_luxel_mean', 0.0)):.4g}", icon="IMAGE")
 
 
-class QSS_PT_cycles_bake(Panel):
-    bl_label = "D · Cycles PBR Bake (Experimental)"
-    bl_idname = "QSS_PT_cycles_bake"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
+class QSS_PT_stats(Panel):
+    bl_label = "STATS"
+    bl_idname = "QSS_PT_stats"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
     bl_category = "Quake"
-    bl_parent_id = "QSS_PT_lighting"
+    bl_parent_id = "QSS_PT_main"
     bl_order = 40
-    bl_options = {'DEFAULT_CLOSED'}
-
-    def draw_header(self, context):
-        self.layout.label(text="", icon='NODE_MATERIAL')
-
-    def draw(self, context):
-        layout = self.layout
-        layout.prop(context.scene, 'qss_bake_bounces', text="Diffuse bounces")
-        layout.operator(QSS_OT_bake_scene_lights.bl_idname, text="Cycles Path-Traced Bake", icon='RENDER_STILL')
-        layout.label(text="Physically based falloff; does not implement ericw delay modes.", icon='INFO')
-
-
-class QSS_PT_diagnostics(Panel):
-    bl_label = "05 · Diagnostics & Recovery"
-    bl_idname = "QSS_PT_diagnostics"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "Quake"
-    bl_parent_id = "QSS_PT_main"
-    bl_order = 50
-    bl_options = {'DEFAULT_CLOSED'}
+    bl_options = {"DEFAULT_CLOSED"}
 
     @classmethod
     def poll(cls, context):
         return _qss_is_map_object(context.object)
 
     def draw_header(self, context):
-        self.layout.label(text="", icon='TEXT')
+        self.layout.label(text="", icon="INFO")
 
     def draw(self, context):
-        layout = self.layout
         obj = context.object
+        mesh = obj.data
+        layout = self.layout
+        source = obj.get("qss_source_path", "")
+        root = bpy.data.collections.get(obj.get("qss_map_collection", ""))
+        map_objects = _qss_collection_objects(root) if root else {obj}
+        entity_objects = [item for item in map_objects if item.get("qss_entity_role") or item.get("qss_light_role")]
+        lights = [item for item in map_objects if item.type == "LIGHT" and item.get("qss_light_role")]
+        source_box = layout.box()
+        source_box.label(text="MAP", icon="FILE_3D")
+        source_box.label(text=os.path.basename(source) if source else obj.name)
+        source_box.label(text=f"BSP version: {obj.get('qss_bsp_version', 'unknown')}")
+        if obj.get("qss_bounds_diagonal"):
+            source_box.label(text=f"Bounds diagonal: {float(obj.get('qss_bounds_diagonal', 0.0)):.3f} m")
+        geometry = layout.box()
+        geometry.label(text="GEOMETRY", icon="MESH_DATA")
+        geometry.label(text=f"Source BSP faces: {obj.get('qss_total_bsp_faces', len(mesh.polygons))}")
+        geometry.label(text=f"Imported mesh: {len(mesh.polygons)} polygons · {len(mesh.vertices)} vertices")
+        geometry.label(text=f"Materials: {len(mesh.materials)}")
+        entities = layout.box()
+        entities.label(text="ENTITIES", icon="EMPTY_AXIS")
+        entities.label(text=f"Entities: {obj.get('qss_entity_count', len(entity_objects))}")
+        entities.label(text=f"Lights: {len(lights)}")
+        entities.label(text=f"Player start: {'Yes' if obj.get('qss_has_player_start') else 'No'}")
+        lighting = layout.box()
+        lighting.label(text="TEXTURES & LIGHTING", icon="IMAGE")
+        lighting.label(text=f"Textures: {obj.get('qss_texture_count', 0)}")
+        missing = [v for v in str(obj.get("qss_missing_texture_names", "")).split(",") if v.strip()]
+        lighting.label(text=f"Missing textures: {len(missing)}")
+        lighting.label(text=f"Lightmapped faces: {obj.get('qss_lightmap_faces', 0)}")
+        image = bpy.data.images.get(obj.get("qss_lightmap_image_name", ""))
+        if image is not None:
+            memory = int(image.size[0]) * int(image.size[1]) * (16 if image.is_float else 4)
+            lighting.label(text=f"Working atlas: {image.size[0]}×{image.size[1]} · ~{memory / (1024 * 1024):.1f} MiB")
+        lighting.label(text=f"Generated bake: {'Available' if _qss_has_baked_lightmap(obj) else 'Not baked'}")
         diagnostics = layout.box()
-        diagnostics.label(text="REPORTS & AUTOMATED TESTS", icon='TEXT')
-        diagnostics.operator(QSS_OT_write_diagnostics.bl_idname, text="Save Lighting Diagnostics…", icon='FILE_TEXT')
-        diagnostics.operator(QSS_OT_run_blender_selftest.bl_idname, text="Run Full Self-Test + Delay Benchmark", icon='EXPERIMENTAL')
-        diagnostics.label(text="Object Mode required. Tests every BSP luxel in seven passes.", icon='TIME')
-        diagnostics.label(text="Progress appears in Blender's status bar; report is saved to Desktop and a Text datablock.", icon='INFO')
-        diagnostics.label(text="Dry run only: does not change the BSP or lightmap atlas.", icon='CHECKMARK')
-        recovery = layout.box()
-        recovery.label(text="Recovery & material repair", icon='TOOL_SETTINGS')
-        recovery.operator(QSS_OT_refresh_lightmap_preview.bl_idname, text="Repair Lightmap Material Links", icon='FILE_REFRESH')
-        if obj.get('qss_last_detach_traceback') or obj.get('qss_last_quake_bake_traceback') or obj.get('qss_last_selftest_traceback'):
-            row = layout.row()
-            row.alert = True
-            row.label(text="Detailed errors are included in diagnostics.", icon='ERROR')
-        layout.label(text="The luxel benchmark tests actual BSP face samples; it does not modify the atlas.", icon='INFO')
+        diagnostics.label(text="EXPORT & DIAGNOSTICS", icon="EXPORT")
+        last_export = obj.get("qss_last_export_path", "")
+        diagnostics.label(text=f"Last export: {os.path.basename(last_export) if last_export else 'Not exported'}")
+        diagnostics.label(text=f"Format: {obj.get('qss_last_export_mode', '—')}")
+        for key, label in (("qss_wad_unresolved", "WAD not found"),
+                           ("qss_wad_failures", "WAD read issue"),
+                           ("qss_missing_texture_names", "Missing textures"),
+                           ("qss_last_quake_bake_error", "Last bake error"),
+                           ("qss_last_detach_error", "Last paint/detach error")):
+            value = obj.get(key, "")
+            if value:
+                row = diagnostics.row()
+                row.alert = True
+                row.label(text=f"{label}: {str(value)[:100]}", icon="ERROR")
 
-
-class QSS_PT_export(Panel):
-    bl_label = "06 · BSP Export"
-    bl_idname = "QSS_PT_export"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "Quake"
-    bl_parent_id = "QSS_PT_main"
-    bl_order = 60
-    bl_options = {'DEFAULT_CLOSED'}
-
-    @classmethod
-    def poll(cls, context):
-        return _qss_is_map_object(context.object)
-
-    def draw_header(self, context):
-        self.layout.label(text="", icon='EXPORT')
-
-    def draw(self, context):
-        layout = self.layout
-        obj = context.object
-        layout.operator(QSS_OT_export_bsp.bl_idname, icon='EXPORT')
-        layout.label(text="Classic BSP29 export; original unrelated lumps preserved.", icon='INFO')
-        layout.label(text="Static lightmap export flattens active styles into style 0.")
-        layout.label(text="External .lit output targets QLIT-compatible ports.")
-        if obj.get('qss_lightmap_note'):
-            row = layout.row()
-            row.alert = True
-            row.label(text=str(obj.get('qss_lightmap_note')), icon='ERROR')
 
 
 CLASSES = (
-    QSS_OT_import_bsp,
-    QSS_OT_browse_game_maps,
-    QSS_OT_validate_bsp_export,
-    QSS_OT_scan_game_maps,
-    QSS_OT_run_python_tests,
-    QSS_OT_run_map_audit,
-    QSS_OT_launch_ironwail,
-    QSS_OT_generate_decoupled_lightmaps,
-    QSS_OT_detach_faces,
-    QSS_OT_activate_paint,
-    QSS_OT_activate_lightmap_paint,
-    QSS_OT_frame_selection,
-    QSS_OT_isolate_faces,
-    QSS_OT_reveal_faces,
-    QSS_OT_optimize_clipping,
-    QSS_OT_player_start,
-    QSS_OT_fps_walk,
-    QSS_OT_preview_imported_lights,
-    QSS_OT_preview_source_lightmaps,
-    QSS_OT_preview_bsp_lightmaps,
-    QSS_OT_quake_direct_bake,
-    QSS_OT_bake_scene_lights,
-    QSS_OT_undo_last_bake,
-    QSS_OT_restore_original_lightmap,
-    QSS_OT_refresh_lightmap_preview,
-    QSS_OT_apply_light_energy_scale,
-    QSS_OT_calibrate_lights_to_source,
-    QSS_OT_write_diagnostics,
-    QSS_OT_run_blender_selftest,
-    QSS_OT_export_bsp,
-    QSS_PT_main,
-    QSS_PT_project,
-    QSS_PT_navigation,
-    QSS_PT_texture,
-    QSS_PT_lighting,
-    QSS_PT_light_preview,
-    QSS_PT_imported_lights,
-    QSS_PT_quake_bake,
-    QSS_PT_cycles_bake,
-    QSS_PT_diagnostics,
-    QSS_PT_export,
+    QSS_OT_import_bsp, QSS_OT_browse_game_maps, QSS_OT_validate_bsp_export,
+    QSS_OT_scan_game_maps, QSS_OT_run_python_tests, QSS_OT_run_map_audit,
+    QSS_OT_launch_ironwail, QSS_OT_open_last_export, QSS_OT_open_config_text,
+    QSS_OT_settings, QSS_OT_change_lightmap_resolution, QSS_OT_set_lighting_mode,
+    QSS_OT_toggle_painted_textures, QSS_OT_toggle_painted_lightmaps,
+    QSS_OT_generate_decoupled_lightmaps, QSS_OT_detach_faces,
+    QSS_OT_activate_paint, QSS_OT_activate_lightmap_paint,
+    QSS_OT_frame_selection, QSS_OT_isolate_faces, QSS_OT_reveal_faces,
+    QSS_OT_optimize_clipping, QSS_OT_player_start, QSS_OT_fps_walk,
+    QSS_OT_preview_imported_lights, QSS_OT_preview_source_lightmaps,
+    QSS_OT_preview_bsp_lightmaps, QSS_OT_quake_direct_bake,
+    QSS_OT_bake_scene_lights, QSS_OT_undo_last_bake,
+    QSS_OT_restore_original_lightmap, QSS_OT_refresh_lightmap_preview,
+    QSS_OT_apply_light_energy_scale, QSS_OT_calibrate_lights_to_source,
+    QSS_OT_write_diagnostics, QSS_OT_run_blender_selftest, QSS_OT_export_bsp,
+    QSS_PT_main, QSS_PT_navigation, QSS_PT_project, QSS_PT_lighting, QSS_PT_stats,
 )
-
 
 def _remove_qss_keymaps():
     """Remove legacy QSS MMB-to-FPS bindings from add-on and user keyconfigs."""
