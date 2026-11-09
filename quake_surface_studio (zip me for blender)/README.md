@@ -1,4 +1,13 @@
-# Quake Surface Studio 0.18.0
+# Quake Surface Studio 0.18.1
+
+## 0.18.1 — Painting and viewport corrections
+
+- Recognizes Blender's Texture Paint context mode correctly, so the Paint Texture and Paint Lightmap buttons remain active while painting.
+- The paint buttons now act as toggles: clicking the active paint button exits to the previous Object/Edit mode; clicking the other button switches paint targets without losing the original return mode.
+- Fixes painted-texture disable: detached faces are reprojected from their original BSP texinfo before restoring their source material, preventing face-local paint UVs from leaking into the original texture mapping.
+- Adds a **Diffuse Textures** toggle that removes albedo while preserving the currently selected original or generated lightmap. Its state is reapplied when changing lighting presets.
+- Removes a stale undefined light-restoration call that interrupted Original/Baked lightmap preview and painted-lightmap switching.
+- Refreshes affected 3D View areas after applying a lighting preset.
 
 ## 0.18.0 — Sidebar-first project workflow
 
