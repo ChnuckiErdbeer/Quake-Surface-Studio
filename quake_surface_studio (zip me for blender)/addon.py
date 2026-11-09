@@ -3475,14 +3475,14 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
                     pass
             _qss_save_config(context.scene, last_source_bsp=source_path)
             _qss_activate_map_collection(context.scene, obj.get("qss_map_collection", ""), context)
-            if policy == "REPLACE" and old_active_name and old_active_name != obj.get("qss_map_collection", ""):
-                _qss_remove_map_collection(context.scene, old_active_name)
             try:
                 _set_lighting_preview(context, obj, "source")
             except Exception as preview_exc:
                 print(f"QSS: imported map but could not set Original preview: {preview_exc}")
             _apply_map_view_clipping(context, obj)
             _frame_player_start(context, obj)
+            if policy == "REPLACE" and old_active_name and old_active_name != obj.get("qss_map_collection", ""):
+                _qss_remove_map_collection(context.scene, old_active_name)
             lit_source = obj.get('qss_source_lighting_source', 'Monochrome BSP lighting')
             lit_note = f" RGB lightmaps: {lit_source}." if obj.get('qss_lit_rgb_faces', 0) else " No RGB lightmaps found; atlas starts grayscale."
             texture_note = (f" Textures: {obj.get('qss_texture_embedded_count', 0)} embedded, "
