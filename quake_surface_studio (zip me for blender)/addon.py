@@ -7537,6 +7537,7 @@ def _qss_rebuild_map_lightmap_resolution(obj, resolution):
         obj.get("qss_original_lightmap_backup", ""),
         obj.get("qss_painted_original_lightmap", ""),
         obj.get("qss_painted_baked_lightmap", ""),
+        obj.get("qss_last_bake_backup", ""),
     )
     lm_uv = mesh.uv_layers.get("Quake_Lightmap_UV")
     if lm_uv is not None:
@@ -7549,8 +7550,18 @@ def _qss_rebuild_map_lightmap_resolution(obj, resolution):
                           source_lit_rgb, lighting_data=atlas_lighting, resolution=int(resolution))
     obj["qss_painted_original_lightmap"] = ""
     obj["qss_painted_baked_lightmap"] = ""
+    obj["qss_last_bake_backup"] = ""
+    obj["qss_baked_lightmap_image_name"] = ""
     obj["qss_lightmap_gradient_baked"] = False
     obj["qss_lightmap_source"] = "source_bsp"
+    for key in (
+        "qss_last_bake_luxel_mean", "qss_last_bake_luxel_max",
+        "qss_last_bake_energy_scale", "qss_last_bake_output_scale",
+        "qss_last_bake_raw_mean", "qss_last_bake_source_mean",
+        "qss_last_bake_calibration", "qss_last_bake_bounces",
+    ):
+        if key in obj:
+            del obj[key]
     for name in old_names:
         image = bpy.data.images.get(name) if name else None
         if image is not None and image.users == 0:
