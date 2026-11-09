@@ -3351,6 +3351,13 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
             context.scene.qss_quake_unit_scale = float(self.unit_scale)
             if self.game_map_path:
                 obj["qss_game_map_path"] = self.game_map_path
+            elif game_dir:
+                try:
+                    relative_map_path = os.path.relpath(os.path.abspath(source_path), os.path.abspath(game_dir))
+                    if relative_map_path != os.pardir and not relative_map_path.startswith(os.pardir + os.sep):
+                        obj["qss_game_map_path"] = relative_map_path.replace(os.sep, "/")
+                except ValueError:
+                    pass
             _qss_save_config(context.scene, last_source_bsp=source_path)
             _qss_activate_map_collection(context.scene, obj.get("qss_map_collection", ""), context)
             if policy == "REPLACE" and old_active_name and old_active_name != obj.get("qss_map_collection", ""):
@@ -7511,9 +7518,14 @@ class QSS_PT_project(Panel):
         scene = context.scene
         obj = context.object
         layout.prop(scene, "qss_game_folder", text="Game / Mod")
-        layout.operator(QSS_OT_browse_game_maps.bl_idname, text="Browse Game Maps", icon="FILEBROWSER")
+        game_ready = bool(scene.qss_game_dir and os.path.isdir(_qss_abspath(scene.qss_game_dir)))
+        browse = layout.row()
+        browse.enabled = game_ready
+        browse.operator(QSS_OT_browse_game_maps.bl_idname, text="Browse Game Maps", icon="FILEBROWSER")
         row = layout.row(align=True)
-        row.operator(QSS_OT_import_bsp.bl_idname, text="Import BSP", icon="IMPORT")
+        import_button = row.row()
+        import_button.enabled = game_ready
+        import_button.operator(QSS_OT_import_bsp.bl_idname, text="Import BSP", icon="IMPORT")
         export_row = row.row(align=True)
         export_row.enabled = _qss_is_map_object(obj) and context.mode == "OBJECT"
         export_row.operator(QSS_OT_export_bsp.bl_idname, text="Export BSP", icon="EXPORT")
