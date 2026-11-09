@@ -1,4 +1,21 @@
-# Quake Surface Studio 0.16.1
+# Quake Surface Studio 0.17.0
+
+## 0.17.0 changes
+
+- Adds a dedicated **Quake Studio** workspace, created by duplicating the current workspace so the user's existing Layout and editor arrangements remain untouched.
+- Adds a Quake Studio sidebar with level import, game/mod selection, map browsing, BSP export, Ironwail launch, installation/tool paths, navigation speed, decoupled lightmap density and lighting workflows.
+- Separates **Visual lightmap resolution** (working paint-atlas scale) from **Target world units per luxel** (compiler-generated lightmap density); the latter explains the build-time, file-size and detail trade-off.
+- Adds viewport toolbar tools for Player Start, focus selection, FPS navigation, isolate/reveal faces, Paint Texture and Paint Lightmap.
+- Paint Texture now has a dedicated action that detaches the selected faces before entering Texture Paint. The previous Quake sidebar remains available as a compatibility fallback.
+- Moves map audits, diagnostics and recovery actions into a collapsed **Advanced / Debug** section.
+
+## Opening Quake Studio
+
+Enable QSS, then use **Open Quake Studio Workspace** from the existing Quake sidebar. QSS duplicates the currently active workspace and names the copy **Quake Studio**; your original Blender workspace is preserved. The new workspace exposes the Quake Studio sidebar and QSS viewport tools.
+
+The **Visual lightmap resolution** setting controls the working paint atlas only. **Target world units per luxel** controls the density requested from ericw-tools when generating a decoupled-lightmap BSP: lower values increase detail, build time and output size.
+
+
 
 ## 0.16.1 changes
 
