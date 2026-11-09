@@ -298,6 +298,25 @@ def _qss_activate_map_collection(scene, name, context=None):
     finally:
         _qss_map_switch_depth = False
 
+    if map_object is not None:
+        map_game_dir = _qss_abspath(map_object.get("qss_game_dir", "") or "")
+        if map_game_dir and os.path.isdir(map_game_dir):
+            root_path = _qss_abspath(getattr(scene, "qss_quake_root", "") or "")
+            game_id = quake_paths.game_id_for_path(root_path, map_game_dir)
+            global _qss_config_update_depth
+            _qss_config_update_depth = True
+            try:
+                if game_id:
+                    scene.qss_game_folder = game_id
+                scene.qss_game_dir = map_game_dir
+            finally:
+                _qss_config_update_depth = False
+            if game_id:
+                try:
+                    _qss_save_config(scene)
+                except Exception as exc:
+                    print(f"QSS: could not persist active map game/mod: {exc}")
+
     if map_object is not None and view_layer is not None:
         try:
             for selected in list(context.selected_objects):
@@ -6780,7 +6799,7 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
         self.lightmap_export_mode = mode if mode in {"AUTO", "CLASSIC", "ENHANCED", "BOTH"} else "AUTO"
         if source:
             virtual_path = str(obj.get("qss_game_map_path", "") or "")
-            game_dir = _qss_abspath(getattr(context.scene, "qss_game_dir", "") or "")
+            game_dir = _qss_abspath(obj.get("qss_game_dir", "") or getattr(context.scene, "qss_game_dir", "") or "")
             if virtual_path and game_dir:
                 relative_root, ext = os.path.splitext(virtual_path.replace("/", os.sep))
                 self.filepath = os.path.join(game_dir, relative_root + "_surface_studio" + (ext or ".bsp"))
@@ -7424,7 +7443,7 @@ class QSS_OT_open_last_export(Operator):
         obj = context.object
         executable = _qss_abspath(getattr(context.scene, "qss_ironwail_executable", "") or "")
         path = obj.get("qss_last_export_path", "") if _qss_is_map_object(obj) else ""
-        game_dir = _qss_abspath(getattr(context.scene, "qss_game_dir", "") or "")
+        game_dir = _qss_abspath(obj.get("qss_game_dir", "") or getattr(context.scene, "qss_game_dir", "") or "")
         return bool(executable and os.path.isfile(executable) and path and os.path.isfile(path)
                     and game_dir and os.path.isdir(game_dir))
 
@@ -7438,7 +7457,7 @@ class QSS_OT_open_last_export(Operator):
             if preferred and os.path.isfile(preferred):
                 path = preferred
         try:
-            game_dir = _qss_abspath(context.scene.qss_game_dir)
+            game_dir = _qss_abspath(obj.get("qss_game_dir", "") or context.scene.qss_game_dir)
             relative = os.path.relpath(os.path.abspath(path), game_dir)
             if relative == os.pardir or relative.startswith(os.pardir + os.sep):
                 raise RuntimeError("The last export is outside the active Game / Mod folder. Export inside the game directory to launch it in Ironwail.")
