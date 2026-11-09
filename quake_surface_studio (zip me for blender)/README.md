@@ -1,4 +1,11 @@
-# Quake Surface Studio 0.17.3
+# Quake Surface Studio 0.17.4
+
+## 0.17.4 changes
+
+- Hardens the Blender 5.2 viewport toolbar repair: only valid ToolDef-like objects with a non-empty string `idname` are retained.
+- Removes stray strings and arbitrary unsupported values from top-level and nested toolbar groups, while preserving valid Blender tools and separators.
+- Handles nested tuple and list groups, removes stale QSS entries, and normalizes separators across every 3D View mode list.
+- Adds standalone regression tests for invalid entries, nested groups, stale QSS ToolDefs, and safe toolbar iteration.
 
 ## 0.17.3 changes
 
