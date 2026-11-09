@@ -6797,7 +6797,6 @@ class QSS_OT_refresh_viewport_tools(Operator):
     def execute(self, context):
         try:
             _register_qss_workspace_tools()
-        _qss_register_ui_menus()
             for window in context.window_manager.windows:
                 for screen in window.screens:
                     for area in screen.areas:
@@ -8060,6 +8059,7 @@ def register():
             finally:
                 _qss_config_update_depth = False
         _register_qss_workspace_tools()
+        _qss_register_ui_menus()
     except Exception:
         # Blender can leave a partially registered add-on behind when register()
         # raises. Roll back everything created in this attempt before propagating.
