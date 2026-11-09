@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils
 
 
-ADDON_VERSION = (0, 17, 0)
+ADDON_VERSION = (0, 17, 1)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -6815,7 +6815,9 @@ class QSS_OT_paint_texture_selected_faces(Operator):
 
 
 def _qss_tool_keymap(operator_id):
-    return ((operator_id, {"type": "LEFTMOUSE", "value": "PRESS"}, {"properties": []}),)
+    # Match Blender's WorkSpaceTool examples: a simple left-click invocation
+    # with no explicit operator-property overrides.
+    return ((operator_id, {"type": "LEFTMOUSE", "value": "PRESS"}, None),)
 
 
 class QSS_WST_player_start(bpy.types.WorkSpaceTool):
@@ -6919,15 +6921,44 @@ QSS_WORKSPACE_TOOLS = (
 
 
 def _register_qss_workspace_tools():
-    previous = "builtin.select_box"
-    for index, tool in enumerate(QSS_WORKSPACE_TOOLS):
-        bpy.utils.register_tool(
-            tool,
-            after={previous},
-            separator=(index == 0 or index == 3),
-            group=(index == 0 or index == 3),
-        )
-        previous = tool.bl_idname
+    # Keep every QSS action as its own visible toolbar button. Grouping these
+    # tools hides all but one icon behind Blender's drag-to-expand tool group;
+    # the first QSS icon also resembles the built-in Select tool.
+    tool_groups = (
+        (
+            "OBJECT",
+            (
+                QSS_WST_player_start,
+                QSS_WST_focus_object,
+                QSS_WST_fps_navigation,
+            ),
+        ),
+        (
+            "EDIT_MESH",
+            (
+                QSS_WST_focus_edit,
+                QSS_WST_isolate_faces,
+                QSS_WST_reveal_faces,
+                QSS_WST_paint_texture,
+                QSS_WST_paint_lightmap,
+            ),
+        ),
+    )
+    for context_mode, tools in tool_groups:
+        previous = "builtin.select_box"
+        for index, tool in enumerate(tools):
+            if tool.bl_context_mode != context_mode:
+                raise RuntimeError(
+                    f"QSS tool {tool.bl_idname} has context mode "
+                    f"{tool.bl_context_mode!r}, expected {context_mode!r}."
+                )
+            bpy.utils.register_tool(
+                tool,
+                after={previous},
+                separator=(index == 0),
+                group=False,
+            )
+            previous = tool.bl_idname
 
 
 def _unregister_qss_workspace_tools():
