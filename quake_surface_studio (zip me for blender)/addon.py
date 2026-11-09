@@ -7628,8 +7628,7 @@ class QSS_PT_main(Panel):
         row.operator(QSS_OT_open_config_text.bl_idname, text="", icon="TEXT")
         obj = context.object
         if _qss_is_map_object(obj):
-            layout.label(text=os.path.basename(obj.get("qss_source_path", obj.name)), icon="FILE_3D")
-            layout.label(text=f"{len(obj.data.polygons)} faces · {len(obj.data.materials)} materials · {obj.get('qss_light_entity_count', 0)} lights")
+            layout.label(text=f"Active map: {os.path.basename(obj.get('qss_source_path', obj.name))}", icon="FILE_3D")
         else:
             layout.label(text="Select or import a Quake BSP to begin.", icon="INFO")
 
