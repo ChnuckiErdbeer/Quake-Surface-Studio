@@ -7725,7 +7725,9 @@ class QSS_PT_project(Panel):
         layout = self.layout
         scene = context.scene
         obj = context.object
-        layout.prop(scene, "qss_game_folder", text="Game / Mod")
+        game_selector = layout.row()
+        game_selector.enabled = bool(scene.qss_quake_root and os.path.isdir(_qss_abspath(scene.qss_quake_root)))
+        game_selector.prop(scene, "qss_game_folder", text="Game / Mod")
         game_ready = bool(
             scene.qss_game_folder != "NONE"
             and scene.qss_game_dir
