@@ -6920,6 +6920,37 @@ QSS_WORKSPACE_TOOLS = (
 )
 
 
+def _qss_remove_workspace_tool_definitions():
+    """Remove current and stale QSS ToolDefs from every 3D View context list.
+
+    This also migrates users upgrading from v0.17.0/v0.17.1, where tools were
+    stored in the OBJECT and EDIT_MESH lists rather than the shared list.
+    """
+    try:
+        from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
+        helper = ToolSelectPanelHelper._tool_class_from_space_type("VIEW_3D")
+        if helper is None:
+            return
+
+        def strip(entries):
+            cleaned = []
+            for item in entries:
+                if item is None:
+                    cleaned.append(item)
+                elif isinstance(item, tuple):
+                    nested = strip(item)
+                    if nested:
+                        cleaned.append(tuple(nested))
+                elif not str(getattr(item, "idname", "")).startswith("qss."):
+                    cleaned.append(item)
+            return cleaned
+
+        for entries in helper._tools.values():
+            entries[:] = strip(entries)
+    except Exception as exc:
+        print(f"QSS: could not clean old viewport tool definitions: {exc}")
+
+
 def _qss_registered_toolbar_tool_ids():
     """Return QSS tool identifiers found in Blender's shared 3D View tool list."""
     try:
@@ -6941,6 +6972,7 @@ def _register_qss_workspace_tools():
     # list plus the current mode's list. Put QSS actions in the shared list so
     # they are visible in Object, Edit and Paint modes alike. Each operator's
     # poll/validation still enforces the modes in which the action is valid.
+    _qss_remove_workspace_tool_definitions()
     for index, tool in enumerate(QSS_WORKSPACE_TOOLS):
         tool.bl_context_mode = None
         bpy.utils.register_tool(
@@ -6957,6 +6989,9 @@ def _unregister_qss_workspace_tools():
             bpy.utils.unregister_tool(tool)
         except Exception:
             pass
+    # Remove definitions left behind by older module instances after an
+    # interrupted add-on reload, including the old mode-specific registrations.
+    _qss_remove_workspace_tool_definitions()
 
 
 class QSS_PT_workspace_main(Panel):
