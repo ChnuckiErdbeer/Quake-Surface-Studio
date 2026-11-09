@@ -6924,8 +6924,19 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
             if mode == "BOTH":
                 root, ext = os.path.splitext(output)
                 ext = ext or ".bsp"
-                classic_result = _export_object(obj, root + "_c" + ext, "CLASSIC")
-                enhanced_result = _export_object(obj, root + "_e" + ext, "ENHANCED")
+                classic_path = root + "_c" + ext
+                enhanced_path = root + "_e" + ext
+                classic_result = _export_object(obj, classic_path, "CLASSIC")
+                try:
+                    enhanced_result = _export_object(obj, enhanced_path, "ENHANCED")
+                except Exception:
+                    for partial_path in (classic_result[0], classic_result[5], enhanced_path, os.path.splitext(enhanced_path)[0] + ".lit"):
+                        if partial_path and os.path.isfile(partial_path):
+                            try:
+                                os.remove(partial_path)
+                            except OSError:
+                                pass
+                    raise
                 obj["qss_last_export_classic_path"] = classic_result[0]
                 obj["qss_last_export_enhanced_path"] = enhanced_result[0]
                 prefer_enhanced = bool(_qss_config_settings().get("prefer_enhanced_last_export", True))
