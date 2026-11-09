@@ -6842,7 +6842,13 @@ class QSS_OT_refresh_viewport_tools(Operator):
                 raise RuntimeError(
                     f"Blender registered {count} of {len(QSS_WORKSPACE_TOOLS)} QSS tools."
                 )
-            self.report({"INFO"}, f"Refreshed {count} QSS viewport tools.")
+            if not _qss_native_toolbar_is_intact():
+                self.report(
+                    {"WARNING"},
+                    f"Refreshed {count} QSS tools, but Blender's built-in tools are missing. Restart Blender.",
+                )
+            else:
+                self.report({"INFO"}, f"Refreshed {count} QSS viewport tools.")
             return {"FINISHED"}
         except Exception as exc:
             self.report({"ERROR"}, f"Could not refresh QSS viewport tools: {exc}")
@@ -7005,6 +7011,28 @@ def _qss_remove_workspace_tool_definitions():
         print(f"QSS: could not clean old viewport tool definitions: {exc}")
 
 
+def _qss_native_toolbar_is_intact():
+    """Check that Blender's built-in Object and Texture Paint tools survived."""
+    try:
+        from bl_ui.space_toolsystem_common import ToolSelectPanelHelper, ToolDef
+        helper = ToolSelectPanelHelper._tool_class_from_space_type("VIEW_3D")
+        if helper is None:
+            return False
+        object_tools = list(
+            toolbar_utils.iter_tooldefs(helper._tools.get("OBJECT", ()), ToolDef)
+        )
+        paint_entries = helper._tools.get("PAINT_TEXTURE", ())
+        paint_tools = list(toolbar_utils.iter_tooldefs(paint_entries, ToolDef))
+        return (
+            bool(object_tools)
+            and any(item.idname.startswith("builtin.") for item in object_tools)
+            and any(item.idname == "builtin.brush" for item in paint_tools)
+            and any(callable(item) for item in paint_entries)
+        )
+    except Exception:
+        return False
+
+
 def _qss_registered_toolbar_tool_ids():
     """Return registered QSS ToolDef identifiers from every 3D View mode list."""
     try:
@@ -7106,6 +7134,13 @@ class QSS_PT_workspace_main(Panel):
             text="Refresh",
             icon="FILE_REFRESH",
         )
+        if not _qss_native_toolbar_is_intact():
+            native_warning = layout.row()
+            native_warning.alert = True
+            native_warning.label(
+                text="Blender's built-in toolbar data is missing. Restart Blender to restore it.",
+                icon="ERROR",
+            )
         layout.label(
             text="Toolbar icons select a tool; left-click the 3D View to run it.",
             icon="INFO",
@@ -7174,7 +7209,7 @@ class QSS_PT_workspace_main(Panel):
                     text="Paint Lightmap",
                     icon="IMAGE",
                 )
-            elif context.mode == "TEXTURE_PAINT":
+            elif context.mode == "PAINT_TEXTURE":
                 actions.label(
                     text="Use Blender's standard paint tools in the left toolbar.",
                     icon="BRUSH_DATA",
