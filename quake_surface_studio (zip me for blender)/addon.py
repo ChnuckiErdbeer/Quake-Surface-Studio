@@ -7281,6 +7281,7 @@ class QSS_OT_settings(Operator):
 
     def execute(self, context):
         settings = _qss_load_config()
+        previous_lighting_storage = str(settings.get("lighting_mode_storage", "PER_MAP")).upper()
         settings.update({
             "import_behavior": self.import_behavior,
             "export_mode": self.export_mode,
@@ -7289,7 +7290,7 @@ class QSS_OT_settings(Operator):
             "rebake_behavior": self.rebake_behavior,
             "lighting_mode_storage": self.lighting_mode_storage,
         })
-        if self.lighting_mode_storage == "GLOBAL" and str(settings.get("lighting_mode_storage", "PER_MAP")).upper() != "GLOBAL":
+        if self.lighting_mode_storage == "GLOBAL" and previous_lighting_storage != "GLOBAL":
             active_obj = context.object
             settings["global_lighting_mode"] = (
                 active_obj.get("qss_preview_mode", "source") if _qss_is_map_object(active_obj) else "source"
