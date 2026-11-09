@@ -1,4 +1,13 @@
-# Quake Surface Studio 0.17.2
+# Quake Surface Studio 0.17.3
+
+## 0.17.3 changes
+
+- Fixes the Blender 5.2 toolbar crash reported in v0.17.2: earlier QSS registrations could create nested ToolDef tuples, causing Blender's toolbar drawing code to fail when reading tool identifiers.
+- Repairs existing VIEW_3D tool lists by flattening legacy nested groups and removing stale QSS entries from every mode list.
+- Registers the QSS actions as individual ToolDefs appended to the Object Mode and Edit Mesh tool lists. The implementation no longer uses nested groups or the fragile after= insertion path.
+- Reports the registered count across all 3D View mode lists and keeps the manual Refresh control.
+
+
 
 ## 0.17.2 changes
 
