@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils
 
 
-ADDON_VERSION = (0, 17, 9)
+ADDON_VERSION = (0, 18, 0)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -56,6 +56,221 @@ def _qss_abspath(path):
 
 def _qss_load_config():
     return quake_paths.load_config(_qss_config_path())
+
+
+# Map collections are the project boundary: mesh, entity lights and spawn
+# markers for one BSP stay together and can be isolated as a unit.
+_qss_map_enum_cache = []
+_qss_map_switch_depth = False
+_QSS_CONFIG_DEFAULTS = {
+    "import_behavior": "ASK",
+    "export_mode": "AUTO",
+    "prefer_enhanced_last_export": True,
+}
+
+
+def _qss_config_settings():
+    values = dict(_QSS_CONFIG_DEFAULTS)
+    values.update(_qss_load_config())
+    return values
+
+
+def _qss_scene_map_collections(scene):
+    found = []
+
+    def visit(collection):
+        for child in collection.children:
+            if bool(child.get("qss_map_collection", False)):
+                found.append(child)
+            visit(child)
+
+    if scene is not None:
+        visit(scene.collection)
+    return sorted(found, key=lambda item: item.name.casefold())
+
+
+def _qss_collection_objects(collection):
+    objects = set()
+
+    def visit(item):
+        objects.update(item.objects)
+        for child in item.children:
+            visit(child)
+
+    if collection is not None:
+        visit(collection)
+    return objects
+
+
+def _qss_map_collection_items(self, context):
+    global _qss_map_enum_cache
+    scene = getattr(context, "scene", None) if context else None
+    collections = _qss_scene_map_collections(scene)
+    _qss_map_enum_cache = [
+        (item.name,
+         os.path.basename(str(item.get("qss_source_path", item.name)))[:63],
+         str(item.get("qss_source_path", item.name))[:255],
+         "OUTLINER_COLLECTION", index)
+        for index, item in enumerate(collections)
+    ]
+    if not _qss_map_enum_cache:
+        _qss_map_enum_cache = [
+            ("__QSS_NO_MAP__", "No imported maps",
+             "Import a BSP to create a map collection", "INFO", 0)
+        ]
+    return _qss_map_enum_cache
+
+
+def _qss_make_map_collection(context, obj, source_path):
+    stem = os.path.splitext(os.path.basename(source_path))[0] or "Map"
+    collection = bpy.data.collections.new(f"QSS_Map_{stem}")
+    collection["qss_map_collection"] = True
+    collection["qss_source_path"] = os.path.abspath(source_path)
+    context.scene.collection.children.link(collection)
+    for old_collection in list(obj.users_collection):
+        old_collection.objects.unlink(obj)
+    collection.objects.link(obj)
+    obj["qss_map_collection"] = collection.name
+    obj["qss_painted_textures_enabled"] = True
+    obj["qss_painted_lightmaps_enabled"] = True
+    obj["qss_preview_mode"] = "source"
+    return collection
+
+
+def _qss_remove_map_collection(scene, name):
+    collection = bpy.data.collections.get(name) if name else None
+    if collection is None or not collection.get("qss_map_collection", False):
+        return False
+
+    def remove_tree(item):
+        for child in list(item.children):
+            remove_tree(child)
+        for obj in list(item.objects):
+            try:
+                bpy.data.objects.remove(obj, do_unlink=True)
+            except Exception:
+                pass
+        for parent in bpy.data.collections:
+            try:
+                if item in parent.children:
+                    parent.children.unlink(item)
+            except Exception:
+                pass
+        try:
+            bpy.data.collections.remove(item)
+        except Exception:
+            pass
+
+    remove_tree(collection)
+    return True
+
+
+def _qss_active_map_objects(scene, obj):
+    name = obj.get("qss_map_collection", "") if obj else ""
+    collection = bpy.data.collections.get(name) if name else None
+    if collection is not None:
+        return _qss_collection_objects(collection)
+    return set(scene.objects) if scene is not None else set()
+
+
+def _qss_has_baked_lightmap(obj):
+    return bool(
+        obj and (
+            obj.get("qss_lightmap_source") in {
+                "quake_direct_cpu_bake", "cycles_bake_from_quake_entities"
+            }
+            or obj.get("qss_lightmap_gradient_baked", False)
+        )
+    )
+
+
+def _qss_lightmap_preview_image(obj, mode, for_paint=False):
+    if mode == "source":
+        base_name, painted_key = obj.get("qss_original_lightmap_backup", ""), "qss_painted_original_lightmap"
+    elif mode == "baked":
+        base_name, painted_key = obj.get("qss_lightmap_image_name", ""), "qss_painted_baked_lightmap"
+    else:
+        raise bsp.BSPError("Lightmap painting is available only in Original or Baked mode.")
+    base = bpy.data.images.get(base_name) if base_name else None
+    if base is None:
+        raise bsp.BSPError("The active map's lightmap image is missing.")
+    painted_name = obj.get(painted_key, "")
+    painted = bpy.data.images.get(painted_name) if painted_name else None
+    if for_paint and painted is None:
+        painted = base.copy()
+        painted.name = f"{obj.name}_{'Original' if mode == 'source' else 'Baked'}_PaintedLightmap"
+        painted.use_fake_user = True
+        try:
+            painted.pack()
+        except RuntimeError:
+            pass
+        obj[painted_key] = painted.name
+    if for_paint:
+        obj["qss_painted_lightmaps_enabled"] = True
+    return painted if bool(obj.get("qss_painted_lightmaps_enabled", True)) and painted else base
+
+
+def _qss_has_painted_texture_faces(obj):
+    mesh = getattr(obj, "data", None)
+    marker = mesh.attributes.get("qss_painted_face") if mesh is not None else None
+    return bool(marker and marker.domain == "FACE" and any(item.value for item in marker.data))
+
+
+def _qss_activate_map_collection(scene, name, context=None):
+    global _qss_map_switch_depth
+    if scene is None:
+        return None
+    collection = next((item for item in _qss_scene_map_collections(scene) if item.name == name), None)
+    if collection is None:
+        return None
+    view_layer = getattr(context, "view_layer", None) if context else None
+    old_active = view_layer.objects.active if view_layer is not None else None
+    if _qss_is_map_object(old_active) and old_active.get("qss_preview_mode", "source") in {"realtime", "cycles"}:
+        try:
+            _set_lighting_preview(context, old_active, "source")
+        except Exception as exc:
+            print(f"QSS: could not restore previous map lighting: {exc}")
+
+    active_objects = _qss_collection_objects(collection)
+    for obj in scene.objects:
+        try:
+            if "qss_isolation_original_hide" not in obj:
+                obj["qss_isolation_original_hide"] = bool(obj.hide_get())
+            obj.hide_set(obj not in active_objects or bool(obj.get("qss_isolation_original_hide", False)))
+        except (AttributeError, RuntimeError, ReferenceError):
+            pass
+
+    map_object = next((obj for obj in active_objects if _qss_is_map_object(obj)), None)
+    _qss_map_switch_depth = True
+    try:
+        if hasattr(scene, "qss_active_map_collection"):
+            scene.qss_active_map_collection = collection.name
+    finally:
+        _qss_map_switch_depth = False
+
+    if map_object is not None and view_layer is not None:
+        try:
+            for selected in list(context.selected_objects):
+                selected.select_set(False)
+            map_object.select_set(True)
+            view_layer.objects.active = map_object
+        except (RuntimeError, ReferenceError):
+            pass
+
+    if map_object is not None and context is not None:
+        try:
+            _set_lighting_preview(context, map_object, map_object.get("qss_preview_mode", "source"))
+        except Exception as exc:
+            print(f"QSS: could not restore lighting for {map_object.name}: {exc}")
+    return map_object
+
+
+def _qss_on_active_map_changed(self, context):
+    if _qss_map_switch_depth:
+        return
+    name = getattr(self, "qss_active_map_collection", "")
+    if name and name != "__QSS_NO_MAP__":
+        _qss_activate_map_collection(context.scene, name, context)
 
 
 def _qss_save_config(scene=None, last_source_bsp=None):
@@ -2299,16 +2514,12 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
 
     map_stem = os.path.splitext(os.path.basename(obj.get('qss_source_path', 'map')))[0]
     collection_name = f"QSS_{map_stem}_Entities"
-    old = bpy.data.collections.get(collection_name)
-    if old is not None:
-        for item in list(old.objects):
-            bpy.data.objects.remove(item, do_unlink=True)
-        for scene in bpy.data.scenes:
-            if old in scene.collection.children:
-                scene.collection.children.unlink(old)
-        bpy.data.collections.remove(old)
     collection = bpy.data.collections.new(collection_name)
-    context.scene.collection.children.link(collection)
+    map_collection = bpy.data.collections.get(obj.get("qss_map_collection", ""))
+    if map_collection is not None:
+        map_collection.children.link(collection)
+    else:
+        context.scene.collection.children.link(collection)
     collection['qss_entity_collection'] = True
 
     # Resolve targetname origins before creating spotlights.
@@ -2546,7 +2757,7 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
     mesh.from_pydata(mesh_vertices, [], mesh_faces)
     mesh.update(calc_edges=True)
     obj = bpy.data.objects.new(os.path.basename(source_path) + "_QSS", mesh)
-    context.collection.objects.link(obj)
+    _qss_make_map_collection(context, obj, source_path)
 
     material_slots = {}
     for mat in materials:
@@ -3050,41 +3261,61 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
     bl_description = "Import classic Quake BSP29 geometry, textures, entity lights and BSPX RGB lightmaps"
     filename_ext = ".bsp"
     filter_glob: StringProperty(default="*.bsp", options={'HIDDEN'})
-    game_dir: StringProperty(name="Quake game directory", subtype='DIR_PATH', default="")
-    palette_file: StringProperty(name="palette.lmp (optional)", subtype='FILE_PATH', default="")
+    game_dir: StringProperty(name="Quake game directory", subtype='DIR_PATH', default="", options={'HIDDEN'})
+    palette_file: StringProperty(name="palette.lmp (optional)", subtype='FILE_PATH', default="", options={'HIDDEN'})
     unit_scale: FloatProperty(
-        name="Quake unit scale", description="Blender metres per Quake map unit (1 Quake unit is conventionally about 1 inch)",
-        default=DEFAULT_QUAKE_UNIT_SCALE, min=0.0001, max=10.0, precision=5
+        name="Quake unit scale", description="Blender metres per Quake map unit",
+        default=DEFAULT_QUAKE_UNIT_SCALE, min=0.0001, max=10.0, precision=5, options={'HIDDEN'}
     )
     flip_z: BoolProperty(
-        name="Invert Z axis", description="Only for non-standard/converter-generated BSPs that use Z-down coordinates",
-        default=False
+        name="Invert Z axis", description="Non-standard converter-generated BSPs only",
+        default=False, options={'HIDDEN'}
     )
     lightmap_resolution: EnumProperty(
         name="Working lightmap resolution",
-        description="Higher-resolution paint atlas; normalized BSP UV layout and classic export remain unchanged",
+        description="Working paint-atlas scale; BSP source luxel density is unchanged",
         items=(('1', '1× · Original', 'Original packed atlas resolution'),
                ('2', '2×', 'Twice the pixels per axis'),
                ('4', '4×', 'Four times the pixels per axis'),
-               ('8', '8×', 'Eight times the pixels per axis; atlas packing is limited to 256²')),
-        default='1'
+               ('8', '8×', 'Eight times the pixels per axis')),
+        default='1', options={'HIDDEN'}
     )
+    import_action: EnumProperty(
+        name="Import behaviour",
+        items=(('ADD', "Add as new map", "Keep existing maps in their own collections"),
+               ('REPLACE', "Replace active map", "Replace only the active QSS map collection")),
+        default='ADD', options={'HIDDEN'}
+    )
+    _qss_import_prompted: BoolProperty(default=False, options={'HIDDEN'})
 
     def invoke(self, context, event):
         self.game_dir = context.scene.qss_game_dir
+        self.unit_scale = float(getattr(context.scene, "qss_quake_unit_scale", DEFAULT_QUAKE_UNIT_SCALE))
         self.lightmap_resolution = getattr(context.scene, "qss_import_lightmap_resolution", "1")
+        self.flip_z = False
         return ImportHelper.invoke(self, context, event)
 
     def draw(self, context):
-        layout = self.layout
-        layout.prop(self, 'game_dir')
-        layout.prop(self, 'palette_file')
-        layout.separator()
-        layout.prop(self, 'unit_scale')
-        layout.prop(self, 'flip_z')
-        layout.prop(self, 'lightmap_resolution')
+        if self._qss_import_prompted:
+            self.layout.label(text="A map is already loaded. What should QSS do with it?")
+            self.layout.prop(self, "import_action", expand=True)
+            self.layout.label(text="Add preserves existing maps; Replace removes only the active QSS map.", icon="INFO")
+        else:
+            self.layout.label(text="Uses the active Game / Mod and QSS project defaults.")
 
     def execute(self, context):
+        settings = _qss_config_settings()
+        existing_maps = _qss_scene_map_collections(context.scene)
+        old_active_name = getattr(context.scene, "qss_active_map_collection", "")
+        policy = str(settings.get("import_behavior", "ASK")).upper()
+        if existing_maps and policy == "ASK" and not self._qss_import_prompted:
+            self._qss_import_prompted = True
+            self.import_action = "ADD"
+            return context.window_manager.invoke_props_dialog(self, width=500)
+        if self._qss_import_prompted:
+            policy = self.import_action
+        if policy not in {"ADD", "REPLACE"}:
+            policy = "ADD"
         try:
             source_path = bpy.path.abspath(self.filepath)
             game_dir = bpy.path.abspath(self.game_dir) if self.game_dir else ""
@@ -3111,7 +3342,13 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
             context.scene.qss_game_dir = game_dir
             context.scene.qss_quake_unit_scale = float(self.unit_scale)
             _qss_save_config(context.scene, last_source_bsp=source_path)
-            # Fit the view's depth buffer and start at info_player_start when available.
+            _qss_activate_map_collection(context.scene, obj.get("qss_map_collection", ""), context)
+            if policy == "REPLACE" and old_active_name and old_active_name != obj.get("qss_map_collection", ""):
+                _qss_remove_map_collection(context.scene, old_active_name)
+            try:
+                _set_lighting_preview(context, obj, "source")
+            except Exception as preview_exc:
+                print(f"QSS: imported map but could not set Original preview: {preview_exc}")
             _apply_map_view_clipping(context, obj)
             _frame_player_start(context, obj)
             lit_source = obj.get('qss_source_lighting_source', 'Monochrome BSP lighting')
@@ -3171,6 +3408,9 @@ class QSS_OT_browse_game_maps(Operator):
             )
             if 'CANCELLED' in result:
                 raise RuntimeError("The QSS BSP importer cancelled the map import.")
+            imported_obj = context.view_layer.objects.active
+            if _qss_is_map_object(imported_obj):
+                imported_obj["qss_game_map_path"] = entry["path"]
             self.report({'INFO'}, f"Imported {entry['path']} from {entry['source_label']}.")
             return {'FINISHED'}
         except Exception as exc:
@@ -7271,7 +7511,7 @@ def _remove_qss_keymaps():
 def _remove_scene_properties():
     """Remove QSS Scene properties, including properties from an older module."""
     for name in (
-        'qss_quake_root', 'qss_game_folder', 'qss_game_dir', 'qss_ericw_tools_dir',
+        'qss_quake_root', 'qss_game_folder', 'qss_game_dir', 'qss_active_map_collection', 'qss_ericw_tools_dir',
         'qss_ironwail_executable', 'qss_ironwail_demo', 'qss_audit_enhanced_export',
         'qss_audit_quake_bake', 'qss_audit_cycles_bake', 'qss_audit_ericw_light', 'qss_audit_ericw_compile',
         'qss_audit_timeout', 'qss_quake_unit_scale', 'qss_nav_speed_quake',
@@ -7374,6 +7614,12 @@ def register():
             description="Resolved active game folder used by the importer and texture/WAD lookup",
             subtype='DIR_PATH',
             default=initial_game_dir,
+        )
+        bpy.types.Scene.qss_active_map_collection = EnumProperty(
+            name="Loaded Map",
+            description="Choose the active imported BSP map; other scene objects are hidden",
+            items=_qss_map_collection_items,
+            update=_qss_on_active_map_changed,
         )
         bpy.types.Scene.qss_ericw_tools_dir = StringProperty(
             name="ericw-tools folder", description="Folder containing qbsp, vis, light and bspinfo",
