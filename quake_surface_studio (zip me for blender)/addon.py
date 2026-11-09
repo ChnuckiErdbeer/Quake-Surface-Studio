@@ -7291,8 +7291,8 @@ class QSS_OT_settings(Operator):
 
     def invoke(self, context, event):
         settings = _qss_config_settings()
-        self.quake_root = str(getattr(context.scene, "qss_quake_root", "") or settings.get("quake_root", ""))
-        self.ironwail_executable = str(getattr(context.scene, "qss_ironwail_executable", "") or settings.get("ironwail_executable", ""))
+        self.quake_root = str(settings.get("quake_root", "") or getattr(context.scene, "qss_quake_root", ""))
+        self.ironwail_executable = str(settings.get("ironwail_executable", "") or getattr(context.scene, "qss_ironwail_executable", ""))
         self.import_behavior = str(settings.get("import_behavior", "ASK")).upper()
         self.export_mode = str(settings.get("export_mode", "AUTO")).upper()
         self.prefer_enhanced_last_export = bool(settings.get("prefer_enhanced_last_export", True))
