@@ -7514,7 +7514,8 @@ class QSS_OT_change_lightmap_resolution(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _qss_is_map_object(context.object) and context.mode == "OBJECT"
+        obj = context.object
+        return _qss_is_map_object(obj) and context.mode == "OBJECT" and bool(obj.get("qss_lightmap_image_name"))
 
     def invoke(self, context, event):
         self.resolution = str(context.object.get("qss_lightmap_resolution", 1))
@@ -7676,7 +7677,7 @@ class QSS_PT_project(Panel):
             row = box.row(align=True)
             row.label(text=f"Lightmap Resolution: {int(obj.get('qss_lightmap_resolution', 1))}×")
             change = row.row()
-            change.enabled = context.mode == "OBJECT"
+            change.enabled = context.mode == "OBJECT" and bool(obj.get("qss_lightmap_image_name"))
             change.operator(QSS_OT_change_lightmap_resolution.bl_idname, text="Change")
             box.label(text=f"Source: {os.path.basename(obj.get('qss_source_path', ''))}", icon="FILE")
         else:
@@ -7701,6 +7702,7 @@ class QSS_PT_lighting(Panel):
         layout = self.layout
         mode = obj.get("qss_preview_mode", "source")
         row = layout.row(align=True)
+        row.enabled = context.mode == "OBJECT"
         for value, label in (("source", "Original"), ("realtime", "Eevee"),
                              ("cycles", "Cycles"), ("baked", "Baked")):
             button = row.row(align=True)
@@ -7749,7 +7751,7 @@ class QSS_PT_lighting(Panel):
                      depress=bool(obj.get("qss_painted_lightmaps_enabled", True)))
 
         bake = layout.row()
-        bake.enabled = mode in {"realtime", "cycles"} and obj.get("qss_light_entity_count", 0) > 0
+        bake.enabled = context.mode == "OBJECT" and mode in {"realtime", "cycles"} and obj.get("qss_light_entity_count", 0) > 0
         bake.operator(QSS_OT_bake_scene_lights.bl_idname, text="Bake Lightmap", icon="RENDER_STILL")
         if mode == "realtime":
             layout.label(text="Eevee preview selected; baking currently uses the Cycles backend.", icon="INFO")
