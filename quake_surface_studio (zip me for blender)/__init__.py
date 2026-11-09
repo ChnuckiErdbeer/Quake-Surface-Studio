@@ -1,10 +1,10 @@
 bl_info = {
     "name": "Quake Surface Studio",
     "author": "OpenAI",
-    "version": (0, 16, 1),
+    "version": (0, 17, 0),
     "blender": (3, 6, 0),
-    "location": "View3D > Sidebar > Quake",
-    "description": "Automated Quake BSP editing, lighting, map audits and engine integration",
+    "location": "Quake Studio workspace",
+    "description": "Dedicated Quake BSP editing workspace with viewport tools, lighting and engine integration",
     "category": "Import-Export",
 }
 
