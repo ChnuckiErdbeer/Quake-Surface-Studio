@@ -18,14 +18,14 @@ import traceback
 
 import bpy
 from bpy.props import StringProperty, FloatProperty, BoolProperty, IntProperty, EnumProperty
-from bpy.types import Operator, Panel
+from bpy.types import Operator, Panel, Menu
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
 from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils
 
 
-ADDON_VERSION = (0, 17, 7)
+ADDON_VERSION = (0, 17, 8)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -6797,6 +6797,7 @@ class QSS_OT_refresh_viewport_tools(Operator):
     def execute(self, context):
         try:
             _register_qss_workspace_tools()
+        _qss_register_ui_menus()
             for window in context.window_manager.windows:
                 for screen in window.screens:
                     for area in screen.areas:
@@ -7048,7 +7049,7 @@ def _unregister_qss_workspace_tools():
 
 
 class QSS_PT_workspace_main(Panel):
-    bl_label = "Quake Studio"
+    bl_label = "Quake Surface Studio"
     bl_idname = "QSS_PT_workspace_main"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -7060,189 +7061,124 @@ class QSS_PT_workspace_main(Panel):
         scene = context.scene
         obj = context.object
         version = ".".join(str(part) for part in ADDON_VERSION)
-
-        header = layout.row(align=True)
-        header.label(text=f"QSS {version}", icon="INFO")
-        toolbar_ids = _qss_registered_toolbar_tool_ids()
-        toolbar_status = layout.row()
-        toolbar_status.alert = len(toolbar_ids) != len(QSS_WORKSPACE_TOOLS)
-        toolbar_status.label(
-            text=f"Viewport tools registered: {len(toolbar_ids)}/{len(QSS_WORKSPACE_TOOLS)}",
-            icon="CHECKMARK" if len(toolbar_ids) == len(QSS_WORKSPACE_TOOLS) else "ERROR",
-        )
-        toolbar_status.operator(
-            QSS_OT_refresh_viewport_tools.bl_idname,
-            text="Refresh",
-            icon="FILE_REFRESH",
-        )
-        if not _qss_native_toolbar_is_intact():
-            native_warning = layout.row()
-            native_warning.alert = True
-            native_warning.label(
-                text="Blender's built-in toolbar data is missing. Restart Blender to restore it.",
-                icon="ERROR",
-            )
-        layout.label(
-            text="Toolbar icons select a tool; left-click the 3D View to run it.",
-            icon="INFO",
-        )
-        launch = header.row()
-        launch.enabled = bool(
-            scene.qss_ironwail_executable
-            and os.path.isfile(_qss_abspath(scene.qss_ironwail_executable))
-            and scene.qss_game_dir and os.path.isdir(_qss_abspath(scene.qss_game_dir))
-            and (_qss_is_map_object(obj) or scene.qss_ironwail_demo)
-        )
-        launch.operator(QSS_OT_launch_ironwail.bl_idname, text="Launch Ironwail", icon="PLAY")
-
+        heading = layout.row(align=True)
+        heading.label(text=f"QSS {version}", icon="INFO")
+        launch = heading.row()
+        launch.enabled = bool(scene.qss_ironwail_executable and os.path.isfile(_qss_abspath(scene.qss_ironwail_executable)) and scene.qss_game_dir and os.path.isdir(_qss_abspath(scene.qss_game_dir)) and (_qss_is_map_object(obj) or scene.qss_ironwail_demo))
+        launch.operator(QSS_OT_launch_ironwail.bl_idname, text="Play", icon="PLAY")
         if _qss_is_map_object(obj):
             summary = layout.box()
             summary.label(text=os.path.basename(obj.get("qss_source_path", obj.name)), icon="FILE_3D")
-            row = summary.row(align=True)
-            row.label(text=f"{len(obj.data.polygons)} faces", icon="FACESEL")
-            row.label(text=f"{len(obj.data.materials)} materials", icon="MATERIAL")
-            row.label(text=f"{obj.get('qss_light_entity_count', 0)} lights", icon="LIGHT")
-
+            stats = summary.row(align=True)
+            stats.label(text=f"{len(obj.data.polygons)} faces", icon="FACESEL")
+            stats.label(text=f"{len(obj.data.materials)} materials", icon="MATERIAL")
+            stats.label(text=f"{obj.get('qss_light_entity_count', 0)} lights", icon="LIGHT")
             actions = layout.box()
-            actions.label(text="QUICK ACTIONS", icon="TOOL_SETTINGS")
+            actions.label(text="QUICK ACTIONS", icon="PLAY")
             if context.mode == "OBJECT":
                 row = actions.row(align=True)
-                row.operator(
-                    QSS_OT_player_start.bl_idname,
-                    text="Player Start",
-                    icon="PIVOT_CURSOR",
-                )
-                row.operator(
-                    QSS_OT_frame_selection.bl_idname,
-                    text="Focus BSP",
-                    icon="VIEWZOOM",
-                )
-                fps_row = actions.row()
-                # FPS navigation is modal and must be invoked from the 3D View
-                # window region, not executed as a non-modal sidebar command.
-                fps_row.operator_context = "INVOKE_REGION_WIN"
-                fps_row.operator(
-                    QSS_OT_fps_walk.bl_idname,
-                    text="Start / Stop FPS Navigation",
-                    icon="PLAY",
-                )
+                if obj.get("qss_has_player_start"):
+                    row.operator(QSS_OT_player_start.bl_idname, text="Player Start", icon="EMPTY_AXIS")
+                row.operator(QSS_OT_frame_selection.bl_idname, text="Focus Map", icon="VIEWZOOM")
+                walk = actions.row()
+                walk.operator_context = "INVOKE_REGION_WIN"
+                walk.operator(QSS_OT_fps_walk.bl_idname, text="Quake Walk · Noclip", icon="VIEW_PAN")
             elif context.mode == "EDIT_MESH":
                 row = actions.row(align=True)
-                row.operator(
-                    QSS_OT_frame_selection.bl_idname,
-                    text="Focus Selected Faces",
-                    icon="VIEWZOOM",
-                )
-                isolation_active = visibility_utils.snapshot_is_active(
-                    obj.get("qss_face_visibility_snapshot", "")
-                )
-                toggle = row.operator(
-                    QSS_OT_isolate_faces.bl_idname,
-                    text="Restore Visibility" if isolation_active else "Isolate Selected Faces",
-                    icon="HIDE_OFF",
-                )
-                if isolation_active:
-                    actions.label(
-                        text="Isolation is active. Click Restore Visibility to return to the previous hidden/selected faces.",
-                        icon="INFO",
-                    )
-                else:
-                    actions.label(
-                        text="Isolation is a toggle; the previous visibility and face selection are restored on the next click.",
-                        icon="INFO",
-                    )
+                row.operator(QSS_OT_frame_selection.bl_idname, text="Focus", icon="VIEWZOOM")
+                active = visibility_utils.snapshot_is_active(obj.get("qss_face_visibility_snapshot", ""))
+                row.operator(QSS_OT_isolate_faces.bl_idname, text="Restore" if active else "Isolate", icon="HIDE_OFF")
                 row = actions.row(align=True)
-                row.operator(
-                    QSS_OT_paint_texture_selected_faces.bl_idname,
-                    text="Paint Texture",
-                    icon="TPAINT_HLT",
-                )
-                row.operator(
-                    QSS_OT_activate_lightmap_paint.bl_idname,
-                    text="Paint Lightmap",
-                    icon="IMAGE",
-                )
+                row.operator(QSS_OT_paint_texture_selected_faces.bl_idname, text="Paint Texture", icon="TPAINT_HLT")
+                row.operator(QSS_OT_activate_lightmap_paint.bl_idname, text="Paint Lightmap", icon="IMAGE")
             elif context.mode == "PAINT_TEXTURE":
-                actions.label(
-                    text="Use Blender's standard paint tools in the left toolbar.",
-                    icon="BRUSH_DATA",
-                )
-                actions.label(
-                    text="Return to Edit Mode to select faces and start another QSS paint setup.",
-                    icon="INFO",
-                )
+                actions.label(text="Paint with Blender's brush tools. Switch to Edit Mode to change face selection.", icon="BRUSH_DATA")
             else:
-                actions.label(
-                    text=f"QSS quick actions are not assigned to {context.mode}.",
-                    icon="INFO",
-                )
+                actions.label(text="Choose an editing workflow below.", icon="INFO")
         else:
-            layout.label(text="No imported Quake BSP selected.", icon="INFO")
+            welcome = layout.box()
+            welcome.label(text="Start with a Quake BSP level", icon="IMPORT")
+            welcome.operator(QSS_OT_import_bsp.bl_idname, text="Import Quake BSP…", icon="IMPORT")
+            welcome.label(text="Your original Blender workspace remains untouched.", icon="INFO")
+        footer = layout.row(align=True)
+        footer.operator(QSS_OT_refresh_viewport_tools.bl_idname, text="Repair Toolbar", icon="FILE_REFRESH")
+        footer.label(text="Paint tools stay in the left toolbar", icon="BRUSH_DATA")
 
-        importer = layout.box()
-        importer.label(text="LEVEL IMPORTER", icon="IMPORT")
-        importer.prop(scene, "qss_game_folder", text="Game / Mod")
-        importer.prop(scene, "qss_import_lightmap_resolution", text="Visual lightmap resolution")
-        importer.label(text="Working paint-atlas scale only; does not change source luxel density.", icon="INFO")
-        importer.operator(QSS_OT_browse_game_maps.bl_idname, text="Browse Game Maps…", icon="FILEBROWSER")
-        import_row = importer.row()
-        import_row.enabled = bool(scene.qss_game_dir and os.path.isdir(_qss_abspath(scene.qss_game_dir)))
-        import_op = import_row.operator(QSS_OT_import_bsp.bl_idname, text="Import Quake BSP…", icon="IMPORT")
-        import_op.game_dir = scene.qss_game_dir
-        import_op.unit_scale = scene.qss_quake_unit_scale
-        import_op.lightmap_resolution = scene.qss_import_lightmap_resolution
-        importer.label(text="MAP import · planned", icon="TIME")
+
+class QSS_MT_viewport_menu(Menu):
+    bl_label = "Quake"
+    bl_idname = "QSS_MT_viewport_menu"
+
+    def draw(self, context):
+        layout = self.layout
+        obj = context.object
+        layout.operator(QSS_OT_import_bsp.bl_idname, text="Import BSP…", icon="IMPORT")
         if _qss_is_map_object(obj):
-            export_row = importer.row()
-            export_row.operator(QSS_OT_export_bsp.bl_idname, text="Export BSP…", icon="EXPORT")
+            layout.separator()
+            if context.mode == "OBJECT":
+                if obj.get("qss_has_player_start"):
+                    layout.operator(QSS_OT_player_start.bl_idname, text="Go to Player Start", icon="EMPTY_AXIS")
+                layout.operator(QSS_OT_frame_selection.bl_idname, text="Focus Map / Selection", icon="VIEWZOOM")
+                walk = layout.row()
+                walk.operator_context = "INVOKE_REGION_WIN"
+                walk.operator(QSS_OT_fps_walk.bl_idname, text="Quake Walk (Noclip)", icon="VIEW_PAN")
+            elif context.mode == "EDIT_MESH":
+                layout.operator(QSS_OT_frame_selection.bl_idname, text="Focus Selected Faces", icon="VIEWZOOM")
+                active = visibility_utils.snapshot_is_active(obj.get("qss_face_visibility_snapshot", ""))
+                layout.operator(QSS_OT_isolate_faces.bl_idname, text="Restore Face Visibility" if active else "Isolate Selected Faces", icon="HIDE_OFF")
+                layout.operator(QSS_OT_reveal_faces.bl_idname, text="Reveal Hidden Faces", icon="HIDE_ON")
+                layout.separator()
+                layout.operator(QSS_OT_paint_texture_selected_faces.bl_idname, text="Paint Selected Textures", icon="TPAINT_HLT")
+                layout.operator(QSS_OT_activate_lightmap_paint.bl_idname, text="Paint Selected Lightmaps", icon="IMAGE")
+            layout.separator()
+            layout.operator(QSS_OT_export_bsp.bl_idname, text="Export BSP…", icon="EXPORT")
+        layout.separator()
+        layout.operator(QSS_OT_open_workspace.bl_idname, text="Open QSS Workspace", icon="WINDOW")
 
-        settings = layout.box()
-        settings.label(text="SETTINGS", icon="PREFERENCES")
-        settings.prop(scene, "qss_quake_root", text="Installation folder")
-        settings.prop(scene, "qss_ericw_tools_dir", text="ericw-tools folder")
-        settings.prop(scene, "qss_ironwail_executable", text="Ironwail executable")
-        settings.prop(scene, "qss_nav_speed_quake", text="Speed")
-        settings.prop(scene, "qss_nav_fast_factor", text="Fast multiplier")
-        settings.label(text="Rerelease launcher and safe presets · planned", icon="TIME")
 
-        lighting = layout.box()
-        lighting.label(text="LIGHTING", icon="LIGHT")
-        lighting.prop(scene, "qss_decoupled_world_units_per_luxel", text="Target WU / luxel")
-        luxel = float(scene.qss_decoupled_world_units_per_luxel)
-        if luxel <= 4.0:
-            lighting.label(text="Fine detail: much longer build time and larger BSP.", icon="TIME")
-        elif luxel <= 8.0:
-            lighting.label(text="Higher detail: more compile time and disk space.", icon="INFO")
-        elif luxel <= 16.0:
-            lighting.label(text="Balanced density for many maps.", icon="INFO")
-        else:
-            lighting.label(text="Coarser detail: faster and smaller, with lower quality.", icon="INFO")
-        if scene.qss_ericw_tools_dir:
-            tools_dir = _qss_abspath(scene.qss_ericw_tools_dir)
-            light_row = lighting.row()
-            light_row.enabled = bool(external_tools.resolve_tool(tools_dir, "light"))
-            generate = light_row.operator(
-                QSS_OT_generate_decoupled_lightmaps.bl_idname,
-                text="Generate Decoupled BSP…",
-                icon="LIGHT",
-            )
-            generate.world_units_per_luxel = luxel
-        else:
-            lighting.label(text="Set ericw-tools folder to enable generation.", icon="INFO")
-        if _qss_is_map_object(obj) and obj.get("qss_lightmap_image_name"):
-            lighting.label(
-                text=f"Working atlas: {obj.get('qss_lightmap_atlas_size', 0) * obj.get('qss_lightmap_resolution', 1)} px",
-                icon="IMAGE",
-            )
-            preview = lighting.row(align=True)
-            preview.operator(QSS_OT_preview_source_lightmaps.bl_idname, text="Original")
-            preview.operator(QSS_OT_preview_bsp_lightmaps.bl_idname, text="Working")
-            preview.operator(QSS_OT_preview_imported_lights.bl_idname, text="Live")
-            lighting.operator(QSS_OT_quake_direct_bake.bl_idname, text="Quake Direct Bake", icon="RENDER_STILL")
-            lighting.operator(QSS_OT_bake_scene_lights.bl_idname, text="Cycles Bake (Experimental)", icon="NODE_MATERIAL")
-            lighting.operator(QSS_OT_refresh_lightmap_preview.bl_idname, text="Refresh Preview", icon="FILE_REFRESH")
-        else:
-            lighting.label(text="Import a BSP with lightmaps to access painting and bake tools.", icon="INFO")
+class QSS_MT_edit_mesh_context(Menu):
+    bl_label = "Quake Surface Studio"
+    bl_idname = "QSS_MT_edit_mesh_context"
+
+    def draw(self, context):
+        layout = self.layout
+        obj = context.object
+        if not _qss_is_map_object(obj):
+            return
+        layout.separator()
+        layout.menu(QSS_MT_viewport_menu.bl_idname, text="Quake Surface Studio", icon="MESH_CUBE")
+        layout.operator(QSS_OT_frame_selection.bl_idname, text="Focus Selected Faces", icon="VIEWZOOM")
+        active = visibility_utils.snapshot_is_active(obj.get("qss_face_visibility_snapshot", ""))
+        layout.operator(QSS_OT_isolate_faces.bl_idname, text="Restore Face Visibility" if active else "Isolate Selected Faces", icon="HIDE_OFF")
+        layout.operator(QSS_OT_reveal_faces.bl_idname, text="Reveal Hidden Faces", icon="HIDE_ON")
+        layout.separator()
+        layout.operator(QSS_OT_paint_texture_selected_faces.bl_idname, text="Paint Selected Textures", icon="TPAINT_HLT")
+        layout.operator(QSS_OT_activate_lightmap_paint.bl_idname, text="Paint Selected Lightmaps", icon="IMAGE")
+
+
+def _qss_draw_viewport_header_menu(self, context):
+    self.layout.menu(QSS_MT_viewport_menu.bl_idname, text="Quake", icon="MESH_CUBE")
+
+
+def _qss_register_ui_menus():
+    _qss_unregister_ui_menus()
+    bpy.types.VIEW3D_HT_header.append(_qss_draw_viewport_header_menu)
+    context_menu = getattr(bpy.types, "VIEW3D_MT_edit_mesh_context_menu", None)
+    if context_menu is not None:
+        context_menu.append(QSS_MT_edit_mesh_context.draw)
+
+
+def _qss_unregister_ui_menus():
+    try:
+        bpy.types.VIEW3D_HT_header.remove(_qss_draw_viewport_header_menu)
+    except Exception:
+        pass
+    context_menu = getattr(bpy.types, "VIEW3D_MT_edit_mesh_context_menu", None)
+    if context_menu is not None:
+        try:
+            context_menu.remove(QSS_MT_edit_mesh_context.draw)
+        except Exception:
+            pass
 
 
 class QSS_PT_workspace_lighting(Panel):
@@ -7370,11 +7306,11 @@ class QSS_PT_workspace_advanced(Panel):
 
 
 class QSS_PT_main(Panel):
-    bl_label = "Quake Surface Studio"
+    bl_label = "WORKFLOWS & TOOLS"
     bl_idname = "QSS_PT_main"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake"
+    bl_category = "Quake Studio"
     bl_order = 0
 
     def draw(self, context):
@@ -7417,7 +7353,7 @@ class QSS_PT_project(Panel):
     bl_idname = "QSS_PT_project"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake"
+    bl_category = "Quake Studio"
     bl_parent_id = "QSS_PT_main"
     bl_order = 10
     bl_options = {'DEFAULT_CLOSED'}
@@ -7499,7 +7435,7 @@ class QSS_PT_navigation(Panel):
     bl_idname = "QSS_PT_navigation"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake"
+    bl_category = "Quake Studio"
     bl_parent_id = "QSS_PT_main"
     bl_order = 20
     bl_options = {'DEFAULT_CLOSED'}
@@ -7547,7 +7483,7 @@ class QSS_PT_texture(Panel):
     bl_idname = "QSS_PT_texture"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake"
+    bl_category = "Quake Studio"
     bl_parent_id = "QSS_PT_main"
     bl_order = 30
     bl_options = {'DEFAULT_CLOSED'}
@@ -7588,7 +7524,7 @@ class QSS_PT_lighting(Panel):
     bl_idname = "QSS_PT_lighting"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake"
+    bl_category = "Quake Studio"
     bl_parent_id = "QSS_PT_main"
     bl_order = 40
     bl_options = {'DEFAULT_CLOSED'}
@@ -7624,7 +7560,7 @@ class QSS_PT_light_preview(Panel):
     bl_idname = "QSS_PT_light_preview"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake"
+    bl_category = "Quake Studio"
     bl_parent_id = "QSS_PT_lighting"
     bl_order = 10
     bl_options = {'DEFAULT_CLOSED'}
@@ -7657,7 +7593,7 @@ class QSS_PT_imported_lights(Panel):
     bl_idname = "QSS_PT_imported_lights"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake"
+    bl_category = "Quake Studio"
     bl_parent_id = "QSS_PT_lighting"
     bl_order = 20
     bl_options = {'DEFAULT_CLOSED'}
@@ -7700,7 +7636,7 @@ class QSS_PT_quake_bake(Panel):
     bl_idname = "QSS_PT_quake_bake"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake"
+    bl_category = "Quake Studio"
     bl_parent_id = "QSS_PT_lighting"
     bl_order = 30
     bl_options = {'DEFAULT_CLOSED'}
@@ -7739,7 +7675,7 @@ class QSS_PT_cycles_bake(Panel):
     bl_idname = "QSS_PT_cycles_bake"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake"
+    bl_category = "Quake Studio"
     bl_parent_id = "QSS_PT_lighting"
     bl_order = 40
     bl_options = {'DEFAULT_CLOSED'}
@@ -7759,7 +7695,7 @@ class QSS_PT_diagnostics(Panel):
     bl_idname = "QSS_PT_diagnostics"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake"
+    bl_category = "Quake Studio"
     bl_parent_id = "QSS_PT_main"
     bl_order = 50
     bl_options = {'DEFAULT_CLOSED'}
@@ -7796,7 +7732,7 @@ class QSS_PT_export(Panel):
     bl_idname = "QSS_PT_export"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake"
+    bl_category = "Quake Studio"
     bl_parent_id = "QSS_PT_main"
     bl_order = 60
     bl_options = {'DEFAULT_CLOSED'}
@@ -7856,8 +7792,8 @@ CLASSES = (
     QSS_OT_run_blender_selftest,
     QSS_OT_export_bsp,
     QSS_PT_workspace_main,
-    QSS_PT_workspace_lighting,
-    QSS_PT_workspace_advanced,
+    QSS_MT_viewport_menu,
+    QSS_MT_edit_mesh_context,
     QSS_PT_main,
     QSS_PT_project,
     QSS_PT_navigation,
@@ -7971,6 +7907,7 @@ def _cleanup_previous_registration():
         session["finished"] = True
     legacy_sessions.clear()
 
+    _qss_unregister_ui_menus()
     _remove_qss_keymaps()
     _unregister_qss_workspace_tools()
     _remove_scene_properties()
