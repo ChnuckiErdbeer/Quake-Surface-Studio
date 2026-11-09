@@ -237,7 +237,10 @@ def _qss_activate_map_collection(scene, name, context=None):
         try:
             if "qss_isolation_original_hide" not in obj:
                 obj["qss_isolation_original_hide"] = bool(obj.hide_get())
-            obj.hide_set(obj not in active_objects or bool(obj.get("qss_isolation_original_hide", False)))
+                obj["qss_isolation_original_hide_render"] = bool(obj.hide_render)
+            should_hide = obj not in active_objects or bool(obj.get("qss_isolation_original_hide", False))
+            obj.hide_set(should_hide)
+            obj.hide_render = obj not in active_objects or bool(obj.get("qss_isolation_original_hide_render", False))
         except (AttributeError, RuntimeError, ReferenceError):
             pass
 
