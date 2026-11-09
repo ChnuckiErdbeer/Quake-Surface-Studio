@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils
 
 
-ADDON_VERSION = (0, 17, 2)
+ADDON_VERSION = (0, 17, 3)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -6945,10 +6945,12 @@ QSS_WORKSPACE_TOOLS = (
 
 
 def _qss_remove_workspace_tool_definitions():
-    """Remove current and stale QSS ToolDefs from every 3D View context list.
+    """Remove QSS tools and repair malformed groups left by earlier releases.
 
-    This also migrates users upgrading from v0.17.0/v0.17.1, where tools were
-    stored in the OBJECT and EDIT_MESH lists rather than the shared list.
+    Blender tool lists allow either a ToolDef or a one-level tuple of ToolDefs.
+    Earlier QSS builds accidentally nested those tuples. Flatten nested groups
+    while retaining their non-QSS tools, and remove all QSS ToolDefs before
+    registering the corrected mode-specific entries.
     """
     try:
         from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
@@ -6956,55 +6958,104 @@ def _qss_remove_workspace_tool_definitions():
         if helper is None:
             return
 
-        def strip(entries):
+        def collect_group_members(item, output):
+            if item is None:
+                return
+            if isinstance(item, tuple):
+                for child in item:
+                    collect_group_members(child, output)
+                return
+            if not str(getattr(item, "idname", "")).startswith("qss."):
+                output.append(item)
+
+        def normalize(entries):
             cleaned = []
             for item in entries:
                 if item is None:
-                    cleaned.append(item)
+                    cleaned.append(None)
                 elif isinstance(item, tuple):
-                    nested = strip(item)
-                    if nested:
-                        cleaned.append(tuple(nested))
+                    members = []
+                    collect_group_members(item, members)
+                    if len(members) == 1:
+                        cleaned.append(members[0])
+                    elif len(members) > 1:
+                        # Blender's toolbar supports one tuple level only.
+                        cleaned.append(tuple(members))
                 elif not str(getattr(item, "idname", "")).startswith("qss."):
                     cleaned.append(item)
-            return cleaned
+
+            # Keep top-level separators only; remove duplicate and edge separators.
+            result = []
+            for item in cleaned:
+                if item is None and (not result or result[-1] is None):
+                    continue
+                result.append(item)
+            while result and result[0] is None:
+                result.pop(0)
+            while result and result[-1] is None:
+                result.pop()
+            return result
 
         for entries in helper._tools.values():
-            entries[:] = strip(entries)
+            entries[:] = normalize(entries)
     except Exception as exc:
         print(f"QSS: could not clean old viewport tool definitions: {exc}")
 
 
+
 def _qss_registered_toolbar_tool_ids():
-    """Return QSS tool identifiers found in Blender's shared 3D View tool list."""
+    """Return QSS tool identifiers from every 3D View mode list."""
     try:
         from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
         helper = ToolSelectPanelHelper._tool_class_from_space_type("VIEW_3D")
         if helper is None:
             return set()
-        definitions = ToolSelectPanelHelper._tools_flatten(helper._tools.get(None, ()))
-        return {
-            item.idname for item in definitions
-            if item is not None and str(getattr(item, "idname", "")).startswith("qss.")
-        }
+        identifiers = set()
+        for definitions in helper._tools.values():
+            for item in ToolSelectPanelHelper._tools_flatten(definitions):
+                identifier = str(getattr(item, "idname", "")) if item is not None else ""
+                if identifier.startswith("qss."):
+                    identifiers.add(identifier)
+        return identifiers
     except Exception:
         return set()
 
 
 def _register_qss_workspace_tools():
-    # Blender 5.2 assembles the 3D View toolbar from the shared _tools[None]
-    # list plus the current mode's list. Put QSS actions in the shared list so
-    # they are visible in Object, Edit and Paint modes alike. Each operator's
-    # poll/validation still enforces the modes in which the action is valid.
+    # Register each QSS tool as a plain ToolDef at the end of its mode list.
+    # Do not use register_tool(after=...) here: several Blender selection tools
+    # live inside tuple groups, and inserting after a member can create a nested
+    # tuple which breaks Blender's toolbar drawing code.
     _qss_remove_workspace_tool_definitions()
-    for index, tool in enumerate(QSS_WORKSPACE_TOOLS):
-        tool.bl_context_mode = None
-        bpy.utils.register_tool(
-            tool,
-            after={"builtin.select_box"} if index == 0 else {QSS_WORKSPACE_TOOLS[index - 1].bl_idname},
-            separator=(index == 0),
-            group=False,
-        )
+
+    tool_groups = (
+        ("OBJECT", (
+            QSS_WST_player_start,
+            QSS_WST_focus_object,
+            QSS_WST_fps_navigation,
+        )),
+        ("EDIT_MESH", (
+            QSS_WST_focus_edit,
+            QSS_WST_isolate_faces,
+            QSS_WST_reveal_faces,
+            QSS_WST_paint_texture,
+            QSS_WST_paint_lightmap,
+        )),
+    )
+
+    from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
+    helper = ToolSelectPanelHelper._tool_class_from_space_type("VIEW_3D")
+    if helper is None:
+        raise RuntimeError("Blender's 3D View toolbar helper is unavailable.")
+
+    for context_mode, tools in tool_groups:
+        entries = helper._tools.setdefault(context_mode, [])
+        if entries and entries[-1] is not None:
+            entries.append(None)
+        for tool in tools:
+            tool.bl_context_mode = context_mode
+            bpy.utils.register_tool(tool)
+
 
 
 def _unregister_qss_workspace_tools():
