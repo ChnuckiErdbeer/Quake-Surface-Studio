@@ -2196,8 +2196,21 @@ def _qss_append_decoupled_classic_fallback(
 
 
 def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None, output_texinfo_lump=None):
-    """Return (monochrome BSP lighting lump, QLIT v1 sidecar or None)."""
-    image_name = obj.get('qss_lightmap_image_name', '')
+    """Return (monochrome BSP lighting lump, QLIT v1 sidecar or None).
+
+    Export follows the selected lightmap layer: Original uses the immutable
+    source snapshot (or its painted override), Baked uses the generated atlas
+    (or its painted override), and live-lighting previews fall back to Original.
+    """
+    preview_mode = obj.get("qss_preview_mode", "source")
+    painted_enabled = bool(obj.get("qss_painted_lightmaps_enabled", True))
+    if preview_mode == "baked":
+        painted_name = obj.get("qss_painted_baked_lightmap", "")
+        image_name = painted_name if painted_enabled and bpy.data.images.get(painted_name) else obj.get("qss_lightmap_image_name", "")
+    else:
+        painted_name = obj.get("qss_painted_original_lightmap", "")
+        source_name = obj.get("qss_original_lightmap_backup", "")
+        image_name = painted_name if painted_enabled and bpy.data.images.get(painted_name) else (source_name or obj.get("qss_lightmap_image_name", ""))
     lighting_source = parsed.lumps[bsp.LUMP_LIGHTING]
     source_lit_path = os.path.splitext(obj.get('qss_source_path', ''))[0] + '.lit'
     source_lit_rgb, source_kind = bsp.resolve_rgb_lighting(
