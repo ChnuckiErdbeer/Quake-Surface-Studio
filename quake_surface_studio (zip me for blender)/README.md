@@ -1,4 +1,11 @@
-# Quake Surface Studio 0.17.8
+# Quake Surface Studio 0.17.9
+
+## 0.17.9 changes
+
+- Returns to the original single **3D View > Sidebar > Quake** workflow. Dedicated workspace creation, workspace toolbar tools, viewport header menus, and context-menu additions have been removed.
+- Restores the original project-first sidebar home panel and the existing collapsible Project, Navigation, Texture, Lighting, Diagnostics, and Export sections.
+- Retains the later BSP/lightmap, face-isolation, focus, and native Quake Walk implementation; no core editing or navigation operators are intentionally reverted.
+
 
 ## 0.17.8 changes
 
