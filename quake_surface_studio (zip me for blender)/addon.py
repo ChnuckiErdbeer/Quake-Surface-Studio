@@ -1212,22 +1212,31 @@ def _restore_preview_engine(scene, obj):
 
 def _set_viewport_lighting_mode(context, mode):
     """Apply Original/Eevee/Cycles/Baked viewport shading."""
-    screen = getattr(context, "screen", None)
-    if screen is None:
-        return
     live = mode in {"realtime", "cycles"}
-    for area in screen.areas:
-        if area.type != "VIEW_3D":
-            continue
-        for space in area.spaces:
-            if space.type != "VIEW_3D":
+    # File-browser operators can execute with a non-3D active area. Apply the
+    # preset to every open window's 3D View spaces, not only context.screen.
+    screens = set()
+    screen = getattr(context, "screen", None)
+    if screen is not None:
+        screens.add(screen)
+    wm = getattr(context, "window_manager", None)
+    if wm is not None:
+        for window in wm.windows:
+            if window.screen is not None:
+                screens.add(window.screen)
+    for target_screen in screens:
+        for area in target_screen.areas:
+            if area.type != "VIEW_3D":
                 continue
-            shading = space.shading
-            shading.type = "RENDERED" if mode == "cycles" else "MATERIAL"
-            for name in ("use_scene_lights", "use_scene_world",
-                         "use_scene_lights_render", "use_scene_world_render"):
-                if hasattr(shading, name):
-                    setattr(shading, name, live)
+            for space in area.spaces:
+                if space.type != "VIEW_3D":
+                    continue
+                shading = space.shading
+                shading.type = "RENDERED" if mode == "cycles" else "MATERIAL"
+                for name in ("use_scene_lights", "use_scene_world",
+                             "use_scene_lights_render", "use_scene_world_render"):
+                    if hasattr(shading, name):
+                        setattr(shading, name, live)
 
 
 def _set_lighting_preview(context, obj, mode):
@@ -1238,7 +1247,6 @@ def _set_lighting_preview(context, obj, mode):
         raise bsp.BSPError("This map has no generated lightmap yet. Bake it first.")
 
     if mode in {"realtime", "cycles"}:
-        _restore_non_quake_lights(context.scene)
         _restore_preview_world(context.scene, obj)
         _store_and_enter_eevee_live_engine(context.scene, obj)
         if mode == "cycles":
@@ -4895,6 +4903,17 @@ class QSS_OT_detach_faces(Operator):
                     )
 
             stage = 'prepare face-local paint images'
+            original_uv_layer = mesh.uv_layers.get("Quake_Texture_UV_Original")
+            if original_uv_layer is None:
+                original_uv_layer = mesh.uv_layers.new(name="Quake_Texture_UV_Original")
+                for loop_index in range(len(uv_layer.data)):
+                    original_uv_layer.data[loop_index].uv = uv_layer.data[loop_index].uv
+            painted_uv_layer = mesh.uv_layers.get("Quake_Texture_UV_Painted")
+            if painted_uv_layer is None:
+                painted_uv_layer = mesh.uv_layers.new(name="Quake_Texture_UV_Painted")
+                for loop_index in range(len(uv_layer.data)):
+                    painted_uv_layer.data[loop_index].uv = uv_layer.data[loop_index].uv
+            painted_marker_existing = mesh.attributes.get("qss_painted_face")
             for poly_index in selected_indices:
                 if poly_index < 0 or poly_index >= len(mesh.polygons):
                     raise bsp.BSPError(f"Selected polygon index {poly_index} is outside the current mesh ({len(mesh.polygons)} polygons).")
@@ -4923,6 +4942,11 @@ class QSS_OT_detach_faces(Operator):
                 projection = _face_local_texinfo_projection(texinfos[texinfo_id], bounds, out_size)
                 plans.append({
                     'poly_index': poly_index,
+                    'was_already_detached': bool(
+                        painted_marker_existing
+                        and poly_index < len(painted_marker_existing.data)
+                        and painted_marker_existing.data[poly_index].value
+                    ),
                     'face_id': face_id,
                     'source_mat': source_mat,
                     'source_index': source_index,
@@ -4986,6 +5010,9 @@ class QSS_OT_detach_faces(Operator):
                         raise bsp.BSPError(
                             f"UV collection changed during detach (loop {loop_index}, size {len(uv_layer.data)})."
                         )
+                    if not plan.get("was_already_detached", False):
+                        original_uv_layer.data[loop_index].uv = uv_layer.data[loop_index].uv
+                    painted_uv_layer.data[loop_index].uv = uv_value
                     _qss_safe_collection_item(uv_layer.data, loop_index, 'Quake texture UV').uv = uv_value
                 last_new_index = material_index
             if last_new_index >= 0:
@@ -5187,9 +5214,16 @@ class QSS_OT_activate_paint(Operator):
             current_image = _qss_current_paint_image(context)
             if not _qss_is_lightmap_paint_image(obj, current_image):
                 bpy.ops.object.mode_set(mode='OBJECT')
+                if bool(obj.get("qss_paint_return_edit", False)):
+                    bpy.ops.object.mode_set(mode='EDIT')
+                obj["qss_paint_return_edit"] = False
                 self.report({'INFO'}, "Texture Paint mode closed.")
                 return {'FINISHED'}
             bpy.ops.object.mode_set(mode='OBJECT')
+        elif context.mode == 'EDIT_MESH':
+            obj["qss_paint_return_edit"] = True
+        else:
+            obj["qss_paint_return_edit"] = False
 
         if context.mode == 'EDIT_MESH':
             import bmesh
@@ -5317,9 +5351,16 @@ class QSS_OT_activate_lightmap_paint(Operator):
             current_image = _qss_current_paint_image(context)
             if _qss_is_lightmap_paint_image(obj, current_image):
                 bpy.ops.object.mode_set(mode='OBJECT')
+                if bool(obj.get("qss_paint_return_edit", False)):
+                    bpy.ops.object.mode_set(mode='EDIT')
+                obj["qss_paint_return_edit"] = False
                 self.report({'INFO'}, "Lightmap Paint mode closed.")
                 return {'FINISHED'}
             bpy.ops.object.mode_set(mode='OBJECT')
+        elif context.mode == 'EDIT_MESH':
+            obj["qss_paint_return_edit"] = True
+        else:
+            obj["qss_paint_return_edit"] = False
         mesh = obj.data
         active_face_index = None
         try:
@@ -6410,7 +6451,6 @@ class QSS_OT_bake_scene_lights(Operator):
             except Exception:
                 pass
             _restore_preview_world(scene, obj)
-            _restore_non_quake_lights(scene)
             for selected in list(context.selected_objects):
                 selected.select_set(False)
             for selected in old_selected:
@@ -7458,6 +7498,46 @@ class QSS_OT_set_lighting_mode(Operator):
             return {"CANCELLED"}
 
 
+class QSS_OT_toggle_textures(Operator):
+    bl_idname = "qss.toggle_textures"
+    bl_label = "Toggle Base Textures"
+    bl_description = "Show base textures or pure BSP lightmaps"
+
+    @classmethod
+    def poll(cls, context):
+        return _qss_is_map_object(context.object) and context.mode == "OBJECT"
+
+    def execute(self, context):
+        obj = context.object
+        enabled = not bool(obj.get("qss_base_textures_enabled", True))
+        changed = 0
+        for mat in obj.data.materials:
+            if mat is None or not mat.use_nodes or mat.node_tree is None:
+                continue
+            nodes = mat.node_tree.nodes
+            base = next((n for n in nodes if n.type == "TEX_IMAGE" and n.get("qss_role") == "base_texture"), None)
+            multiply = next((n for n in nodes if n.type == "MIX_RGB" and n.get("qss_role") == "lightmap_multiply"), None)
+            if base is None or multiply is None:
+                continue
+            socket = multiply.inputs.get("Color1")
+            if socket is None:
+                continue
+            for link in list(mat.node_tree.links):
+                if link.to_socket == socket:
+                    mat.node_tree.links.remove(link)
+            if enabled:
+                mat.node_tree.links.new(base.outputs.get("Color"), socket)
+            else:
+                socket.default_value = (1.0, 1.0, 1.0, 1.0)
+            changed += 1
+        obj["qss_base_textures_enabled"] = enabled
+        if not changed:
+            self.report({"WARNING"}, "No Quake lightmap materials were found to update.")
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Base textures {'enabled' if enabled else 'hidden'}; lightmaps remain visible.")
+        return {"FINISHED"}
+
+
 class QSS_OT_toggle_painted_textures(Operator):
     bl_idname = "qss.toggle_painted_textures"
     bl_label = "Toggle Painted Textures"
@@ -7477,12 +7557,21 @@ class QSS_OT_toggle_painted_textures(Operator):
             self.report({"WARNING"}, "This map has no detached painted textures.")
             return {"CANCELLED"}
         enabled = not bool(obj.get("qss_painted_textures_enabled", True))
+        original_uv = mesh.uv_layers.get("Quake_Texture_UV_Original")
+        painted_uv = mesh.uv_layers.get("Quake_Texture_UV_Painted")
+        active_uv = mesh.uv_layers.get("Quake_Texture_UV")
+        if active_uv is None or original_uv is None or painted_uv is None:
+            self.report({"ERROR"}, "The original/painted UV backups are missing. Re-import this BSP before toggling painted textures.")
+            return {"CANCELLED"}
         for poly in mesh.polygons:
             index = poly.index
             if marker.data[index].value:
                 target = int(painted.data[index].value) if enabled else int(original.data[index].value)
                 if 0 <= target < len(mesh.materials):
                     poly.material_index = target
+                source_uv = painted_uv if enabled else original_uv
+                for loop_index in poly.loop_indices:
+                    active_uv.data[loop_index].uv = source_uv.data[loop_index].uv
         obj["qss_painted_textures_enabled"] = enabled
         mesh.update()
         self.report({"INFO"}, f"Painted textures {'enabled' if enabled else 'disabled'}.")
@@ -7846,6 +7935,12 @@ class QSS_PT_lighting(Panel):
         )
 
         row = layout.row()
+        row.enabled = context.mode == "OBJECT"
+        row.operator(QSS_OT_toggle_textures.bl_idname,
+                     text="Base Textures: " + ("ON" if obj.get("qss_base_textures_enabled", True) else "OFF"),
+                     depress=bool(obj.get("qss_base_textures_enabled", True)))
+
+        row = layout.row()
         row.enabled = context.mode == "OBJECT" and _qss_has_painted_texture_faces(obj)
         row.operator(QSS_OT_toggle_painted_textures.bl_idname,
                      text="Painted Textures: " + ("ON" if obj.get("qss_painted_textures_enabled", True) else "OFF"),
@@ -7947,7 +8042,7 @@ CLASSES = (
     QSS_OT_scan_game_maps, QSS_OT_run_python_tests, QSS_OT_run_map_audit,
     QSS_OT_launch_ironwail, QSS_OT_open_last_export, QSS_OT_open_config_text,
     QSS_OT_settings, QSS_OT_change_lightmap_resolution, QSS_OT_set_lighting_mode,
-    QSS_OT_toggle_painted_textures, QSS_OT_toggle_painted_lightmaps,
+    QSS_OT_toggle_textures, QSS_OT_toggle_painted_textures, QSS_OT_toggle_painted_lightmaps,
     QSS_OT_generate_decoupled_lightmaps, QSS_OT_detach_faces,
     QSS_OT_activate_paint, QSS_OT_activate_lightmap_paint,
     QSS_OT_frame_selection, QSS_OT_isolate_faces, QSS_OT_reveal_faces,
