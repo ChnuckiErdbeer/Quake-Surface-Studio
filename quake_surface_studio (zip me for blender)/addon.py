@@ -7352,6 +7352,8 @@ class QSS_OT_settings(Operator):
         try:
             context.scene.qss_quake_root = normalized_root
             context.scene.qss_ironwail_executable = ironwail_path
+            settings["active_game_dir"] = _qss_abspath(context.scene.qss_game_dir or "")
+            settings["active_game_id"] = str(context.scene.qss_game_folder or "")
             quake_paths.save_config(settings, _qss_config_path())
             context.scene.qss_import_lightmap_resolution = self.import_lightmap_resolution
             self.report({"INFO"}, "Quake Surface Studio settings saved.")
