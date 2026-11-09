@@ -190,10 +190,20 @@ def _qss_remove_map_collection(scene, name):
         for child in list(item.children):
             remove_tree(child)
         for obj in list(item.objects):
+            data = getattr(obj, "data", None)
+            data_collection = (
+                bpy.data.meshes if obj.type == "MESH" else
+                bpy.data.lights if obj.type == "LIGHT" else None
+            )
             try:
                 bpy.data.objects.remove(obj, do_unlink=True)
             except Exception:
                 pass
+            if data_collection is not None and data is not None and getattr(data, "users", 1) == 0:
+                try:
+                    data_collection.remove(data)
+                except Exception:
+                    pass
         for parent in bpy.data.collections:
             try:
                 if item in parent.children:
