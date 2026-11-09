@@ -24,14 +24,16 @@ This release implements the agreed NAVIGATION / MAIN / LIGHTING / STATS layout i
 - Painted textures are reversible per-face material overrides. The original material assignments are retained.
 - Original and Baked lightmap painting each use a separate image override. Painted Lightmaps is available only in those two modes.
 - The Cycles bake is the supported artist-bake path. Existing bake data prompts for confirmation before replacement. A new bake invalidates the painted Baked override but never overwrites the immutable original BSP snapshot.
-- EEVEE lightmap baking is not part of this release; it remains a possible future experiment.
+- EEVEE lightmap baking is not implemented as a separate backend in this release. The Bake button remains available from Eevee preview but uses the existing Cycles bake path; this is disclosed in the panel and is a low-priority future experiment.
 
 ### Import, export and settings
 
 - The BSP file browser no longer exposes QSS-specific import settings. It uses the active Game / Mod, configured unit scale and configured working-atlas resolution.
 - Export format choices are Automatic, Classic, Enhanced and Both. Automatic chooses Enhanced for upscaled working atlases or source maps carrying DECOUPLED_LM; otherwise it chooses Classic. Both writes `_c.bsp` and `_e.bsp`.
 - Open Last Export in Ironwail prefers the Enhanced file after Both by default. The preference is configurable. The exported BSP must be inside the active Game / Mod directory for Quake's virtual map lookup.
-- The Settings popup edits common defaults. The adjacent Text Editor action opens the actual `config.json` in a separate Blender window for advanced editing.
+- The Settings popup edits common defaults: import behaviour (`ASK`), export format (`AUTO`), preferred Both-export launch variant, default working-atlas resolution, re-bake policy (`ASK`) and lighting-mode memory (`PER_MAP` or `GLOBAL`). The adjacent Text Editor action opens the actual `config.json` in a separate Blender window for advanced editing.
+- Per-map lighting memory is the default. Global mode memory is optional and stores one shared Original/Eevee/Cycles/Baked choice. A map without a generated bake safely falls back to Original when global Baked mode is selected.
+- Re-baking asks before replacing an existing generated lightmap by default; the setting can be changed to overwrite directly.
 - Changing working lightmap resolution rebuilds the atlas from the original BSP. The dialog warns that generated and painted lightmaps are discarded; painted textures and mesh geometry are retained.
 
 ### Validation status
