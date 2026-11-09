@@ -1,6 +1,16 @@
-# Quake Surface Studio 0.17.4
+# Quake Surface Studio 0.17.5
+
+## 0.17.5 changes
+
+- Fixes the 0.17.4 toolbar regression: Blender 5.2 ToolDef entries are namedtuples, not ordinary tool groups. The sanitizer now recognizes the actual ToolDef type before inspecting tuples.
+- Preserves Blender's built-in Object, Edit, Texture Paint, Vertex Paint, Weight Paint, Sculpt, and other mode tool definitions without rebuilding or flattening untouched groups.
+- Preserves top-level dynamic tool generators used by built-in context-sensitive tools, including paint-mode selection tools.
+- Repairs only stale QSS entries and malformed/nested data; leaves valid native ToolDef groups and callable generators in their original order.
+- Uses Blender's register_tool/unregister_tool lifecycle consistently. Refresh unregisters previous QSS tools and generated keymaps before registering them once, with a normal separator between built-in and QSS tools.
+- Adds regression coverage for actual namedtuple ToolDef behavior, built-in groups, dynamic generators, malformed strings, stale QSS entries, and safe iteration.
 
 ## 0.17.4 changes
+
 
 - Hardens the Blender 5.2 viewport toolbar repair: only valid ToolDef-like objects with a non-empty string `idname` are retained.
 - Removes stray strings and arbitrary unsupported values from top-level and nested toolbar groups, while preserving valid Blender tools and separators.
