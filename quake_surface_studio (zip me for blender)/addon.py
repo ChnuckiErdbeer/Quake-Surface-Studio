@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils
 
 
-ADDON_VERSION = (0, 16, 1)
+ADDON_VERSION = (0, 17, 0)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -3271,6 +3271,7 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
 
     def invoke(self, context, event):
         self.game_dir = context.scene.qss_game_dir
+        self.lightmap_resolution = getattr(context.scene, "qss_import_lightmap_resolution", "1")
         return ImportHelper.invoke(self, context, event)
 
     def draw(self, context):
@@ -3365,6 +3366,7 @@ class QSS_OT_browse_game_maps(Operator):
                 filepath=map_path,
                 game_dir=context.scene.qss_game_dir,
                 unit_scale=context.scene.qss_quake_unit_scale,
+                lightmap_resolution=context.scene.qss_import_lightmap_resolution,
             )
             if 'CANCELLED' in result:
                 raise RuntimeError("The QSS BSP importer cancelled the map import.")
@@ -4483,11 +4485,23 @@ class QSS_OT_generate_decoupled_lightmaps(Operator, ImportHelper):
         source = obj.get("qss_source_path", "") if _qss_is_map_object(obj) else ""
         if source and os.path.isfile(bpy.path.abspath(source)):
             self.filepath = bpy.path.abspath(source)
+        self.world_units_per_luxel = float(
+            getattr(context.scene, "qss_decoupled_world_units_per_luxel", 16.0)
+        )
         return ImportHelper.invoke(self, context, event)
 
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "world_units_per_luxel")
+        value = float(self.world_units_per_luxel)
+        if value <= 4.0:
+            layout.label(text="Fine luxel density: expect a much longer build and a larger BSP.", icon="TIME")
+        elif value <= 8.0:
+            layout.label(text="Higher detail: expect more build time and disk space.", icon="INFO")
+        elif value <= 16.0:
+            layout.label(text="Balanced density for many maps.", icon="INFO")
+        else:
+            layout.label(text="Coarser lighting: faster and smaller, with less spatial detail.", icon="INFO")
         layout.label(text="A new *_decoupled.bsp copy will be created beside the source.", icon="INFO")
         layout.label(text="The source BSP is never modified; lighting is recalculated.", icon="INFO")
 
@@ -6737,6 +6751,340 @@ def _qss_is_map_object(obj):
     return bool(obj and obj.type == 'MESH' and obj.get('qss_object_role') == 'quake_bsp29')
 
 
+class QSS_OT_open_workspace(Operator):
+    bl_idname = "qss.open_workspace"
+    bl_label = "Open Quake Studio Workspace"
+    bl_description = "Create or activate the dedicated Quake Studio workspace without changing the existing Layout workspace"
+
+    def execute(self, context):
+        window = context.window
+        if window is None:
+            self.report({"ERROR"}, "A Blender window is required to open Quake Studio.")
+            return {"CANCELLED"}
+
+        workspace = bpy.data.workspaces.get("Quake Studio")
+        created = False
+        if workspace is None:
+            try:
+                result = bpy.ops.workspace.duplicate()
+                if "CANCELLED" in result:
+                    raise RuntimeError("Blender could not duplicate the current workspace.")
+                workspace = window.workspace
+                workspace.name = "Quake Studio"
+                workspace["qss_managed_workspace"] = True
+                created = True
+            except Exception as exc:
+                self.report({"ERROR"}, f"Could not create Quake Studio workspace: {exc}")
+                return {"CANCELLED"}
+        else:
+            window.workspace = workspace
+
+        # The workspace is a duplicate of the user's current layout. Keep its
+        # editor arrangement intact, but make the 3D View's left toolbar and
+        # Quake Studio right sidebar visible in every stored screen layout.
+        for screen in workspace.screens:
+            for area in screen.areas:
+                if area.type != "VIEW_3D":
+                    continue
+                for space in area.spaces:
+                    if space.type == "VIEW_3D":
+                        space.show_region_toolbar = True
+                        space.show_region_ui = True
+        workspace.object_mode = "OBJECT"
+        self.report(
+            {"INFO"},
+            "Created Quake Studio workspace." if created else "Switched to Quake Studio workspace."
+        )
+        return {"FINISHED"}
+
+
+class QSS_OT_paint_texture_selected_faces(Operator):
+    bl_idname = "qss.paint_texture_selected_faces"
+    bl_label = "Paint Texture"
+    bl_description = "Detach the selected BSP faces into a face-local paint target, then enter Texture Paint"
+    bl_options = {"REGISTER"}
+
+    @classmethod
+    def poll(cls, context):
+        return bool(_qss_is_map_object(context.object) and context.mode == "EDIT_MESH")
+
+    def execute(self, context):
+        result = bpy.ops.qss.detach_selected_faces("EXEC_DEFAULT")
+        if "CANCELLED" in result:
+            return {"CANCELLED"}
+        return bpy.ops.qss.activate_texture_paint("EXEC_DEFAULT")
+
+
+def _qss_tool_keymap(operator_id):
+    return ((operator_id, {"type": "LEFTMOUSE", "value": "PRESS"}, {"properties": []}),)
+
+
+class QSS_WST_player_start(bpy.types.WorkSpaceTool):
+    bl_space_type = "VIEW_3D"
+    bl_context_mode = "OBJECT"
+    bl_idname = "qss.player_start"
+    bl_label = "Go to Player Start"
+    bl_description = "Click in the viewport to move to info_player_start"
+    bl_icon = "ops.generic.select"
+    bl_operator = QSS_OT_player_start.bl_idname
+    bl_keymap = _qss_tool_keymap(QSS_OT_player_start.bl_idname)
+
+
+class QSS_WST_focus_object(bpy.types.WorkSpaceTool):
+    bl_space_type = "VIEW_3D"
+    bl_context_mode = "OBJECT"
+    bl_idname = "qss.focus_face_object"
+    bl_label = "Focus Selected Face"
+    bl_description = "Click in the viewport to frame the selected face(s)"
+    bl_icon = "ops.view3d.view_selected"
+    bl_operator = QSS_OT_frame_selection.bl_idname
+    bl_keymap = _qss_tool_keymap(QSS_OT_frame_selection.bl_idname)
+
+
+class QSS_WST_fps_navigation(bpy.types.WorkSpaceTool):
+    bl_space_type = "VIEW_3D"
+    bl_context_mode = "OBJECT"
+    bl_idname = "qss.fps_navigation"
+    bl_label = "FPS Navigation"
+    bl_description = "Click in the viewport to start keyboard navigation; WASD moves and MMB looks"
+    bl_icon = "ops.view3d.walk"
+    bl_operator = QSS_OT_fps_walk.bl_idname
+    bl_keymap = _qss_tool_keymap(QSS_OT_fps_walk.bl_idname)
+
+
+class QSS_WST_focus_edit(bpy.types.WorkSpaceTool):
+    bl_space_type = "VIEW_3D"
+    bl_context_mode = "EDIT_MESH"
+    bl_idname = "qss.focus_face_edit"
+    bl_label = "Focus Selected Face"
+    bl_description = "Click in the viewport to frame the selected face(s)"
+    bl_icon = "ops.view3d.view_selected"
+    bl_operator = QSS_OT_frame_selection.bl_idname
+    bl_keymap = _qss_tool_keymap(QSS_OT_frame_selection.bl_idname)
+
+
+class QSS_WST_isolate_faces(bpy.types.WorkSpaceTool):
+    bl_space_type = "VIEW_3D"
+    bl_context_mode = "EDIT_MESH"
+    bl_idname = "qss.isolate_faces"
+    bl_label = "Isolate Selected Faces"
+    bl_description = "Hide all unselected BSP faces"
+    bl_icon = "ops.mesh.hide"
+    bl_operator = QSS_OT_isolate_faces.bl_idname
+    bl_keymap = _qss_tool_keymap(QSS_OT_isolate_faces.bl_idname)
+
+
+class QSS_WST_reveal_faces(bpy.types.WorkSpaceTool):
+    bl_space_type = "VIEW_3D"
+    bl_context_mode = "EDIT_MESH"
+    bl_idname = "qss.reveal_faces"
+    bl_label = "Reveal Hidden Faces"
+    bl_description = "Reveal faces hidden in Edit Mode"
+    bl_icon = "ops.mesh.reveal"
+    bl_operator = QSS_OT_reveal_faces.bl_idname
+    bl_keymap = _qss_tool_keymap(QSS_OT_reveal_faces.bl_idname)
+
+
+class QSS_WST_paint_texture(bpy.types.WorkSpaceTool):
+    bl_space_type = "VIEW_3D"
+    bl_context_mode = "EDIT_MESH"
+    bl_idname = "qss.paint_texture"
+    bl_label = "Paint Texture"
+    bl_description = "Detach the selected faces and enter Texture Paint"
+    bl_icon = "ops.paint.texture_paint"
+    bl_operator = QSS_OT_paint_texture_selected_faces.bl_idname
+    bl_keymap = _qss_tool_keymap(QSS_OT_paint_texture_selected_faces.bl_idname)
+
+
+class QSS_WST_paint_lightmap(bpy.types.WorkSpaceTool):
+    bl_space_type = "VIEW_3D"
+    bl_context_mode = "EDIT_MESH"
+    bl_idname = "qss.paint_lightmap"
+    bl_label = "Paint Lightmap"
+    bl_description = "Enter Lightmap Paint for the selected lightmapped faces"
+    bl_icon = "ops.paint.image"
+    bl_operator = QSS_OT_activate_lightmap_paint.bl_idname
+    bl_keymap = _qss_tool_keymap(QSS_OT_activate_lightmap_paint.bl_idname)
+
+
+QSS_WORKSPACE_TOOLS = (
+    QSS_WST_player_start,
+    QSS_WST_focus_object,
+    QSS_WST_fps_navigation,
+    QSS_WST_focus_edit,
+    QSS_WST_isolate_faces,
+    QSS_WST_reveal_faces,
+    QSS_WST_paint_texture,
+    QSS_WST_paint_lightmap,
+)
+
+
+def _register_qss_workspace_tools():
+    previous = "builtin.select_box"
+    for index, tool in enumerate(QSS_WORKSPACE_TOOLS):
+        bpy.utils.register_tool(
+            tool,
+            after={previous},
+            separator=(index == 0 or index == 3),
+            group=(index == 0 or index == 3),
+        )
+        previous = tool.bl_idname
+
+
+def _unregister_qss_workspace_tools():
+    for tool in reversed(QSS_WORKSPACE_TOOLS):
+        try:
+            bpy.utils.unregister_tool(tool)
+        except Exception:
+            pass
+
+
+class QSS_PT_workspace_main(Panel):
+    bl_label = "Quake Studio"
+    bl_idname = "QSS_PT_workspace_main"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Quake Studio"
+    bl_order = 0
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        obj = context.object
+        version = ".".join(str(part) for part in ADDON_VERSION)
+
+        header = layout.row(align=True)
+        header.label(text=f"QSS {version}", icon="INFO")
+        launch = header.row()
+        launch.enabled = bool(
+            scene.qss_ironwail_executable
+            and os.path.isfile(_qss_abspath(scene.qss_ironwail_executable))
+            and scene.qss_game_dir and os.path.isdir(_qss_abspath(scene.qss_game_dir))
+            and (_qss_is_map_object(obj) or scene.qss_ironwail_demo)
+        )
+        launch.operator(QSS_OT_launch_ironwail.bl_idname, text="Launch Ironwail", icon="PLAY")
+
+        if _qss_is_map_object(obj):
+            summary = layout.box()
+            summary.label(text=os.path.basename(obj.get("qss_source_path", obj.name)), icon="FILE_3D")
+            row = summary.row(align=True)
+            row.label(text=f"{len(obj.data.polygons)} faces", icon="FACESEL")
+            row.label(text=f"{len(obj.data.materials)} materials", icon="MATERIAL")
+            row.label(text=f"{obj.get('qss_light_entity_count', 0)} lights", icon="LIGHT")
+        else:
+            layout.label(text="No imported Quake BSP selected.", icon="INFO")
+
+        importer = layout.box()
+        importer.label(text="LEVEL IMPORTER", icon="IMPORT")
+        importer.prop(scene, "qss_game_folder", text="Game / Mod")
+        importer.prop(scene, "qss_import_lightmap_resolution", text="Visual lightmap resolution")
+        importer.label(text="Working paint-atlas scale only; does not change source luxel density.", icon="INFO")
+        importer.operator(QSS_OT_browse_game_maps.bl_idname, text="Browse Game Maps…", icon="FILEBROWSER")
+        import_row = importer.row()
+        import_row.enabled = bool(scene.qss_game_dir and os.path.isdir(_qss_abspath(scene.qss_game_dir)))
+        import_op = import_row.operator(QSS_OT_import_bsp.bl_idname, text="Import Quake BSP…", icon="IMPORT")
+        import_op.game_dir = scene.qss_game_dir
+        import_op.unit_scale = scene.qss_quake_unit_scale
+        import_op.lightmap_resolution = scene.qss_import_lightmap_resolution
+        importer.label(text="MAP import · planned", icon="TIME")
+        if _qss_is_map_object(obj):
+            export_row = importer.row()
+            export_row.operator(QSS_OT_export_bsp.bl_idname, text="Export BSP…", icon="EXPORT")
+
+        settings = layout.box()
+        settings.label(text="SETTINGS", icon="PREFERENCES")
+        settings.prop(scene, "qss_quake_root", text="Installation folder")
+        settings.prop(scene, "qss_ericw_tools_dir", text="ericw-tools folder")
+        settings.prop(scene, "qss_ironwail_executable", text="Ironwail executable")
+        settings.prop(scene, "qss_nav_speed_quake", text="Speed")
+        settings.prop(scene, "qss_nav_fast_factor", text="Fast multiplier")
+        settings.label(text="Rerelease launcher and safe presets · planned", icon="TIME")
+
+        lighting = layout.box()
+        lighting.label(text="LIGHTING", icon="LIGHT")
+        lighting.prop(scene, "qss_decoupled_world_units_per_luxel", text="Target WU / luxel")
+        luxel = float(scene.qss_decoupled_world_units_per_luxel)
+        if luxel <= 4.0:
+            lighting.label(text="Fine detail: much longer build time and larger BSP.", icon="TIME")
+        elif luxel <= 8.0:
+            lighting.label(text="Higher detail: more compile time and disk space.", icon="INFO")
+        elif luxel <= 16.0:
+            lighting.label(text="Balanced density for many maps.", icon="INFO")
+        else:
+            lighting.label(text="Coarser detail: faster and smaller, with lower quality.", icon="INFO")
+        if scene.qss_ericw_tools_dir:
+            tools_dir = _qss_abspath(scene.qss_ericw_tools_dir)
+            light_row = lighting.row()
+            light_row.enabled = bool(external_tools.resolve_tool(tools_dir, "light"))
+            generate = light_row.operator(
+                QSS_OT_generate_decoupled_lightmaps.bl_idname,
+                text="Generate Decoupled BSP…",
+                icon="LIGHT",
+            )
+            generate.world_units_per_luxel = luxel
+        else:
+            lighting.label(text="Set ericw-tools folder to enable generation.", icon="INFO")
+        if _qss_is_map_object(obj) and obj.get("qss_lightmap_image_name"):
+            lighting.label(
+                text=f"Working atlas: {obj.get('qss_lightmap_atlas_size', 0) * obj.get('qss_lightmap_resolution', 1)} px",
+                icon="IMAGE",
+            )
+            preview = lighting.row(align=True)
+            preview.operator(QSS_OT_preview_source_lightmaps.bl_idname, text="Original")
+            preview.operator(QSS_OT_preview_bsp_lightmaps.bl_idname, text="Working")
+            preview.operator(QSS_OT_preview_imported_lights.bl_idname, text="Live")
+            lighting.operator(QSS_OT_quake_direct_bake.bl_idname, text="Quake Direct Bake", icon="RENDER_STILL")
+            lighting.operator(QSS_OT_bake_scene_lights.bl_idname, text="Cycles Bake (Experimental)", icon="NODE_MATERIAL")
+            lighting.operator(QSS_OT_refresh_lightmap_preview.bl_idname, text="Refresh Preview", icon="FILE_REFRESH")
+        else:
+            lighting.label(text="Import a BSP with lightmaps to access painting and bake tools.", icon="INFO")
+
+
+class QSS_PT_workspace_advanced(Panel):
+    bl_label = "Advanced / Debug"
+    bl_idname = "QSS_PT_workspace_advanced"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Quake Studio"
+    bl_parent_id = "QSS_PT_workspace_main"
+    bl_order = 90
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        obj = context.object
+        layout.label(text="Diagnostics stay out of the normal editing workflow.", icon="INFO")
+        layout.operator(QSS_OT_scan_game_maps.bl_idname, text="Validate Maps in Active Game", icon="CHECKMARK")
+        layout.operator(QSS_OT_validate_bsp_export.bl_idname, text="Validate Exported BSP…", icon="CHECKMARK")
+        layout.operator(QSS_OT_run_python_tests.bl_idname, text="Run QSS Python Test Suite", icon="PLAY")
+        audit = layout.box()
+        audit.label(text="FULL MAP AUDIT", icon="EXPERIMENTAL")
+        audit.prop(scene, "qss_audit_timeout")
+        audit.prop(scene, "qss_audit_ericw_light")
+        audit.prop(scene, "qss_audit_ericw_compile")
+        audit.prop(scene, "qss_audit_quake_bake")
+        audit.prop(scene, "qss_audit_cycles_bake")
+        audit.prop(scene, "qss_audit_enhanced_export")
+        audit.operator(QSS_OT_run_map_audit.bl_idname, text="Run Full Game Map Audit", icon="EXPERIMENTAL")
+        if _qss_is_map_object(obj):
+            diagnostics = layout.box()
+            diagnostics.label(text="CURRENT MAP", icon="FILE_3D")
+            diagnostics.operator(QSS_OT_write_diagnostics.bl_idname, text="Save Lighting Diagnostics…", icon="FILE_TEXT")
+            diagnostics.operator(QSS_OT_run_blender_selftest.bl_idname, text="Run Full Self-Test + Luxel Benchmark", icon="EXPERIMENTAL")
+            diagnostics.operator(QSS_OT_refresh_lightmap_preview.bl_idname, text="Repair Lightmap Material Links", icon="FILE_REFRESH")
+            for key, label in (
+                ("qss_missing_texture_names", "Missing textures"),
+                ("qss_wad_unresolved", "WADs not found"),
+                ("qss_wad_failures", "WAD read issues"),
+                ("qss_last_quake_bake_error", "Last Quake bake error"),
+            ):
+                if obj.get(key):
+                    row = diagnostics.row()
+                    row.alert = True
+                    row.label(text=f"{label}: {str(obj.get(key))[:100]}", icon="ERROR")
+
+
 class QSS_PT_main(Panel):
     bl_label = "Quake Surface Studio"
     bl_idname = "QSS_PT_main"
@@ -6748,6 +7096,7 @@ class QSS_PT_main(Panel):
     def draw(self, context):
         layout = self.layout
         layout.label(text=f"Version {'.'.join(str(part) for part in ADDON_VERSION)}", icon='INFO')
+        layout.operator(QSS_OT_open_workspace.bl_idname, text="Open Quake Studio Workspace", icon="WINDOW")
         window = context.window
         if window is not None and (_qss_fps_navigation_sessions.get(window.as_pointer()) or {}).get("finished") is False:
             stop_row = layout.row()
@@ -7197,6 +7546,8 @@ class QSS_PT_export(Panel):
 
 CLASSES = (
     QSS_OT_import_bsp,
+    QSS_OT_open_workspace,
+    QSS_OT_paint_texture_selected_faces,
     QSS_OT_browse_game_maps,
     QSS_OT_validate_bsp_export,
     QSS_OT_scan_game_maps,
@@ -7226,6 +7577,8 @@ CLASSES = (
     QSS_OT_write_diagnostics,
     QSS_OT_run_blender_selftest,
     QSS_OT_export_bsp,
+    QSS_PT_workspace_main,
+    QSS_PT_workspace_advanced,
     QSS_PT_main,
     QSS_PT_project,
     QSS_PT_navigation,
@@ -7281,6 +7634,7 @@ def _remove_scene_properties():
         'qss_audit_quake_bake', 'qss_audit_cycles_bake', 'qss_audit_ericw_light', 'qss_audit_ericw_compile',
         'qss_audit_timeout', 'qss_quake_unit_scale', 'qss_nav_speed_quake',
         'qss_nav_fast_factor', 'qss_light_energy_scale',
+        'qss_import_lightmap_resolution', 'qss_decoupled_world_units_per_luxel',
         'qss_bake_output_scale', 'qss_bake_bounces', 'qss_bake_match_source', 'qss_mmb_fps_walk',
         'qss_quake_bake_shadows', 'qss_quake_bake_gate',
     ):
@@ -7337,6 +7691,7 @@ def _cleanup_previous_registration():
         session["finished"] = True
     _qss_fps_navigation_sessions.clear()
     _remove_qss_keymaps()
+    _unregister_qss_workspace_tools()
     _remove_scene_properties()
     _unregister_qss_classes()
 
@@ -7414,6 +7769,25 @@ def register():
         )
         bpy.types.Scene.qss_audit_timeout = IntProperty(
             name="External tool timeout (seconds)", default=300, min=10, max=7200,
+        )
+        bpy.types.Scene.qss_import_lightmap_resolution = EnumProperty(
+            name="Visual lightmap resolution",
+            description="Working paint-atlas scale only; does not change the source BSP's luxel density",
+            items=(
+                ('1', "1× · Original", "Original packed atlas resolution"),
+                ('2', "2×", "Twice the pixels per axis"),
+                ('4', "4×", "Four times the pixels per axis"),
+                ('8', "8×", "Eight times the pixels per axis"),
+            ),
+            default="1",
+        )
+        bpy.types.Scene.qss_decoupled_world_units_per_luxel = FloatProperty(
+            name="Target world units per luxel",
+            description=(
+                "Lower values create denser, more detailed lightmaps but increase compile time "
+                "and BSP size; higher values are faster and smaller but less detailed"
+            ),
+            default=16.0, min=0.01, max=1024.0, precision=2,
         )
         bpy.types.Scene.qss_quake_unit_scale = FloatProperty(
             name="Quake unit scale", description="Blender metres per Quake unit", default=DEFAULT_QUAKE_UNIT_SCALE,
