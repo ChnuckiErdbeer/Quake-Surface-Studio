@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils
 
 
-ADDON_VERSION = (0, 17, 8)
+ADDON_VERSION = (0, 17, 9)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -6743,583 +6743,17 @@ def _qss_is_map_object(obj):
     return bool(obj and obj.type == 'MESH' and obj.get('qss_object_role') == 'quake_bsp29')
 
 
-class QSS_OT_open_workspace(Operator):
-    bl_idname = "qss.open_workspace"
-    bl_label = "Open Quake Studio Workspace"
-    bl_description = "Create or activate the dedicated Quake Studio workspace without changing the existing Layout workspace"
-
-    def execute(self, context):
-        window = context.window
-        if window is None:
-            self.report({"ERROR"}, "A Blender window is required to open Quake Studio.")
-            return {"CANCELLED"}
-
-        workspace = bpy.data.workspaces.get("Quake Studio")
-        created = False
-        if workspace is None:
-            try:
-                result = bpy.ops.workspace.duplicate()
-                if "CANCELLED" in result:
-                    raise RuntimeError("Blender could not duplicate the current workspace.")
-                workspace = window.workspace
-                workspace.name = "Quake Studio"
-                workspace["qss_managed_workspace"] = True
-                created = True
-            except Exception as exc:
-                self.report({"ERROR"}, f"Could not create Quake Studio workspace: {exc}")
-                return {"CANCELLED"}
-        else:
-            window.workspace = workspace
-
-        # The workspace is a duplicate of the user's current layout. Keep its
-        # editor arrangement intact, but make the 3D View's left toolbar and
-        # Quake Studio right sidebar visible in every stored screen layout.
-        for screen in workspace.screens:
-            for area in screen.areas:
-                if area.type != "VIEW_3D":
-                    continue
-                for space in area.spaces:
-                    if space.type == "VIEW_3D":
-                        space.show_region_toolbar = True
-                        space.show_region_ui = True
-        self.report(
-            {"INFO"},
-            "Created Quake Studio workspace." if created else "Switched to Quake Studio workspace."
-        )
-        return {"FINISHED"}
-
-
-class QSS_OT_refresh_viewport_tools(Operator):
-    bl_idname = "qss.refresh_viewport_tools"
-    bl_label = "Refresh QSS Viewport Tools"
-    bl_description = "Rebuild the QSS toolbar entries and redraw Blender viewports"
-
-    def execute(self, context):
-        try:
-            _register_qss_workspace_tools()
-            for window in context.window_manager.windows:
-                for screen in window.screens:
-                    for area in screen.areas:
-                        area.tag_redraw()
-            count = len(_qss_registered_toolbar_tool_ids())
-            if count != len(QSS_WORKSPACE_TOOLS):
-                raise RuntimeError(
-                    f"Blender registered {count} of {len(QSS_WORKSPACE_TOOLS)} QSS tools."
-                )
-            if not _qss_native_toolbar_is_intact():
-                self.report(
-                    {"WARNING"},
-                    f"Refreshed {count} QSS tools, but Blender's built-in tools are missing. Restart Blender.",
-                )
-            else:
-                self.report({"INFO"}, f"Refreshed {count} QSS viewport tools.")
-            return {"FINISHED"}
-        except Exception as exc:
-            self.report({"ERROR"}, f"Could not refresh QSS viewport tools: {exc}")
-            return {"CANCELLED"}
-
-
-class QSS_OT_paint_texture_selected_faces(Operator):
-    bl_idname = "qss.paint_texture_selected_faces"
-    bl_label = "Paint Texture"
-    bl_description = "Detach the selected BSP faces into a face-local paint target, then enter Texture Paint"
-    bl_options = {"REGISTER"}
-
-    @classmethod
-    def poll(cls, context):
-        return bool(_qss_is_map_object(context.object) and context.mode == "EDIT_MESH")
-
-    def execute(self, context):
-        result = bpy.ops.qss.detach_selected_faces("EXEC_DEFAULT")
-        if "CANCELLED" in result:
-            return {"CANCELLED"}
-        return bpy.ops.qss.activate_texture_paint("EXEC_DEFAULT")
-
-
-def _qss_tool_keymap(operator_id):
-    # Match Blender's WorkSpaceTool examples: a simple left-click invocation
-    # with no explicit operator-property overrides.
-    return ((operator_id, {"type": "LEFTMOUSE", "value": "PRESS"}, None),)
-
-
-class QSS_WST_player_start(bpy.types.WorkSpaceTool):
-    bl_space_type = "VIEW_3D"
-    bl_context_mode = None
-    bl_idname = "qss.player_start"
-    bl_label = "Go to Player Start"
-    bl_description = "Select this tool, then click the 3D View to move to info_player_start"
-    bl_icon = "ops.generic.select"
-    bl_operator = QSS_OT_player_start.bl_idname
-    bl_keymap = _qss_tool_keymap(QSS_OT_player_start.bl_idname)
-
-
-class QSS_WST_focus_object(bpy.types.WorkSpaceTool):
-    bl_space_type = "VIEW_3D"
-    bl_context_mode = None
-    bl_idname = "qss.focus_face_object"
-    bl_label = "Focus Selected Face"
-    bl_description = "Select this tool, then click the 3D View to frame the current selection"
-    bl_icon = "ops.view3d.view_selected"
-    bl_operator = QSS_OT_frame_selection.bl_idname
-    bl_keymap = _qss_tool_keymap(QSS_OT_frame_selection.bl_idname)
-
-
-class QSS_WST_focus_edit(bpy.types.WorkSpaceTool):
-    bl_space_type = "VIEW_3D"
-    bl_context_mode = None
-    bl_idname = "qss.focus_face_edit"
-    bl_label = "Focus Selected Face"
-    bl_description = "Click in the viewport to frame the selected face(s)"
-    bl_icon = "ops.view3d.view_selected"
-    bl_operator = QSS_OT_frame_selection.bl_idname
-    bl_keymap = _qss_tool_keymap(QSS_OT_frame_selection.bl_idname)
-
-
-class QSS_WST_isolate_faces(bpy.types.WorkSpaceTool):
-    bl_space_type = "VIEW_3D"
-    bl_context_mode = None
-    bl_idname = "qss.isolate_faces"
-    bl_label = "Isolate Selected Faces"
-    bl_description = "Select this tool, then click the 3D View to hide all unselected BSP faces"
-    bl_icon = "ops.mesh.hide"
-    bl_operator = QSS_OT_isolate_faces.bl_idname
-    bl_keymap = _qss_tool_keymap(QSS_OT_isolate_faces.bl_idname)
-
-
-class QSS_WST_reveal_faces(bpy.types.WorkSpaceTool):
-    bl_space_type = "VIEW_3D"
-    bl_context_mode = None
-    bl_idname = "qss.reveal_faces"
-    bl_label = "Reveal Hidden Faces"
-    bl_description = "Select this tool, then click the 3D View to reveal hidden faces"
-    bl_icon = "ops.mesh.reveal"
-    bl_operator = QSS_OT_reveal_faces.bl_idname
-    bl_keymap = _qss_tool_keymap(QSS_OT_reveal_faces.bl_idname)
-
-
-class QSS_WST_paint_texture(bpy.types.WorkSpaceTool):
-    bl_space_type = "VIEW_3D"
-    bl_context_mode = None
-    bl_idname = "qss.paint_texture"
-    bl_label = "Paint Texture"
-    bl_description = "Select this tool, then click the 3D View to detach selected faces and enter Texture Paint"
-    bl_icon = "ops.paint.texture_paint"
-    bl_operator = QSS_OT_paint_texture_selected_faces.bl_idname
-    bl_keymap = _qss_tool_keymap(QSS_OT_paint_texture_selected_faces.bl_idname)
-
-
-class QSS_WST_paint_lightmap(bpy.types.WorkSpaceTool):
-    bl_space_type = "VIEW_3D"
-    bl_context_mode = None
-    bl_idname = "qss.paint_lightmap"
-    bl_label = "Paint Lightmap"
-    bl_description = "Select this tool, then click the 3D View to enter Lightmap Paint for selected lightmapped faces"
-    bl_icon = "ops.paint.image"
-    bl_operator = QSS_OT_activate_lightmap_paint.bl_idname
-    bl_keymap = _qss_tool_keymap(QSS_OT_activate_lightmap_paint.bl_idname)
-
-
-# Only persistent painting tools occupy the left toolbar. Navigation and
-# one-shot commands run directly from the sidebar and do not hijack selection.
-QSS_WORKSPACE_TOOLS = (
-    QSS_WST_paint_texture,
-    QSS_WST_paint_lightmap,
-)
-
-
-def _qss_remove_workspace_tool_definitions():
-    """Remove stale QSS definitions without damaging Blender's own tool lists.
-
-    Blender 5.2 ToolDef objects are namedtuples, so they must be identified
-    before tuple groups are inspected. Context-dependent callables in the
-    built-in paint and selection lists are also intentional and must survive.
-    """
-    try:
-        from bl_ui.space_toolsystem_common import ToolSelectPanelHelper, ToolDef
-        helper = ToolSelectPanelHelper._tool_class_from_space_type("VIEW_3D")
-        if helper is None:
-            return
-
-        discarded_types = {}
-        for context_mode, entries in tuple(helper._tools.items()):
-            normalized, discarded = toolbar_utils.normalize_tool_entries(
-                entries, ToolDef
-            )
-            if normalized != entries:
-                entries[:] = normalized
-            for item in discarded:
-                item_type = type(item).__name__
-                discarded_types[item_type] = discarded_types.get(item_type, 0) + 1
-
-        if discarded_types:
-            summary = ", ".join(
-                f"{count} {item_type}" for item_type, count in sorted(discarded_types.items())
-            )
-            print(f"QSS: removed malformed viewport toolbar entries ({summary}).")
-    except Exception as exc:
-        print(f"QSS: could not clean old viewport tool definitions: {exc}")
-
-
-def _qss_native_toolbar_is_intact():
-    """Check that Blender's built-in Object and Texture Paint tools survived."""
-    try:
-        from bl_ui.space_toolsystem_common import ToolSelectPanelHelper, ToolDef
-        helper = ToolSelectPanelHelper._tool_class_from_space_type("VIEW_3D")
-        if helper is None:
-            return False
-        object_tools = list(
-            toolbar_utils.iter_tooldefs(helper._tools.get("OBJECT", ()), ToolDef)
-        )
-        paint_entries = helper._tools.get("PAINT_TEXTURE", ())
-        paint_tools = list(toolbar_utils.iter_tooldefs(paint_entries, ToolDef))
-        return (
-            bool(object_tools)
-            and any(item.idname.startswith("builtin.") for item in object_tools)
-            and any(item.idname == "builtin.brush" for item in paint_tools)
-            and any(callable(item) for item in paint_entries)
-        )
-    except Exception:
-        return False
-
-
-def _qss_registered_toolbar_tool_ids():
-    """Return registered QSS ToolDef identifiers from every 3D View mode list."""
-    try:
-        from bl_ui.space_toolsystem_common import ToolSelectPanelHelper, ToolDef
-        helper = ToolSelectPanelHelper._tool_class_from_space_type("VIEW_3D")
-        if helper is None:
-            return set()
-        identifiers = set()
-        for definitions in helper._tools.values():
-            for item in toolbar_utils.iter_tooldefs(definitions, ToolDef):
-                identifier = toolbar_utils.tooldef_idname(item, ToolDef)
-                if identifier and identifier.startswith("qss."):
-                    identifiers.add(identifier)
-        return identifiers
-    except Exception:
-        return set()
-
-
-def _register_qss_workspace_tools():
-    """Register QSS tools through Blender's public WorkSpaceTool API.
-
-    Always unregister the previous QSS definitions first. This also removes
-    their generated add-on keymaps, so the Refresh action is idempotent.
-    """
-    _unregister_qss_workspace_tools()
-
-    tool_groups = (
-        ("EDIT_MESH", (
-            QSS_WST_paint_texture,
-            QSS_WST_paint_lightmap,
-        )),
-    )
-
-    from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
-    helper = ToolSelectPanelHelper._tool_class_from_space_type("VIEW_3D")
-    if helper is None:
-        raise RuntimeError("Blender's 3D View toolbar helper is unavailable.")
-
-    for context_mode, tools in tool_groups:
-        if context_mode not in helper._tools:
-            raise RuntimeError(
-                f"Blender's 3D View toolbar has no {context_mode} tool list."
-            )
-        for index, tool in enumerate(tools):
-            tool.bl_context_mode = context_mode
-            # Blender creates one normal top-level separator before each
-            # QSS mode section. No manual list insertion or tuple grouping.
-            bpy.utils.register_tool(
-                tool,
-                separator=(index == 0),
-                group=False,
-            )
-
-
-def _unregister_qss_workspace_tools():
-    for tool in reversed(QSS_WORKSPACE_TOOLS):
-        try:
-            bpy.utils.unregister_tool(tool)
-        except Exception:
-            pass
-    # Remove definitions left behind by older module instances after an
-    # interrupted add-on reload, including the old mode-specific registrations.
-    _qss_remove_workspace_tool_definitions()
-
-
-class QSS_PT_workspace_main(Panel):
-    bl_label = "Quake Surface Studio"
-    bl_idname = "QSS_PT_workspace_main"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "Quake Studio"
-    bl_order = 0
-
-    def draw(self, context):
-        layout = self.layout
-        scene = context.scene
-        obj = context.object
-        version = ".".join(str(part) for part in ADDON_VERSION)
-        heading = layout.row(align=True)
-        heading.label(text=f"QSS {version}", icon="INFO")
-        launch = heading.row()
-        launch.enabled = bool(scene.qss_ironwail_executable and os.path.isfile(_qss_abspath(scene.qss_ironwail_executable)) and scene.qss_game_dir and os.path.isdir(_qss_abspath(scene.qss_game_dir)) and (_qss_is_map_object(obj) or scene.qss_ironwail_demo))
-        launch.operator(QSS_OT_launch_ironwail.bl_idname, text="Play", icon="PLAY")
-        if _qss_is_map_object(obj):
-            summary = layout.box()
-            summary.label(text=os.path.basename(obj.get("qss_source_path", obj.name)), icon="FILE_3D")
-            stats = summary.row(align=True)
-            stats.label(text=f"{len(obj.data.polygons)} faces", icon="FACESEL")
-            stats.label(text=f"{len(obj.data.materials)} materials", icon="MATERIAL")
-            stats.label(text=f"{obj.get('qss_light_entity_count', 0)} lights", icon="LIGHT")
-            actions = layout.box()
-            actions.label(text="QUICK ACTIONS", icon="PLAY")
-            if context.mode == "OBJECT":
-                row = actions.row(align=True)
-                if obj.get("qss_has_player_start"):
-                    row.operator(QSS_OT_player_start.bl_idname, text="Player Start", icon="EMPTY_AXIS")
-                row.operator(QSS_OT_frame_selection.bl_idname, text="Focus Map", icon="VIEWZOOM")
-                walk = actions.row()
-                walk.operator_context = "INVOKE_REGION_WIN"
-                walk.operator(QSS_OT_fps_walk.bl_idname, text="Quake Walk · Noclip", icon="VIEW_PAN")
-            elif context.mode == "EDIT_MESH":
-                row = actions.row(align=True)
-                row.operator(QSS_OT_frame_selection.bl_idname, text="Focus", icon="VIEWZOOM")
-                active = visibility_utils.snapshot_is_active(obj.get("qss_face_visibility_snapshot", ""))
-                row.operator(QSS_OT_isolate_faces.bl_idname, text="Restore" if active else "Isolate", icon="HIDE_OFF")
-                row = actions.row(align=True)
-                row.operator(QSS_OT_paint_texture_selected_faces.bl_idname, text="Paint Texture", icon="TPAINT_HLT")
-                row.operator(QSS_OT_activate_lightmap_paint.bl_idname, text="Paint Lightmap", icon="IMAGE")
-            elif context.mode == "PAINT_TEXTURE":
-                actions.label(text="Paint with Blender's brush tools. Switch to Edit Mode to change face selection.", icon="BRUSH_DATA")
-            else:
-                actions.label(text="Choose an editing workflow below.", icon="INFO")
-        else:
-            welcome = layout.box()
-            welcome.label(text="Start with a Quake BSP level", icon="IMPORT")
-            welcome.operator(QSS_OT_import_bsp.bl_idname, text="Import Quake BSP…", icon="IMPORT")
-            welcome.label(text="Your original Blender workspace remains untouched.", icon="INFO")
-        footer = layout.row(align=True)
-        footer.operator(QSS_OT_refresh_viewport_tools.bl_idname, text="Repair Toolbar", icon="FILE_REFRESH")
-        footer.label(text="Paint tools stay in the left toolbar", icon="BRUSH_DATA")
-
-
-class QSS_MT_viewport_menu(Menu):
-    bl_label = "Quake"
-    bl_idname = "QSS_MT_viewport_menu"
-
-    def draw(self, context):
-        layout = self.layout
-        obj = context.object
-        layout.operator(QSS_OT_import_bsp.bl_idname, text="Import BSP…", icon="IMPORT")
-        if _qss_is_map_object(obj):
-            layout.separator()
-            if context.mode == "OBJECT":
-                if obj.get("qss_has_player_start"):
-                    layout.operator(QSS_OT_player_start.bl_idname, text="Go to Player Start", icon="EMPTY_AXIS")
-                layout.operator(QSS_OT_frame_selection.bl_idname, text="Focus Map / Selection", icon="VIEWZOOM")
-                walk = layout.row()
-                walk.operator_context = "INVOKE_REGION_WIN"
-                walk.operator(QSS_OT_fps_walk.bl_idname, text="Quake Walk (Noclip)", icon="VIEW_PAN")
-            elif context.mode == "EDIT_MESH":
-                layout.operator(QSS_OT_frame_selection.bl_idname, text="Focus Selected Faces", icon="VIEWZOOM")
-                active = visibility_utils.snapshot_is_active(obj.get("qss_face_visibility_snapshot", ""))
-                layout.operator(QSS_OT_isolate_faces.bl_idname, text="Restore Face Visibility" if active else "Isolate Selected Faces", icon="HIDE_OFF")
-                layout.operator(QSS_OT_reveal_faces.bl_idname, text="Reveal Hidden Faces", icon="HIDE_ON")
-                layout.separator()
-                layout.operator(QSS_OT_paint_texture_selected_faces.bl_idname, text="Paint Selected Textures", icon="TPAINT_HLT")
-                layout.operator(QSS_OT_activate_lightmap_paint.bl_idname, text="Paint Selected Lightmaps", icon="IMAGE")
-            layout.separator()
-            layout.operator(QSS_OT_export_bsp.bl_idname, text="Export BSP…", icon="EXPORT")
-        layout.separator()
-        layout.operator(QSS_OT_open_workspace.bl_idname, text="Open QSS Workspace", icon="WINDOW")
-
-
-class QSS_MT_edit_mesh_context(Menu):
-    bl_label = "Quake Surface Studio"
-    bl_idname = "QSS_MT_edit_mesh_context"
-
-    def draw(self, context):
-        layout = self.layout
-        obj = context.object
-        if not _qss_is_map_object(obj):
-            return
-        layout.separator()
-        layout.menu(QSS_MT_viewport_menu.bl_idname, text="Quake Surface Studio", icon="MESH_CUBE")
-        layout.operator(QSS_OT_frame_selection.bl_idname, text="Focus Selected Faces", icon="VIEWZOOM")
-        active = visibility_utils.snapshot_is_active(obj.get("qss_face_visibility_snapshot", ""))
-        layout.operator(QSS_OT_isolate_faces.bl_idname, text="Restore Face Visibility" if active else "Isolate Selected Faces", icon="HIDE_OFF")
-        layout.operator(QSS_OT_reveal_faces.bl_idname, text="Reveal Hidden Faces", icon="HIDE_ON")
-        layout.separator()
-        layout.operator(QSS_OT_paint_texture_selected_faces.bl_idname, text="Paint Selected Textures", icon="TPAINT_HLT")
-        layout.operator(QSS_OT_activate_lightmap_paint.bl_idname, text="Paint Selected Lightmaps", icon="IMAGE")
-
-
-def _qss_draw_viewport_header_menu(self, context):
-    self.layout.menu(QSS_MT_viewport_menu.bl_idname, text="Quake", icon="MESH_CUBE")
-
-
-def _qss_register_ui_menus():
-    _qss_unregister_ui_menus()
-    bpy.types.VIEW3D_HT_header.append(_qss_draw_viewport_header_menu)
-    context_menu = getattr(bpy.types, "VIEW3D_MT_edit_mesh_context_menu", None)
-    if context_menu is not None:
-        context_menu.append(QSS_MT_edit_mesh_context.draw)
-
-
-def _qss_unregister_ui_menus():
-    try:
-        bpy.types.VIEW3D_HT_header.remove(_qss_draw_viewport_header_menu)
-    except Exception:
-        pass
-    context_menu = getattr(bpy.types, "VIEW3D_MT_edit_mesh_context_menu", None)
-    if context_menu is not None:
-        try:
-            context_menu.remove(QSS_MT_edit_mesh_context.draw)
-        except Exception:
-            pass
-
-
-class QSS_PT_workspace_lighting(Panel):
-    bl_label = "Lighting Controls"
-    bl_idname = "QSS_PT_workspace_lighting"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "Quake Studio"
-    bl_parent_id = "QSS_PT_workspace_main"
-    bl_order = 40
-    bl_options = {"DEFAULT_CLOSED"}
-
-    @classmethod
-    def poll(cls, context):
-        return _qss_is_map_object(context.object)
-
-    def draw(self, context):
-        layout = self.layout
-        scene = context.scene
-        obj = context.object
-
-        preview = layout.box()
-        preview.label(text="LIGHTING PREVIEW", icon="SHADING_RENDERED")
-        row = preview.row(align=True)
-        row.operator(QSS_OT_preview_source_lightmaps.bl_idname, text="Original")
-        row.operator(QSS_OT_preview_bsp_lightmaps.bl_idname, text="Working")
-        row.operator(QSS_OT_preview_imported_lights.bl_idname, text="Live")
-        preview.prop(scene, "qss_light_energy_scale", text="Live light scale")
-        row = preview.row(align=True)
-        row.operator(QSS_OT_apply_light_energy_scale.bl_idname, text="Apply Scale")
-        row.operator(QSS_OT_calibrate_lights_to_source.bl_idname, text="Match Source")
-        preview.operator(QSS_OT_refresh_lightmap_preview.bl_idname, text="Refresh Preview", icon="FILE_REFRESH")
-
-        quake = layout.box()
-        quake.label(text="QUAKE DIRECT LIGHTMAP", icon="LIGHT")
-        quake.operator(QSS_OT_quake_direct_bake.bl_idname, text="Bake Quake Direct Lighting", icon="RENDER_STILL")
-        quake.prop(scene, "qss_quake_bake_shadows", text="Ray-traced visibility")
-        quake.prop(scene, "qss_quake_bake_gate", text="Contribution gate")
-        quake.prop(scene, "qss_bake_match_source", text="Match source average")
-        quake.prop(scene, "qss_bake_output_scale", text="Output brightness")
-        row = quake.row(align=True)
-        row.operator(QSS_OT_undo_last_bake.bl_idname, text="Undo Last Bake")
-        row.operator(QSS_OT_restore_original_lightmap.bl_idname, text="Restore Original")
-
-        cycles = layout.box()
-        cycles.label(text="CYCLES PBR BAKE · EXPERIMENTAL", icon="NODE_MATERIAL")
-        cycles.prop(scene, "qss_bake_bounces", text="Diffuse bounces")
-        cycles.operator(QSS_OT_bake_scene_lights.bl_idname, text="Cycles Path-Traced Bake")
-
-        lamps = layout.box()
-        lamps.label(text="IMPORTED QUAKE LIGHT ENTITIES", icon="OUTLINER_OB_LIGHT")
-        quake_lamps = [
-            item for item in scene.objects
-            if item.type == "LIGHT"
-            and item.get("qss_light_role") in {"quake_entity_light", "quake_world_sunlight"}
-        ]
-        if not quake_lamps:
-            lamps.label(text="No imported Quake lights.", icon="INFO")
-        for lamp in quake_lamps:
-            box = lamps.box()
-            box.label(text=f"{lamp.name} · {float(lamp.data.energy):.3g} W", icon="LIGHT_POINT")
-            row = box.row(align=True)
-            for key, label in (
-                ("qss_quake_light_delay", "delay"),
-                ("qss_quake_light_style", "style"),
-                ("qss_quake_wait", "wait"),
-                ("qss_quake_anglescale", "anglescale"),
-            ):
-                if key in lamp:
-                    row.prop(lamp, f'["{key}"]', text=label)
-            if "qss_quake_falloff" in lamp:
-                box.prop(lamp, '["qss_quake_falloff"]', text="_falloff")
-            if lamp.get("qss_quake_style_was_inferred"):
-                row = box.row()
-                row.alert = True
-                row.label(text="Style recovered from malformed empty key", icon="ERROR")
-
-        layout.label(text=f"Source calibration: {obj.get('qss_light_energy_calibration', 1.0):.4g}×")
-        layout.label(text="delay 4 is a non-additive local-minlight clamp.", icon="INFO")
-
-
-class QSS_PT_workspace_advanced(Panel):
-    bl_label = "Advanced / Debug"
-    bl_idname = "QSS_PT_workspace_advanced"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "Quake Studio"
-    bl_parent_id = "QSS_PT_workspace_main"
-    bl_order = 90
-    bl_options = {"DEFAULT_CLOSED"}
-
-    def draw(self, context):
-        layout = self.layout
-        scene = context.scene
-        obj = context.object
-        layout.label(text="Diagnostics stay out of the normal editing workflow.", icon="INFO")
-        layout.operator(QSS_OT_scan_game_maps.bl_idname, text="Validate Maps in Active Game", icon="CHECKMARK")
-        layout.operator(QSS_OT_validate_bsp_export.bl_idname, text="Validate Exported BSP…", icon="CHECKMARK")
-        layout.operator(QSS_OT_run_python_tests.bl_idname, text="Run QSS Python Test Suite", icon="PLAY")
-        audit = layout.box()
-        audit.label(text="FULL MAP AUDIT", icon="EXPERIMENTAL")
-        audit.prop(scene, "qss_audit_timeout")
-        audit.prop(scene, "qss_audit_ericw_light")
-        audit.prop(scene, "qss_audit_ericw_compile")
-        audit.prop(scene, "qss_audit_quake_bake")
-        audit.prop(scene, "qss_audit_cycles_bake")
-        audit.prop(scene, "qss_audit_enhanced_export")
-        audit.operator(QSS_OT_run_map_audit.bl_idname, text="Run Full Game Map Audit", icon="EXPERIMENTAL")
-        if _qss_is_map_object(obj):
-            diagnostics = layout.box()
-            diagnostics.label(text="CURRENT MAP", icon="FILE_3D")
-            diagnostics.operator(QSS_OT_write_diagnostics.bl_idname, text="Save Lighting Diagnostics…", icon="FILE_TEXT")
-            diagnostics.operator(QSS_OT_run_blender_selftest.bl_idname, text="Run Full Self-Test + Luxel Benchmark", icon="EXPERIMENTAL")
-            diagnostics.operator(QSS_OT_refresh_lightmap_preview.bl_idname, text="Repair Lightmap Material Links", icon="FILE_REFRESH")
-            for key, label in (
-                ("qss_missing_texture_names", "Missing textures"),
-                ("qss_wad_unresolved", "WADs not found"),
-                ("qss_wad_failures", "WAD read issues"),
-                ("qss_last_quake_bake_error", "Last Quake bake error"),
-            ):
-                if obj.get(key):
-                    row = diagnostics.row()
-                    row.alert = True
-                    row.label(text=f"{label}: {str(obj.get(key))[:100]}", icon="ERROR")
-
-
 class QSS_PT_main(Panel):
-    bl_label = "WORKFLOWS & TOOLS"
+    bl_label = "Quake Surface Studio"
     bl_idname = "QSS_PT_main"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake Studio"
+    bl_category = "Quake"
     bl_order = 0
 
     def draw(self, context):
         layout = self.layout
         layout.label(text=f"Version {'.'.join(str(part) for part in ADDON_VERSION)}", icon='INFO')
-        layout.operator(QSS_OT_open_workspace.bl_idname, text="Open Quake Studio Workspace", icon="WINDOW")
-        layout.label(
-            text="Walk mode is started from the sidebar, not kept as a toolbar tool.",
-            icon='VIEW_PAN',
-        )
         layout.use_property_split = True
         import_box = layout.box()
         import_box.label(text="START HERE · PROJECT", icon='FILE_3D')
@@ -7352,7 +6786,7 @@ class QSS_PT_project(Panel):
     bl_idname = "QSS_PT_project"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake Studio"
+    bl_category = "Quake"
     bl_parent_id = "QSS_PT_main"
     bl_order = 10
     bl_options = {'DEFAULT_CLOSED'}
@@ -7434,7 +6868,7 @@ class QSS_PT_navigation(Panel):
     bl_idname = "QSS_PT_navigation"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake Studio"
+    bl_category = "Quake"
     bl_parent_id = "QSS_PT_main"
     bl_order = 20
     bl_options = {'DEFAULT_CLOSED'}
@@ -7482,7 +6916,7 @@ class QSS_PT_texture(Panel):
     bl_idname = "QSS_PT_texture"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake Studio"
+    bl_category = "Quake"
     bl_parent_id = "QSS_PT_main"
     bl_order = 30
     bl_options = {'DEFAULT_CLOSED'}
@@ -7523,7 +6957,7 @@ class QSS_PT_lighting(Panel):
     bl_idname = "QSS_PT_lighting"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake Studio"
+    bl_category = "Quake"
     bl_parent_id = "QSS_PT_main"
     bl_order = 40
     bl_options = {'DEFAULT_CLOSED'}
@@ -7559,7 +6993,7 @@ class QSS_PT_light_preview(Panel):
     bl_idname = "QSS_PT_light_preview"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake Studio"
+    bl_category = "Quake"
     bl_parent_id = "QSS_PT_lighting"
     bl_order = 10
     bl_options = {'DEFAULT_CLOSED'}
@@ -7592,7 +7026,7 @@ class QSS_PT_imported_lights(Panel):
     bl_idname = "QSS_PT_imported_lights"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake Studio"
+    bl_category = "Quake"
     bl_parent_id = "QSS_PT_lighting"
     bl_order = 20
     bl_options = {'DEFAULT_CLOSED'}
@@ -7635,7 +7069,7 @@ class QSS_PT_quake_bake(Panel):
     bl_idname = "QSS_PT_quake_bake"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake Studio"
+    bl_category = "Quake"
     bl_parent_id = "QSS_PT_lighting"
     bl_order = 30
     bl_options = {'DEFAULT_CLOSED'}
@@ -7674,7 +7108,7 @@ class QSS_PT_cycles_bake(Panel):
     bl_idname = "QSS_PT_cycles_bake"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake Studio"
+    bl_category = "Quake"
     bl_parent_id = "QSS_PT_lighting"
     bl_order = 40
     bl_options = {'DEFAULT_CLOSED'}
@@ -7694,7 +7128,7 @@ class QSS_PT_diagnostics(Panel):
     bl_idname = "QSS_PT_diagnostics"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake Studio"
+    bl_category = "Quake"
     bl_parent_id = "QSS_PT_main"
     bl_order = 50
     bl_options = {'DEFAULT_CLOSED'}
@@ -7731,7 +7165,7 @@ class QSS_PT_export(Panel):
     bl_idname = "QSS_PT_export"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quake Studio"
+    bl_category = "Quake"
     bl_parent_id = "QSS_PT_main"
     bl_order = 60
     bl_options = {'DEFAULT_CLOSED'}
@@ -7758,9 +7192,6 @@ class QSS_PT_export(Panel):
 
 CLASSES = (
     QSS_OT_import_bsp,
-    QSS_OT_open_workspace,
-    QSS_OT_refresh_viewport_tools,
-    QSS_OT_paint_texture_selected_faces,
     QSS_OT_browse_game_maps,
     QSS_OT_validate_bsp_export,
     QSS_OT_scan_game_maps,
@@ -7790,9 +7221,6 @@ CLASSES = (
     QSS_OT_write_diagnostics,
     QSS_OT_run_blender_selftest,
     QSS_OT_export_bsp,
-    QSS_PT_workspace_main,
-    QSS_MT_viewport_menu,
-    QSS_MT_edit_mesh_context,
     QSS_PT_main,
     QSS_PT_project,
     QSS_PT_navigation,
@@ -7905,10 +7333,7 @@ def _cleanup_previous_registration():
         session["timer"] = None
         session["finished"] = True
     legacy_sessions.clear()
-
-    _qss_unregister_ui_menus()
     _remove_qss_keymaps()
-    _unregister_qss_workspace_tools()
     _remove_scene_properties()
     _unregister_qss_classes()
 
@@ -8058,7 +7483,6 @@ def register():
                 scene.qss_game_dir = initial_game_dir
             finally:
                 _qss_config_update_depth = False
-        _register_qss_workspace_tools()
         _qss_register_ui_menus()
     except Exception:
         # Blender can leave a partially registered add-on behind when register()
