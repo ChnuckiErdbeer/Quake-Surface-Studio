@@ -7176,10 +7176,14 @@ class QSS_PT_workspace_main(Panel):
                     text="Focus",
                     icon="VIEWZOOM",
                 )
-                actions.operator(
+                fps_row = actions.row()
+                # FPS navigation is modal and must be invoked from the 3D View
+                # window region, not executed as a non-modal sidebar command.
+                fps_row.operator_context = "INVOKE_REGION_WIN"
+                fps_row.operator(
                     QSS_OT_fps_walk.bl_idname,
                     text="Start / Stop FPS Navigation",
-                    icon="WALK",
+                    icon="PLAY",
                 )
             elif context.mode == "EDIT_MESH":
                 row = actions.row(align=True)
