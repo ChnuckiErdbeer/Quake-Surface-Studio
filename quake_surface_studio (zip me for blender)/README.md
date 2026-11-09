@@ -1,4 +1,42 @@
-# Quake Surface Studio 0.17.9
+# Quake Surface Studio 0.18.0
+
+## 0.18.0 — Sidebar-first project workflow
+
+This release implements the agreed NAVIGATION / MAIN / LIGHTING / STATS layout in the existing **View3D → Sidebar → Quake** tab. The dedicated workspace, toolbar, viewport-header and context-menu interfaces remain removed.
+
+### Sidebar
+
+- **NAVIGATION:** native Blender Walk Navigation in Quake noclip mode and Move to Player Start.
+- **MAIN:** Game / Mod selector, immediate map browser import, BSP import/export, active map selector, Open Last Export in Ironwail, lightmap resolution controls, and Settings.
+- **LIGHTING:** Original, Eevee Material Preview, Cycles Rendered and Baked presets; selected-face Texture/Lightmap Paint; independent painted texture/lightmap overrides; Cycles lightmap bake.
+- **STATS:** collapsed by default; active-map geometry, entity, texture, lightmap, export and diagnostic information.
+
+### Multi-map workflow
+
+- Every imported BSP receives a uniquely named `QSS_Map_*` root collection. Its mesh and entity collection live below that root.
+- Importing another map follows `import_behavior` in `CONFIG/qss/config.json`: `ASK` (default), `ADD`, or `REPLACE`. The Ask dialog defaults to Add. Replace deletes only the previously active QSS map collection, and only after the new import succeeds.
+- A newly imported map becomes active, is isolated in the viewport, and frames `info_player_start` when available. Switching Loaded Map changes the active object and hides the other scene content without deleting it.
+- Each map stores its own lighting preview mode and painted-lightmap state. Only the active map's QSS lights are enabled for its live-light preview and Cycles bake.
+
+### Lighting and painting
+
+- Original and Baked use Material Preview with scene lighting disabled; Eevee uses Material Preview with scene lights/world enabled; Cycles uses Rendered shading with Cycles.
+- Painted textures are reversible per-face material overrides. The original material assignments are retained.
+- Original and Baked lightmap painting each use a separate image override. Painted Lightmaps is available only in those two modes.
+- The Cycles bake is the supported artist-bake path. Existing bake data prompts for confirmation before replacement. A new bake invalidates the painted Baked override but never overwrites the immutable original BSP snapshot.
+- EEVEE lightmap baking is not part of this release; it remains a possible future experiment.
+
+### Import, export and settings
+
+- The BSP file browser no longer exposes QSS-specific import settings. It uses the active Game / Mod, configured unit scale and configured working-atlas resolution.
+- Export format choices are Automatic, Classic, Enhanced and Both. Automatic chooses Enhanced for upscaled working atlases or source maps carrying DECOUPLED_LM; otherwise it chooses Classic. Both writes `_c.bsp` and `_e.bsp`.
+- Open Last Export in Ironwail prefers the Enhanced file after Both by default. The preference is configurable. The exported BSP must be inside the active Game / Mod directory for Quake's virtual map lookup.
+- The Settings popup edits common defaults. The adjacent Text Editor action opens the actual `config.json` in a separate Blender window for advanced editing.
+- Changing working lightmap resolution rebuilds the atlas from the original BSP. The dialog warns that generated and painted lightmaps are discarded; painted textures and mesh geometry are retained.
+
+### Validation status
+
+Python compilation, standalone regression tests and package assembly are run by GitHub Actions. Blender 5.2 GUI registration, visual layout, multi-map interaction, painting and render-mode switching still require interactive verification; CI cannot replace that test.
 
 ## 0.17.9 changes
 
