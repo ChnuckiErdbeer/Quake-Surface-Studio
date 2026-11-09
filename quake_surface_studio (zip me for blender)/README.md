@@ -1,4 +1,13 @@
-# Quake Surface Studio 0.17.6
+# Quake Surface Studio 0.17.7
+
+## 0.17.7 changes
+
+- Replaces QSS's custom timer-driven WASD overlay with Blender 5.2's native **Walk Navigation** operator. QSS no longer maintains a competing camera-navigation modal loop.
+- Provides genuine first-person mouse-look and free-flight movement: **W/A/S/D** move, **Q/E** move vertically, and **Shift** temporarily accelerates. Free flight is enabled to match Quake noclip rather than gravity-based walking.
+- Makes exit behaviour explicit and reliable: **LMB confirms and exits**; **Esc or RMB cancels and restores the starting view**. There is no persistent QSS navigation session or separate stop toggle to get stuck in.
+- Maps the QSS Quake-units/second speed and fast multiplier into Blender's native Walk Navigation preferences using the imported BSP's unit scale.
+- Leaves Blender's ordinary viewport navigation and MMB orbit untouched outside the native Walk session. The QSS toolbar and sidebar both start the same native operator.
+- Adds standalone tests for Quake-to-Blender navigation speed conversion and preference bounds.
 
 ## 0.17.6 changes
 
@@ -289,7 +298,7 @@ The importer/exporter is deliberately conservative: geometry, visibility, nodes,
 - Quake and Blender are both Z-up. The **Invert Z axis** import option is only for non-standard maps produced by a converter that uses Z-down coordinates. Leave it disabled for normal Quake maps.
 - Reads `info_player_start` from the compiled BSP entity lump and starts the viewport there, with the entity yaw and an approximate eye height.
 - Imports explicit `light*` entities and worldspawn `_sunlight` into a collection named `QSS_<map>_Entities`.
-- **FPS / Walk Navigation** uses Blender's native Walk Navigation, fitted clipping, and the configurable Quake-unit speed. It is free-fly navigation, not a collision-aware Quake player controller.
+- **Quake Walk / Noclip Navigation** uses Blender's native first-person Walk Navigation with mouse-look, WASD/QE free flight, Quake-scaled speed, LMB exit, and Esc/RMB cancel. It does not collide with BSP walls, matching noclip movement.
 - **Focus Selected Face(s)**, **Isolate Selected Faces**, **Reveal Hidden Faces**, and **Optimize View Clipping** are available in the Quake sidebar.
 
 ### Textures

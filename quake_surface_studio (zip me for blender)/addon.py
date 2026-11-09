@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils
 
 
-ADDON_VERSION = (0, 17, 6)
+ADDON_VERSION = (0, 17, 7)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -33,7 +33,6 @@ DEFAULT_QUAKE_UNIT_SCALE = 0.0254
 
 # Track keymap items created by this add-on. This must exist before register().
 _addon_keymaps = []
-_qss_fps_navigation_sessions = {}
 
 
 def _report(op, level, message):
@@ -2939,21 +2938,16 @@ def _apply_map_view_clipping(context, obj):
 
 
 def _configure_quake_walk_speed(context, obj):
-    """Map Quake's 320 units/s run speed into Blender metres/s."""
-    unit_scale = float(obj.get('qss_unit_scale', DEFAULT_QUAKE_UNIT_SCALE))
-    speed_qu = float(getattr(context.scene, 'qss_nav_speed_quake', 320.0))
-    speed_m = max(0.01, min(100.0, speed_qu * unit_scale))
-    fast_factor = max(1.0, min(10.0, float(getattr(context.scene, 'qss_nav_fast_factor', 3.0))))
-    try:
-        walk = context.preferences.inputs.walk_navigation
-        walk.walk_speed = speed_m
-        walk.walk_speed_factor = fast_factor
-        walk.view_height = 22.0 * unit_scale
-        # Free-fly navigation is intentional until collision-aware player movement exists.
-        walk.use_gravity = False
-        return speed_qu, speed_m, fast_factor
-    except Exception:
-        return speed_qu, speed_m, fast_factor
+    """Configure Blender's native Walk Navigation from the imported Quake map scale."""
+    settings = navigation_utils.quake_walk_preferences(
+        obj.get('qss_unit_scale', DEFAULT_QUAKE_UNIT_SCALE),
+        getattr(context.scene, 'qss_nav_speed_quake', 640.0),
+        getattr(context.scene, 'qss_nav_fast_factor', 4.0),
+    )
+    walk = context.preferences.inputs.walk_navigation
+    for name, value in settings.items():
+        setattr(walk, name, value)
+    return settings
 
 
 class QSS_OT_optimize_clipping(Operator):
@@ -2974,255 +2968,62 @@ class QSS_OT_optimize_clipping(Operator):
 
 class QSS_OT_fps_walk(Operator):
     bl_idname = "qss.fps_walk"
-    bl_label = "FPS / Walk Navigation"
+    bl_label = "Quake Walk / Noclip Navigation"
     bl_description = (
-        "Toggle keyboard navigation: WASD moves relative to the current viewport heading, "
-        "Q/E moves vertically, and Blender's normal MMB orbit remains unchanged"
+        "Start Blender's native first-person Walk Navigation with free flight. "
+        "Move the mouse to look, WASD to fly, Q/E vertically, Shift to move faster. "
+        "LMB confirms and exits; Esc or RMB cancels and restores the starting view"
     )
     bl_options = {"REGISTER"}
 
-    _move_keys = {"W", "A", "S", "D", "Q", "E", "LEFT_SHIFT", "RIGHT_SHIFT"}
-
     @classmethod
     def poll(cls, context):
-        window = context.window
-        if window is not None:
-            session = _qss_fps_navigation_sessions.get(window.as_pointer())
-            if session is not None and not session.get("finished", False):
-                return True
+        area = context.area
         obj = context.object
         return bool(
-            context.area and context.area.type == "VIEW_3D"
+            area and area.type == "VIEW_3D"
             and obj and obj.type == "MESH"
             and obj.get("qss_object_role") == "quake_bsp29"
         )
 
-    def _finish(self, context):
-        session = getattr(self, "_session", None)
-        if session is None or session.get("finished", False):
-            return {"FINISHED"}
-        session["finished"] = True
-        timer = session.get("timer")
-        window_manager = session.get("window_manager")
-        if timer is not None and window_manager is not None:
-            try:
-                window_manager.event_timer_remove(timer)
-            except Exception:
-                pass
-        session["timer"] = None
-        try:
-            session["area"].header_text_set(None)
-            session["area"].tag_redraw()
-        except Exception:
-            pass
-        try:
-            if _qss_fps_navigation_sessions.get(self._session_key) is session:
-                del _qss_fps_navigation_sessions[self._session_key]
-        except Exception:
-            pass
-        return {"FINISHED"}
-
-    def invoke(self, context, event):
-        window = context.window
-        if window is None:
-            self.report({"WARNING"}, "Keyboard navigation needs an active Blender window.")
-            return {"CANCELLED"}
-        session_key = window.as_pointer()
-        existing = _qss_fps_navigation_sessions.get(session_key)
-        if existing is not None and not existing.get("finished", False):
-            existing["stop_requested"] = True
-            try:
-                existing["area"].tag_redraw()
-            except Exception:
-                pass
-            self.report({"INFO"}, "FPS navigation stopping.")
-            return {"FINISHED"}
-        if existing is not None:
-            _qss_fps_navigation_sessions.pop(session_key, None)
-
+    def _start_walk(self, context):
         area = context.area
         if area is None or area.type != "VIEW_3D":
-            self.report({"WARNING"}, "Start FPS navigation from a 3D View.")
+            self.report({"WARNING"}, "Start Quake Walk Navigation from a 3D View.")
             return {"CANCELLED"}
+
         region = next((item for item in area.regions if item.type == "WINDOW"), None)
-        space = next((item for item in area.spaces if item.type == "VIEW_3D"), None)
-        if region is None or space is None or space.region_3d is None:
+        if region is None:
             self.report({"WARNING"}, "The 3D View has no usable window region.")
             return {"CANCELLED"}
 
-        # Do not set view_perspective, view_rotation, view_location or cursor state
-        # when starting. QSS adds movement only; Blender retains full mouse control.
-        session = {
-            "stop_requested": False,
-            "finished": False,
-            "timer": None,
-            "window": window,
-            "window_manager": context.window_manager,
-            "area": area,
-        }
-        self._area = area
-        self._rv3d = space.region_3d
-        self._window_manager = context.window_manager
-        self._scene = context.scene
-        self._session_key = session_key
-        self._session = session
-        self._keys_down = set()
-        self._last_time = time.monotonic()
-        obj = context.object
-        unit_scale = float(obj.get("qss_unit_scale", DEFAULT_QUAKE_UNIT_SCALE))
-        self._unit_scale = max(1e-8, unit_scale)
-        self._speed = max(0.0, float(context.scene.qss_nav_speed_quake)) * self._unit_scale
-        self._fast_factor = max(1.0, float(context.scene.qss_nav_fast_factor))
         try:
-            timer = self._window_manager.event_timer_add(1.0 / 60.0, window=window)
-            session["timer"] = timer
-            _qss_fps_navigation_sessions[session_key] = session
-            self._window_manager.modal_handler_add(self)
+            settings = _configure_quake_walk_speed(context, context.object)
+            # Sidebar buttons execute in the UI region. Blender's native
+            # view3d.walk operator must run in the 3D View's WINDOW region.
+            with context.temp_override(
+                window=context.window,
+                area=area,
+                region=region,
+            ):
+                result = bpy.ops.view3d.walk("INVOKE_DEFAULT")
+            if "CANCELLED" in result:
+                raise RuntimeError("Blender could not start native Walk Navigation.")
         except Exception as exc:
-            _qss_fps_navigation_sessions.pop(session_key, None)
-            session["finished"] = True
-            if session.get("timer") is not None:
-                try:
-                    self._window_manager.event_timer_remove(session["timer"])
-                except Exception:
-                    pass
-            self.report({"ERROR"}, f"Could not start keyboard navigation: {exc}")
+            self.report({"ERROR"}, f"Could not start Quake Walk Navigation: {exc}")
             return {"CANCELLED"}
-        try:
-            self._area.header_text_set(
-                "QSS MOVEMENT ACTIVE: WASD move | Q/E down/up | Shift fast | "
-                "Blender MMB orbit unchanged | Esc or button to stop"
-            )
-            self._area.tag_redraw()
-        except Exception:
-            pass
+
         self.report(
             {"INFO"},
-            "Keyboard movement active. WASD follows the current view heading; MMB remains Blender orbit.",
+            "Quake free-fly active: mouse-look + WASD/QE; LMB exits, Esc or RMB cancels.",
         )
-        return {"RUNNING_MODAL"}
+        return {"FINISHED"}
 
-    def _move_with_wall_collision(self, context, camera_position, displacement, right):
-        """Simple eye-level ray collision and slide against the imported BSP mesh."""
-        from mathutils import Vector
-        length = displacement.length
-        if length <= 1e-8:
-            return Vector((0.0, 0.0, 0.0))
-        direction = displacement.normalized()
-        radius = 8.0 * self._unit_scale
-        depsgraph = context.evaluated_depsgraph_get()
-        best_hit = None
-        offsets = (Vector((0.0, 0.0, 0.0)), right * radius, -right * radius)
-        for offset in offsets:
-            origin = camera_position + offset
-            hit, location, normal, _face_index, _hit_obj, _matrix = self._scene.ray_cast(
-                depsgraph, origin, direction, distance=length + radius
-            )
-            if hit:
-                hit_distance = (location - origin).length
-                if best_hit is None or hit_distance < best_hit[0]:
-                    best_hit = (hit_distance, normal.copy())
-        if best_hit is None:
-            return displacement
-        hit_distance, normal = best_hit
-        safe_distance = max(0.0, min(length, hit_distance - radius))
-        safe_move = direction * safe_distance
-        remaining = displacement - safe_move
-        if normal.dot(displacement) > 0.0:
-            normal.negate()
-        into_wall = remaining.dot(normal)
-        if into_wall < 0.0:
-            remaining -= normal * into_wall
-        return safe_move + remaining
+    def invoke(self, context, event):
+        return self._start_walk(context)
 
-    def modal(self, context, event):
-        try:
-            return self._modal_event(context, event)
-        except Exception as exc:
-            # Never let a modal exception strand a session entry or viewport timer.
-            print("QSS keyboard navigation failed: " + str(exc))
-            traceback.print_exc()
-            self._finish(context)
-            self.report({"ERROR"}, f"Keyboard navigation stopped safely: {exc}")
-            return {"CANCELLED"}
-
-    def _modal_event(self, context, event):
-        from mathutils import Vector
-        session = getattr(self, "_session", None)
-        if session is None or session.get("finished", False):
-            return {"CANCELLED"}
-        if session.get("stop_requested", False):
-            return self._finish(context)
-        if event.type == "ESC" and event.value == "PRESS":
-            return self._finish(context)
-
-        # Blender 5.2 builds can expose TIMER events without Event.timer.
-        if event.type == "TIMER" and navigation_utils.is_active_timer_event(
-            event.type, getattr(event, "timer", None), session.get("timer")
-        ):
-            now = time.monotonic()
-            dt = max(0.0, min(0.05, now - self._last_time))
-            self._last_time = now
-            if self._keys_down:
-                # Read the viewport rotation on every tick. MMB orbit therefore
-                # remains Blender-native and movement immediately follows the
-                # user's latest view heading instead of a cached QSS yaw/pitch.
-                view_rotation = self._rv3d.view_rotation.copy()
-                view_forward = view_rotation @ Vector((0.0, 0.0, -1.0))
-                view_right = view_rotation @ Vector((1.0, 0.0, 0.0))
-                forward_xy, right_xy = navigation_utils.horizontal_movement_axes(
-                    view_forward.x, view_forward.y, view_right.x, view_right.y
-                )
-                forward = Vector((forward_xy[0], forward_xy[1], 0.0))
-                right = Vector((right_xy[0], right_xy[1], 0.0))
-                movement = Vector((0.0, 0.0, 0.0))
-                if "W" in self._keys_down: movement += forward
-                if "S" in self._keys_down: movement -= forward
-                if "D" in self._keys_down: movement += right
-                if "A" in self._keys_down: movement -= right
-                if "E" in self._keys_down: movement.z += 1.0
-                if "Q" in self._keys_down: movement.z -= 1.0
-                if movement.length > 1e-8:
-                    movement.normalize()
-                    fast = bool({"LEFT_SHIFT", "RIGHT_SHIFT"} & self._keys_down)
-                    speed = self._speed * (self._fast_factor if fast else 1.0)
-                    camera_position = (
-                        self._rv3d.view_location.copy()
-                        + view_rotation @ Vector((
-                            0.0, 0.0, max(0.001, float(self._rv3d.view_distance))
-                        ))
-                    )
-                    displacement = self._move_with_wall_collision(
-                        context, camera_position, movement * speed * dt, right
-                    )
-                    if displacement.length > 1e-8:
-                        # Translate the existing view without changing its aim,
-                        # perspective mode or orbit distance.
-                        self._rv3d.view_location = self._rv3d.view_location + displacement
-                        self._area.tag_redraw()
-            return {"RUNNING_MODAL"}
-
-        in_area = context.area == self._area
-
-        # Observe releases even after the pointer crosses into the Sidebar.
-        if event.type in self._move_keys and event.value == "RELEASE":
-            self._keys_down.discard(event.type)
-            return {"RUNNING_MODAL"} if in_area else {"PASS_THROUGH"}
-
-        # Consume only the navigation keys. Blender's MMB and MOUSEMOVE events
-        # are always passed through untouched to its native viewport operators.
-        if event.type in self._move_keys and event.value == "PRESS":
-            if in_area:
-                self._keys_down.add(event.type)
-                return {"RUNNING_MODAL"}
-            return {"PASS_THROUGH"}
-
-        # Deliberately do not handle MIDDLEMOUSE or MOUSEMOVE. Blender receives
-        # those events normally for orbit, pan, cursor and other viewport tools.
-        return {"PASS_THROUGH"}
-
-    def cancel(self, context):
-        self._finish(context)
+    def execute(self, context):
+        return self._start_walk(context)
 
 
 class QSS_OT_player_start(Operator):
@@ -7068,7 +6869,7 @@ class QSS_WST_fps_navigation(bpy.types.WorkSpaceTool):
     bl_context_mode = None
     bl_idname = "qss.fps_navigation"
     bl_label = "FPS Navigation"
-    bl_description = "Select this tool, then click the 3D View to start keyboard navigation; WASD moves and MMB looks"
+    bl_description = "Start Blender Walk Navigation: mouse-look, WASD/QE free flight; LMB exits, Esc or RMB cancels"
     bl_icon = "ops.view3d.walk"
     bl_operator = QSS_OT_fps_walk.bl_idname
     bl_keymap = _qss_tool_keymap(QSS_OT_fps_walk.bl_idname)
@@ -7596,16 +7397,10 @@ class QSS_PT_main(Panel):
         layout = self.layout
         layout.label(text=f"Version {'.'.join(str(part) for part in ADDON_VERSION)}", icon='INFO')
         layout.operator(QSS_OT_open_workspace.bl_idname, text="Open Quake Studio Workspace", icon="WINDOW")
-        window = context.window
-        if window is not None and (_qss_fps_navigation_sessions.get(window.as_pointer()) or {}).get("finished") is False:
-            stop_row = layout.row()
-            stop_row.alert = True
-            stop_row.operator(
-                QSS_OT_fps_walk.bl_idname,
-                text="Stop FPS Navigation",
-                icon='PAUSE',
-            )
-            layout.label(text="FPS mode active · MMB look + WASD movement", icon='VIEW_PAN')
+        layout.label(
+            text="First-person controls: mouse-look + WASD; LMB exits, Esc/RMB cancels.",
+            icon='VIEW_PAN',
+        )
         layout.use_property_split = True
         import_box = layout.box()
         import_box.label(text="START HERE · PROJECT", icon='FILE_3D')
@@ -7747,11 +7542,10 @@ class QSS_PT_navigation(Panel):
         player.label(text="FIRST-PERSON NAVIGATION", icon='ORIENTATION_VIEW')
         if obj.get('qss_has_player_start'):
             player.operator(QSS_OT_player_start.bl_idname, icon='EMPTY_AXIS')
-        fps_active = _qss_fps_navigation_sessions.get(context.window.as_pointer()) is not None
         player.operator(
             QSS_OT_fps_walk.bl_idname,
-            text="Stop FPS Navigation" if fps_active else "Start FPS Navigation",
-            icon='PAUSE' if fps_active else 'VIEW_PAN',
+            text="Start Quake Walk (Noclip)",
+            icon='VIEW_PAN',
         )
         player.prop(context.scene, 'qss_nav_speed_quake', text="Speed (Quake u/s)")
         player.prop(context.scene, 'qss_nav_fast_factor', text="Fast multiplier")
@@ -7760,8 +7554,8 @@ class QSS_PT_navigation(Panel):
             row = player.row()
             row.alert = True
             row.label(text="Imported with inverted Z axis", icon='INFO')
-        player.label(text="Hold MMB to look while moving with WASD")
-        player.label(text="Press the button again or Esc to stop")
+        player.label(text="Mouse movement = look · WASD = fly · Q/E = vertical")
+        player.label(text="LMB confirms/exits · Esc or RMB cancels")
 
 
 class QSS_PT_texture(Panel):
@@ -8173,28 +7967,13 @@ def _unregister_qss_classes():
 
 
 def _cleanup_previous_registration():
-    # Remove resources held by any active FPS session without retaining or
-    # mutating an operator instance that Blender may already have destroyed.
-    for session in tuple(_qss_fps_navigation_sessions.values()):
-        timer = session.get("timer")
-        window_manager = session.get("window_manager")
-        if timer is not None and window_manager is not None:
-            try:
-                window_manager.event_timer_remove(timer)
-            except Exception:
-                pass
-        try:
-            session["area"].header_text_set(None)
-            session["area"].tag_redraw()
-        except Exception:
-            pass
-        session["timer"] = None
-        session["finished"] = True
-    _qss_fps_navigation_sessions.clear()
+    # Navigation now runs entirely inside Blender's native Walk operator;
+    # QSS no longer owns modal timers or per-window navigation sessions.
     _remove_qss_keymaps()
     _unregister_qss_workspace_tools()
     _remove_scene_properties()
     _unregister_qss_classes()
+
 
 def register():
     """Register QSS safely, including upgrades from an already-enabled build."""
