@@ -28,7 +28,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils
 
 
-ADDON_VERSION = (0, 20, 0)
+ADDON_VERSION = (0, 20, 1)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -3419,97 +3419,58 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
     return obj
 
 
-@lru_cache(maxsize=4)
-def _palette_nearest_lookup(palette, allow_transparency):
-    # 5-bit-per-channel lookup table: one-time palette search, cheap per pixel.
-    allowed = range(255) if allow_transparency else range(256)
-    cols = [(palette[i * 3], palette[i * 3 + 1], palette[i * 3 + 2]) for i in allowed]
-    lookup = bytearray(32 * 32 * 32)
-    for r5 in range(32):
-        r = r5 * 255.0 / 31.0
-        for g5 in range(32):
-            g = g5 * 255.0 / 31.0
-            for b5 in range(32):
-                b = b5 * 255.0 / 31.0
-                best_idx = 0
-                best_d = 1e30
-                for idx, (pr, pg, pb) in enumerate(cols):
-                    dr, dg, db = r - pr, g - pg, b - pb
-                    # Green-weighted distance works better for classic RGB palettes.
-                    d = 0.30 * dr * dr + 0.59 * dg * dg + 0.11 * db * db
-                    if d < best_d:
-                        best_d = d
-                        best_idx = idx
-                lookup[(r5 * 32 + g5) * 32 + b5] = best_idx
-    return lookup
+def _miptex_fullbright_mask(entry, width, height, fullbright_start=224):
+    """Recover an original miptex's fullbright texels when the dimensions match."""
+    if entry is None or entry.blob is None:
+        return None
+    try:
+        name_raw, source_width, source_height, o0, _o1, _o2, _o3 = struct.unpack_from(
+            '<16s6I', entry.blob, 0
+        )
+        if (int(source_width), int(source_height)) != (int(width), int(height)):
+            return None
+        count = int(source_width) * int(source_height)
+        if o0 <= 0 or o0 + count > len(entry.blob):
+            return None
+        indices = entry.blob[o0:o0 + count]
+        return bytearray(
+            1 if fullbright_start <= index < 255 else 0 for index in indices
+        )
+    except (struct.error, TypeError, ValueError):
+        return None
 
 
-def _downsample_rgba(src, width, height):
-    out_w, out_h = max(1, width // 2), max(1, height // 2)
-    out = array.array('f')
-    for y in range(out_h):
-        for x in range(out_w):
-            sums = [0.0, 0.0, 0.0, 0.0]
-            count = 0
-            for dy in range(2):
-                for dx in range(2):
-                    sx, sy = min(width - 1, x * 2 + dx), min(height - 1, y * 2 + dy)
-                    p = (sy * width + sx) * 4
-                    alpha = max(0.0, min(1.0, src[p + 3]))
-                    sums[0] += src[p] * alpha
-                    sums[1] += src[p + 1] * alpha
-                    sums[2] += src[p + 2] * alpha
-                    sums[3] += alpha
-                    count += 1
-            alpha_out = sums[3] / count
-            if sums[3] > 1e-8:
-                out.extend((sums[0] / sums[3], sums[1] / sums[3], sums[2] / sums[3], alpha_out))
-            else:
-                out.extend((0.0, 0.0, 0.0, 0.0))
-    return out_w, out_h, out
-
-
-def _encode_image_to_miptex(image, palette, texture_name):
+def _encode_image_to_miptex(
+    image, palette, texture_name, *, fullbright_mask=None, settings=None
+):
+    """Encode a Blender texture with Slipgate's material-zone converter at every mip level."""
     width, height = int(image.size[0]), int(image.size[1])
     if width < 16 or height < 16 or width > 512 or height > 512:
-        raise bsp.BSPError(f"Image '{image.name}' is {width}x{height}; export requires dimensions from 16 to 512.")
+        raise bsp.BSPError(
+            f"Image '{image.name}' is {width}x{height}; export requires dimensions from 16 to 512."
+        )
     if width & (width - 1) or height & (height - 1):
-        raise bsp.BSPError(f"Image '{image.name}' is {width}x{height}; width and height must be powers of two.")
-
-    special = texture_name.startswith('{')
-    lut = _palette_nearest_lookup(palette, special)
-    is_float_buffer = bool(getattr(image, 'is_float', False))
-    px = array.array('f', [0.0]) * (width * height * 4)
-    image.update()
-    image.pixels.foreach_get(px)
-    # Convert Blender's bottom-up linear pixels into Quake's top-down mip rows.
-    current = array.array('f')
-    for y in range(height - 1, -1, -1):
-        start = y * width * 4
-        current.extend(px[start:start + width * 4])
-
-    levels = []
-    w, h, rgba = width, height, current
-    for level in range(4):
-        indexed = bytearray(w * h)
-        for i in range(w * h):
-            p = i * 4
-            alpha = rgba[p + 3]
-            if special and alpha < 0.5:
-                indexed[i] = 255
-                continue
-            # bpy Image.pixels for byte buffers contains values encoded in the
-            # image's assigned colour space (sRGB here); float buffers contain
-            # scene-linear values. Convert only the latter.
-            r = int(round(color.blender_pixel_to_quake_code(rgba[p], is_float_buffer) * 255.0))
-            g = int(round(color.blender_pixel_to_quake_code(rgba[p + 1], is_float_buffer) * 255.0))
-            b = int(round(color.blender_pixel_to_quake_code(rgba[p + 2], is_float_buffer) * 255.0))
-            index = lut[((r >> 3) * 32 + (g >> 3)) * 32 + (b >> 3)]
-            indexed[i] = index
-        levels.append(bytes(indexed))
-        if level < 3:
-            w, h, rgba = _downsample_rgba(rgba, w, h)
-    return bsp.build_miptex_blob(texture_name, width, height, levels)
+        raise bsp.BSPError(
+            f"Image '{image.name}' is {width}x{height}; width and height must be powers of two."
+        )
+    try:
+        width, height, rgba = _qss_image_pixels_to_rgba8(image)
+        if settings is None:
+            settings_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "quake_texture_converter.ini",
+            )
+            settings = palette_utils.load_settings(settings_path)
+        mip_levels, _mip_stats = palette_utils.convert_rgba8_mip_chain(
+            width, height, rgba, palette, settings,
+            transparent=str(texture_name).startswith("{"),
+            fullbright_mask=fullbright_mask,
+        )
+        return bsp.build_miptex_blob(texture_name, width, height, mip_levels)
+    except Exception as exc:
+        raise bsp.BSPError(
+            f"Material-zone Quake palette conversion failed for '{image.name}': {exc}"
+        ) from exc
 
 
 def _safe_texture_name(value, fallback):
@@ -3547,6 +3508,12 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
     faces = parsed.faces()
     texinfos = parsed.texinfos()
     entries = parsed.miptextures()
+    converter_settings_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "quake_texture_converter.ini",
+    )
+    converter_settings = palette_utils.load_settings(converter_settings_path)
+    fullbright_start = int(converter_settings.get("fullbright_start", 224))
     if len(entries) > bsp.MAX_CLASSIC_TEXTURES:
         raise bsp.BSPError("The source BSP already exceeds the conservative classic texture count limit.")
 
@@ -3581,7 +3548,15 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
             if image_key not in new_texture_for_image:
                 fallback = f"qss_{len(entries):05d}"
                 tex_name = _safe_texture_name(mat.get('qss_export_name', ''), fallback)
-                blob = _encode_image_to_miptex(image, palette, tex_name)
+                source_id = int(mat.get("qss_fullbright_source_texture_id", -1))
+                source_entry = entries[source_id] if 0 <= source_id < len(entries) else None
+                fullbright_mask = _miptex_fullbright_mask(
+                    source_entry, image.size[0], image.size[1], fullbright_start
+                )
+                blob = _encode_image_to_miptex(
+                    image, palette, tex_name, fullbright_mask=fullbright_mask,
+                    settings=converter_settings,
+                )
                 texture_index = texture_export.allocate_image_texture_index(
                     entries, new_texture_for_image, image_key,
                     bsp.MipTexture(blob, tex_name, image.size[0], image.size[1]),
@@ -3592,7 +3567,14 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
         if source_texture_id >= 0 and source_texture_id < len(entries) and digest != baseline:
             fallback = entries[source_texture_id].name or f"qss_{source_texture_id:05d}"
             tex_name = _safe_texture_name(mat.get('qss_export_name', ''), fallback)
-            blob = _encode_image_to_miptex(image, palette, tex_name)
+            source_entry = entries[source_texture_id]
+            fullbright_mask = _miptex_fullbright_mask(
+                source_entry, image.size[0], image.size[1], fullbright_start
+            )
+            blob = _encode_image_to_miptex(
+                image, palette, tex_name, fullbright_mask=fullbright_mask,
+                settings=converter_settings,
+            )
             prior = replacements.get(source_texture_id)
             if prior and prior[0] != digest:
                 raise bsp.BSPError(
@@ -5457,6 +5439,9 @@ class QSS_OT_detach_faces(Operator):
                 new_mat.name = f"QSS_Detached_F{plan['face_id']:05d}"
                 new_mat['qss_texture_index'] = -1
                 new_mat['qss_is_new_texture'] = True
+                new_mat['qss_fullbright_source_texture_id'] = int(
+                    plan['source_mat'].get('qss_texture_index', -1)
+                )
                 source_texture_name = str(plan['source_mat'].get('qss_texture_name', ''))
                 if source_texture_name.startswith('sky'):
                     texture_prefix = 'sky'
@@ -5984,13 +5969,16 @@ def _qss_map_image_memory_bytes(obj):
     return total
 
 
-def _qss_paint_confirmation_needed(face_count, estimated_bytes, available_bytes):
-    """Ask before a paint preparation that could create substantial image buffers."""
+def _qss_paint_confirmation_needed(
+    face_count, estimated_bytes, available_bytes, *,
+    minimum_bytes=32 * 1024 * 1024, available_fraction=0.05,
+):
+    """Ask before paint preparation only when its peak allocation is material."""
     return bool(
-        int(estimated_bytes) >= 32 * 1024 * 1024
+        int(estimated_bytes) >= int(minimum_bytes)
         or (
             available_bytes is not None and available_bytes > 0
-            and int(estimated_bytes) >= int(available_bytes * 0.05)
+            and int(estimated_bytes) >= int(available_bytes * float(available_fraction))
         )
     )
 
@@ -6275,7 +6263,8 @@ class QSS_OT_activate_lightmap_paint(Operator):
         available = _qss_available_memory_bytes()
         self.warning_available_bytes = float(available or 0)
         if _qss_paint_confirmation_needed(
-            count, int(self.warning_atlas_bytes * 2), available
+            count, int(self.warning_atlas_bytes * 2), available,
+            minimum_bytes=256 * 1024 * 1024, available_fraction=0.10,
         ):
             return context.window_manager.invoke_props_dialog(self, width=460)
         return self.execute(context)
@@ -6284,11 +6273,14 @@ class QSS_OT_activate_lightmap_paint(Operator):
         layout = self.layout
         layout.alert = True
         layout.label(
-            text=f"You selected {self.warning_face_count} faces for Lightmap Paint.",
+            text=(
+                f"You selected {self.warning_face_count} "
+                f"{'face' if self.warning_face_count == 1 else 'faces'} for Lightmap Paint."
+            ),
             icon="INFO",
         )
         layout.label(
-            text="QSS reuses the existing atlas; it does not create a separate image for every face."
+            text="QSS creates a working copy of the shared atlas for the first lightmap-paint pass."
         )
         layout.label(
             text=f"Current working lightmap atlas: about {palette_utils.format_mib(self.warning_atlas_bytes)}"
@@ -7124,6 +7116,10 @@ class QSS_OT_bake_scene_lights(Operator):
         if current_energy_scale <= 0.0:
             self.report({'ERROR'}, "Live light scale is 0, so a light bake must be black. Set Live light scale to 1 or higher, click Apply Light Energy Scale, verify Live Lights, then bake.")
             return {'CANCELLED'}
+        output_scale = max(0.0, float(getattr(scene, 'qss_bake_output_scale', 1.0)))
+        if output_scale <= 0.0:
+            self.report({'ERROR'}, "Bake output scale is 0. Set it above 0 before baking.")
+            return {'CANCELLED'}
 
         # Use a new float atlas. The source atlas is never the bake target, so it
         # remains recoverable if Cycles fails or a material bake is incomplete.
@@ -7326,23 +7322,23 @@ class QSS_OT_bake_scene_lights(Operator):
                     'Live light scale is exactly 0. Set it to 1.0 (or higher), click Apply Light Energy Scale, '
                     'confirm the Live Lights preview is illuminated, then bake again.'
                 )
+            if not bake_values or raw_bake_mean <= 1e-8:
+                obj['qss_last_bake_attempt_lights'] = '; '.join(
+                    f'{lamp.name}: {float(lamp.data.energy):.6g}W type={lamp.data.type} '
+                    f'hide_render={bool(lamp.hide_render)} hide_viewport={bool(lamp.hide_viewport)} '
+                    f'hide_get={bool(lamp.hide_get())} cutoff={float(getattr(lamp.data, "cutoff_distance", 0.0)):.4g}'
+                    for lamp in imported_lights
+                )
+                raise bsp.BSPError(
+                    'Cycles completed without producing any nonzero sampled BSP lightmap luxels. '
+                    f'Energy scale={energy_scale:g}; output scale={float(getattr(scene, "qss_bake_output_scale", 1.0)):.6g}; '
+                    f'imported lamps={len(imported_lights)}; max lamp energy={max_energy_after_bake:.6g} W; '
+                    f'sampled luxels={len(bake_values)}; source mean={source_mean:.6g}; '
+                    f'whole atlas nonzero pixels={raw_image_stats["nonzero_pixels"]}/{raw_image_stats["pixels"]}; '
+                    f'whole atlas max RGB={raw_image_stats["max_channel"]:.6g}. '
+                    'The failed bake was discarded. Use Save Lighting Diagnostics and send the report.'
+                )
             if bool(getattr(scene, 'qss_bake_match_source', True)) and source_mean > 1e-8:
-                if raw_bake_mean <= 1e-8:
-                    obj['qss_last_bake_attempt_lights'] = '; '.join(
-                        f'{lamp.name}: {float(lamp.data.energy):.6g}W type={lamp.data.type} '
-                        f'hide_render={bool(lamp.hide_render)} hide_viewport={bool(lamp.hide_viewport)} '
-                        f'hide_get={bool(lamp.hide_get())} cutoff={float(getattr(lamp.data, "cutoff_distance", 0.0)):.4g}'
-                        for lamp in imported_lights
-                    )
-                    raise bsp.BSPError(
-                        'Cycles finished but sampled BSP lightmap luxels are all zero. '
-                        f'Energy scale={energy_scale:g}; imported lamps={len(imported_lights)}; '
-                        f'max lamp energy={max_energy_after_bake:.6g} W; '
-                        f'sampled luxels={len(bake_values)}; whole atlas nonzero pixels='
-                        f'{raw_image_stats["nonzero_pixels"]}/{raw_image_stats["pixels"]}; '
-                        f'whole atlas max RGB={raw_image_stats["max_channel"]:.6g}. '
-                        'Use Save Lighting Diagnostics and send the report; failed-bake statistics are recorded.'
-                    )
                 new_calibration = old_calibration * lighting_utils.calibration_factor(source_mean, raw_bake_mean, energy_scale)
                 calibration_output_scale = new_calibration / old_calibration
                 obj['qss_light_energy_calibration'] = new_calibration
