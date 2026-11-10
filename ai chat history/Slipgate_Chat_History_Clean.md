@@ -15415,3 +15415,56 @@ The user said the six-delay/three-intensity calibration map was already built an
 - The branch head at this checkpoint is `e1b19cd036d55c6147105fdf1779816ae8a660f0` (user upload commit, message: “uploaded new lighttest results”).
 - Latest add-on release remains Slipgate 0.20.7. No add-on source changes or lighting calibration coefficients have been made based on these results yet.
 - Next engineering step, when requested, is to use the measured delay curves to compare/fix Slipgate's Quake Direct CPU solver and then separately calibrate Blender Live Lights and Cycles bake. Preserve the existing solver and all add-on features unless the user approves a change. Treat the delay-4 white appearance and missing north-side luxels as open questions rather than settled diagnoses.
+
+
+## 2026-11-10 — First ericw lighting solver correction and renderer calibration analysis
+
+### User request
+The user asked to analyze the uploaded `results_20261110_155139` measurements and calibrate Cycles (and Eevee) lighting to imitate ericw-tools. Work should be based on the real calibration data and the current add-on implementation; do not remove existing features.
+
+### Repository/source inspection
+- Inspected current branch source `quake_surface_studio (zip me for blender)/lighting.py`, `addon.py`, `tests/test_lighting.py`, both calibration CSVs, both run reports, both ericw light logs, the calibration summary, source MAP and calibration runner.
+- Current architecture has separate paths:
+  1. Quake Direct CPU lightmap solver: `lighting.evaluate_quake_luxel()` called from `_qss_run_ericw_direct_bake()`; calculates point/spot direct light and BSP visibility using a map-only BVH.
+  2. Native Eevee live preview: `blender_live_light_preview_parameters()` converts Quake lights to Blender point/spot lamp energies/cutoffs; `_set_lighting_preview(..., 'realtime')` switches to Eevee.
+  3. Native Cycles bake: `QSS_OT_bake_scene_lights` bakes Blender diffuse direct+indirect lamp illumination, then optionally normalizes the atlas to the original BSP lightmap mean. This mean normalization does not make its spatial falloff match ericw.
+- The Quake Direct CPU bake operator `qss.quake_direct_bake` is registered and available, but the main Lighting panel's visible `Bake Lightmap` button calls the native Cycles bake. The panel currently says Eevee preview selected; baking uses Cycles.
+- Native Blender point/spot lights have inverse-square falloff. They cannot reproduce the ericw linear (delay 0), inverse (delay 1), constant (delay 3), local-minlight clamp (delay 4), or softened inverse-square (delay 5) profiles over all distances with energy/cutoff alone. Delay 2 is the one matching inverse-square profile.
+- A renderer-independent exact direct bake can be displayed as an unlit lightmap/emission material in both Eevee and Cycles. That is the reliable way to make both render engines display the same ericw-matched direct light result. Cycles can additionally provide indirect bounce, but that is an artistic/extended pass and is not identical to the current direct-only calibration reference. Real-time native live lamps remain approximations unless a custom material/shader evaluation path is implemented; no shader replacement has been implemented in this pass.
+
+### Calibration data interpretation
+- Rechecked source map and sampler data: lights are at Z=152, receiver floor at Z=128, so centre samples are 24 Quake units away. The map-info text says 8 units above floor, but the actual source geometry and recorded `sample_z` establish 24 units. The CSV distances are correctly computed from actual floor Z.
+- Both variants were direct-only: `light -verbose -nocolor -bounce 0 -dirt -1`; no bounce, dirt, `extra4`, `soft`, `phong` or surface-light contribution. Logs report 18 lights, zero switchable styles and zero empty lightmaps.
+- ericw alpha11 default `rangescale=0.5` applies to Quake (not Quake II, whose default is set to 1.0). The uploaded map is Quake BSP29. Raw BSP lightmap bytes are after range scale and byte clamping; compare solver float values after the same range/gamma/maxlight processing.
+- Attenuation-only CSV centre values at 24 units, in raw luxel bytes: delay0 50/300/900 = 13/138/255; delay1 = 139/255/255; delay2 = 255/255/254; delay3 = 25/150/254; delay4 = 25/150/255; delay5 = 17/107/255.
+- Delay 2 is confirmed by the 50/300/900 curves to follow the existing inverse-square coefficient exactly (within luxel rounding) when the global range multiplier 0.5 is included.
+- Delay 0 is linear, delay 1 inverse, delay 5 shifted inverse-square; fitting one inverse-square lamp coefficient to all points gives high residual error for those profiles. Delay 3 is constant in attenuation-only. Delay 4 is local minlight and is not a point-light radial curve.
+- Angle-default samples show incidence scaling for delays 0/1/2/3/5. Delay 4 remains unchanged by `_anglescale`.
+- Do not use a fitted single native-light wattage as proof of full curve calibration. It can only be a compromise over a chosen distance/intensity range.
+
+### ericw local-minlight source check
+- Exact alpha11 `light/ltface.cc` source was inspected at the commit used for the source research. `GetLightValueWithAngle()` applies `_anglescale` to ordinary direct lights. `LightFace_LocalMin()` is a separate pass after ordinary direct face lighting.
+- For each local-min light, ericw checks whether the current style sample's arithmetic RGB mean (`LightSample_Brightness = (R+G+B)/3`) is strictly below the entity's `light` value. If so, it ray-tests line of sight and clamps each channel with `Light_ClampMin`: channel target = `entity color[channel] * (light / 255)`. It does not use surface angle or spotlight cone. The worldspawn `_addmin` option changes clamp to additive behavior; this is not part of the current calibration map and is not yet modeled by the helper.
+- This confirms a real mismatch in the existing CPU helper: delay 4 was being multiplied by the surface-angle factor and was treated as a local per-channel max without ericw's prior average-brightness threshold test.
+
+### Implemented source correction
+- Updated `lighting.evaluate_quake_luxel()` to process ordinary direct lights first, then delay-4 local-min lights as a separate second pass per style.
+- Delay 4 now ignores surface-angle scaling and spotlight cone, but still uses visibility callback for line of sight. It compares the arithmetic mean of the accumulated style RGB sample against the local-min threshold; if strictly below, it clamps each channel to the threshold times light colour. It does not add the local-min threshold to normal light.
+- Ordinary delay 0/1/2/3/5 attenuation and incidence code, world range/gamma/maxlight postprocess, style isolation, and other light properties remain in place.
+- Added three regression tests:
+  - delay 4 ignores `_anglescale` and spotlight cone;
+  - a sample whose arithmetic mean is equal to threshold is not clamped (strict less-than);
+  - a dim coloured sample is clamped per channel only where below threshold.
+- Files changed:
+  - `quake_surface_studio (zip me for blender)/lighting.py`
+  - `quake_surface_studio (zip me for blender)/tests/test_lighting.py`
+- Commits: lighting implementation `12645b9d9600cfd8ae67cc06c725e498a775a8b4`; regression tests `9e462ab1c2bdcbef314c15d53051ef9e55f09db3`.
+- Verified current branch file blob SHAs after update: lighting `6b3ddb4264c0896058abc028cc863fc72a7e4207`; tests `a3f17b3125656d73eb367fbf53636d5b7779dc2a`.
+- GitHub Actions QSS Python workflow run `42851048510`, run #659, completed successfully for commit `9e462ab1c2bdcbef314c15d53051ef9e55f09db3`. Python compileall and the full standalone unit test suite passed. Install artifact ID `13780242360`, name `Quake-Surface-Studio-v0.20.7-Blender-Install`, 237077 bytes, expires 2027-02-08. Version metadata remains 0.20.7; this was not a version bump or an interactive Blender verification.
+- No Blender 5.2 GUI test, Cycles bake, Eevee render or Ironwail test was performed by the assistant.
+
+### Current next step / limitations
+- Next compare the corrected CPU direct bake with the uploaded ericw luxel curves (especially delay 4 at oblique sample angles) and validate any remaining exact-solver differences.
+- For both render engines to display ericw-matched direct lightmaps, the reliable current architecture is to compute the direct lightmap with the CPU solver and display it via the existing unlit lightmap material. The current native Cycles bake remains useful for indirect bounce but is not an exact ericw direct-light substitute. Eevee/Cycles native lamps can only approximate delays 0/1/3/4/5 with current lamp model.
+- If the user wants a true real-time Eevee/Cycles material shader emulation for all six delays, that is a separate engineering project: implement and test a per-material shader evaluation for per-light distance, incidence, style, RGB accumulation and delay-4 clamp, and separately solve visibility/shadows. Do not claim it exists.
+- Preserve the existing Cycles bake and Live Lights workflows; do not remove or silently replace them. A UI distinction between exact Quake Direct and Cycles artistic/bounce bake may be proposed, but no UI changes were made in this pass.
