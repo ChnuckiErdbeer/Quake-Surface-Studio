@@ -35,53 +35,50 @@
 
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
 - Working branch: `fix/v0.11.1-metadata-style-order-test`
-- Add-on source/package version observed in `quake_surface_studio (zip me for blender)/__init__.py`: **Slipgate 0.20.3**.
-- Main implementation: `quake_surface_studio (zip me for blender)/addon.py`; lighting helpers: `lighting.py`; palette helpers: `palette_utils.py`; tests: `tests/`.
-- The latest previously recorded CI-tested code commit is `0755aec7070b9b4010afadd85496823d1792df2f`. The later README-only clarification is `3463c51b73cd5f8af28137e9feb0b0df9726cb7c`.
-- Latest recorded install artifact: `Quake-Surface-Studio-v0.20.3-Blender-Install`, artifact ID `13749247827`, SHA-256 `6c46995851369427bbb1bf847b1c9086dd7e5a7693ec1c0e19b27eac7ec7d02c`. Its ZIP integrity was verified in the earlier session.
-- The package folder and internal identifiers remain `quake_surface_studio` / QSS for compatibility; visible branding is Slipgate.
+- Add-on version: **Slipgate 0.20.4** (`__init__.py` and `addon.py`).
+- Main implementation: `quake_surface_studio (zip me for blender)/addon.py`; Quake lighting helpers: `lighting.py`; tests: `tests/`.
+- Latest implementation commit recorded in this handoff: `8b342e56bc5181e1af20d5e9db4e638b7acee77c`. Latest README-only update: `0fb124e720a66501b53608a56bacc3edf6538649`.
+- Latest verified Blender install artifact for the implementation commit: `Quake-Surface-Studio-v0.20.4-Blender-Install`, artifact ID `13756980665`, SHA-256 `92e74e8d6d53d6562f5cf9e1a530b2aaecdbcc53f1abdc15f55315a1be28f4c1`. It is a GitHub Actions artifact from run 606 and expires 2027-02-08.
+- Package folder and internal identifiers remain `quake_surface_studio` / QSS for compatibility; visible branding is Slipgate.
 - Target interactive environment: Blender 5.2. Target engine includes Ironwail.
 
 **Latest user-reported status**
 
-- **Bake — working, user-reported.** The user reports that the bake now produces visible lightmaps and the black-texture failure is gone. The result is not yet considered finished.
-- **Texture painting — working well, user-reported.** The user reports good painting behavior and no brightness issue.
-- **Quick Actions — restored, user-reported.** The buttons are back.
-- **Remaining visual issue — dark frame edges.** The user sees a dark shadow along the edges of all frames. Root cause is not yet established.
-- **Quake-style delay falloff — outstanding.** The next lighting task is to make Blender's live-light preview better match Quake/ericw delay attenuation, rather than changing light ranges by guesswork.
-- The user wants useful bake progress feedback and general, readable console logging from Slipgate.
+- Bake is working and the previous black-texture failure is gone.
+- Texture painting works well, with no reported brightness problem.
+- Quick Actions were restored and were present in the user's last test.
+- The user reported a dark shadow along all frame edges. Version 0.20.4 adds edge-extension bake margin based on the packed atlas gutter; this is a targeted mitigation, not yet proven to eliminate the user's artefact.
+- User asked for the remaining development work to be implemented and a directly usable add-on download link supplied.
 
-**Source observations relevant to the next work**
+**Implemented in Slipgate 0.20.4**
 
-1. `QSS_OT_bake_scene_lights` in `addon.py` calls Blender's `bpy.ops.object.bake(type='DIFFUSE')`. The operator currently has no Slipgate-specific staged progress/logging around the Cycles bake. The Quake Direct CPU bake does use `window_manager.progress_begin/update/end`; map audit also has progress reporting. Console output exists in scattered error paths, but there is not yet a consistent logging convention.
-2. `lighting.py` already implements `ericw_light_value()` for delay modes 0–5, and `tests/test_lighting.py` contains attenuation tests. The Quake Direct CPU bake calls those helpers. Imported Blender live lights are still native Blender point/spot lights; `addon.py` explicitly records that their live preview only approximates Quake delay behavior. The requested work is therefore primarily live-preview parity, not starting the attenuation implementation from scratch.
-3. The lightmap atlas packer `_pack_lightmap_rectangles()` reserves a two-pixel gutter. `_build_lightmap_atlas()` places sample blocks at texel-centred UV coordinates and initializes unused atlas pixels to white. The Cycles bake sets bake margin to zero. These are relevant inspection points for the dark frame-edge shadow, but they do not yet prove its cause. Do not change gutter, UV placement, normals or bake margin until a minimal reproduction identifies whether the shadow is in the source atlas, raw Cycles target, or viewport composite.
-4. `QSS_OT_create_slipgate_folder` currently creates a single `##slipgate` directory beside the loaded BSP only when the user clicks a button. This is no longer the desired workflow.
+1. **Bake progress and logging:** The Cycles bake now reports timestamped `[Slipgate] [LEVEL] [event]` console messages, staged progress and workspace status text, with cleanup on both success and failure. The progress is stage-based; the synchronous Cycles bake does not expose a reliable per-sample callback here, so no fake render percentage is shown.
+2. **Frame-edge coverage mitigation:** Cycles bake margin is now computed from the map's packed gutter and working resolution, and `margin_type` is set to `EXTEND` where supported. Both margin and margin type are restored to the user's prior settings in the bake cleanup. This is not a Blender GUI-verified fix yet; the user's frame-edge test remains essential.
+3. **Quake delay-aware Live Lights:** Imported point/spot lamps now use delay-aware native-light energy/range/soft-source calibration. Delay 2 is calibrated to Blender's inverse-square curve. Delays 0, 1 and 5 are explicitly labelled approximations. Delays 3 (constant field) and 4 (local minlight clamp) remain native-light fallbacks because standard Blender point/spot lamps cannot express those semantics. The Quake Direct CPU solver continues to evaluate all six static ericw attenuation formulas, including visibility rays. Do not claim exact Live Lights parity for delays 0, 1, 3, 4 or 5.
+4. **Per-map non-BSP artifacts:** Removed the manual **Create ##slipgate Folder** Quick Action and its operator. Importing a BSP does not create folders. Palette-converted PNGs, lighting diagnostics and the full self-test report are routed to `<map directory>/##slipgate/<map name>/`; the folder is created only when the output is actually written. Ordinary BSP exports and decoupled BSP copies remain beside their source map.
+5. **Version/documentation/tests:** Bumped the add-on to 0.20.4, documented the new behavior and added unit tests for bake-margin scaling and live-delay calibration.
 
-**Updated product direction for generated assets**
+**Verification status**
 
-- Keep ordinary BSP exports in the existing maps folder.
-- When Slipgate generates non-BSP assets, create `<maps>/##slipgate/<map-name>/` automatically.
-- Store generated artifacts for each map in that map's own subfolder. Avoid creating the root folder for a BSP-only export.
-- Remove the one-off manual folder-creation button once automatic artifact creation is implemented.
-- A future map-browser enhancement may scan maps and generate player-start/end-camera preview images plus map metadata into these folders. This is an optional follow-up, not a prerequisite for the storage design.
+- GitHub Actions QSS Python tests passed (run 606).
+- GitHub Actions Quake Texture Converter GUI tests passed (run 65).
+- CI compiles the Python package, runs standalone tests, and assembles the Blender install artifact. It does not run Blender 5.2 GUI, a real Cycles bake, live Eevee preview, QBSP or Ironwail.
+- No Blender GUI or engine test was performed during this implementation pass. The user must verify bake-edge appearance, delay modes, folder creation and general workflow in Blender 5.2.
 
-**Immediate development priorities**
+**Next validation priorities**
 
-1. Add meaningful bake-stage progress feedback and consistent console logging. Distinguish stages that Slipgate can measure from Blender's internally blocking Cycles bake; do not display a fabricated percentage for an operation whose progress is unavailable.
-2. Diagnose the dark frame-edge shadow by comparing source atlas pixels, raw bake-target pixels, and final viewport/material output. Record a minimal test map and exact reproduction before changing atlas padding or bake settings.
-3. Improve Blender live-light falloff to reproduce Quake/ericw delay modes, using the existing `lighting.py` formulas and tests as the reference. Verify point lights, spotlights, `wait`, `_falloff`, world `_dist`, and any unsupported keys before claiming parity.
-4. Replace manual `##slipgate` folder creation with automatic per-map generated-artifact storage, and remove the manual button.
-5. Add tests for path creation, per-map isolation, BSP-only exports, repeat exports, and failure handling.
-6. Continue validating in Blender 5.2 and Ironwail. CI/unit tests do not establish GUI bake quality or target-engine acceptance.
+1. Install the 0.20.4 Blender artifact and import a fresh BSP.
+2. Run an imported-light Cycles bake; inspect whether the dark frame-edge shadows are gone or reduced. If still present, save Lighting Diagnostics and compare the raw bake target against the final atlas/material output.
+3. Compare Live Lights and Quake Direct CPU output for a small map containing point lights with delays 0–5, including a spotlight and non-default `wait`/`_falloff`. Expect delays 3 and 4 to remain visibly approximate in Live Lights.
+4. Generate a palette PNG and a lighting diagnostics report. Confirm the folder appears only on generation and that two maps get separate subfolders. Confirm BSP exports remain in their existing map directory.
+5. Report any Blender console traceback, unexpected lamp energy/range, bake seam or path issue. Do not mark visual behavior complete based on CI alone.
 
 **Historical issues still worth retaining**
 
-- The old 0.20.3 bake report showed sparse face coverage; the user now reports that the bake works and no longer produces black textures. Keep the earlier report as history, but treat the newer user report as the current status.
-- The 0.20.3 sRGB export change was intended to address Ironwail brightness differences. The user now reports no brightness issue during painting, but a fresh export/engine comparison is still required before marking the Ironwail export path fully verified.
-- The earlier imported-light over-brightness was addressed by separating atlas normalization from live-light calibration. The user reports that the overly bright lights are gone.
+- The 0.20.3 bake report showed sparse face coverage; the user subsequently reported that the bake works and no longer produces black textures. Keep the earlier report as history, but use the newer user report as current status.
+- The 0.20.3 sRGB export change addressed Ironwail brightness concerns. Painting brightness is user-reported as good; a fresh export/engine comparison is still needed before marking Ironwail export fully verified.
 - Layer-toggle behavior outside Object Mode was previously reported and has not been explicitly closed out.
-- No new Blender GUI, QBSP or Ironwail validation should be claimed unless performed in the relevant session.
+- Never claim Blender GUI, QBSP or Ironwail validation unless performed in the relevant session.
 
 **Documentation maintenance note**
 
@@ -15191,4 +15188,32 @@ The user approved proceeding with development and expressed eagerness to continu
 2. Diagnose dark frame-edge shadows by comparing atlas source texels, raw Cycles target pixels, and final material/viewport output before changing atlas gutters, UVs, normals, or bake margin.
 3. Design a technically honest live-light approximation for Quake `delay` modes. Blender's native point/spot lights do not expose an arbitrary attenuation curve; delay 4 (local minlight clamp) in particular cannot be represented by simply changing point-light energy or cutoff distance. Keep the exact ericw attenuation implementation in the Quake Direct CPU path.
 4. Continue toward the generated-artifact layout `<maps>/##slipgate/<map-name>/` when non-BSP outputs are generated.
+
+## 2026-11-10 — Slipgate 0.20.4 implementation pass
+
+### User direction
+The user approved implementing the remaining development work and requested an installable add-on link for Blender testing.
+
+### Implemented
+- Kept the staged Cycles bake progress/logging from the prior implementation.
+- Changed the Cycles bake margin from zero to a gutter-derived margin, scaled by working resolution, using `EXTEND` where available. The previous margin and margin type are restored after the bake.
+- Added `lighting.blender_live_light_preview_parameters()` to calibrate imported native Blender point/spot lights by Quake delay mode. Delay 2 maps to inverse-square falloff; delays 0, 1 and 5 are labelled approximations; delays 3 and 4 remain fallbacks due to native-light model limitations. Exact static delay equations remain in Quake Direct CPU solver.
+- Removed the manual Create ##slipgate Folder operator and Quick Action.
+- Added per-map generated-artifact path helpers. Palette-converted PNGs, lighting diagnostics and self-test reports use `<map directory>/##slipgate/<map name>/`. Folder creation is deferred until output generation; BSP exports and decoupled BSPs remain beside the source map.
+- Bumped add-on version and package metadata to 0.20.4; updated README and regression tests.
+
+### Git and package
+- Branch: `fix/v0.11.1-metadata-style-order-test`
+- Main implementation commit: `8b342e56bc5181e1af20d5e9db4e638b7acee77c`
+- Latest documentation update at this point: `0fb124e720a66501b53608a56bacc3edf6538649`
+- CI package artifact: `Quake-Surface-Studio-v0.20.4-Blender-Install`, artifact ID `13756980665`, SHA-256 `92e74e8d6d53d6562f5cf9e1a530b2aaecdbcc53f1abdc15f55315a1be28f4c1`.
+
+### Verification
+- QSS Python tests passed (workflow run 606).
+- Quake Texture Converter GUI tests passed (workflow run 65).
+- CI built the Blender install package. No Blender 5.2 GUI, Cycles bake, QBSP or Ironwail session was run. The bake-margin change is therefore a testable mitigation, not a verified fix for the frame-edge shadow.
+- Live-light delay 0/1/5 are approximations and 3/4 are fallback modes; do not describe the native Blender preview as fully equivalent to ericw-tools.
+
+### User test request
+Install the 0.20.4 package, then test Cycles bake edge coverage, live-light delay modes, per-map non-BSP output folders and normal map/paint/export workflows. Capture diagnostics if the dark frame edges persist.
 
