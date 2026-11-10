@@ -7714,7 +7714,7 @@ class QSS_OT_frame_selection(Operator):
         self._target_label = label
         self._clip_watch_started = False
 
-        if _qss_is_texture_paint_context(context):
+        if _qss_focus_clip_context(context):
             near_gap = max(radius * 0.02, unit_scale * 0.05, 0.005)
             far_gap = max(radius * 1.5, unit_scale * 2.0, 0.1)
             self._space.clip_start = max(0.0001, distance - near_gap)
