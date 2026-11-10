@@ -15181,6 +15181,8 @@ The user approved proceeding with development and expressed eagerness to continu
 - Changed file: `quake_surface_studio (zip me for blender)/addon.py`
 
 ### Verification status
+
+- Follow-up CI check: both workflows completed successfully — QSS Python tests (run 583) and Quake Texture Converter GUI tests (run 53), for implementation commit `811bce7066763bd553390021eb70f82eca4c260d`.
 - GitHub Actions QSS Python tests and Quake Texture Converter GUI tests were observed in progress immediately after the commit; their final result has not yet been confirmed.
 - No Blender GUI/Cycles bake was run in this implementation pass. The user must verify the staged progress display in Blender 5.2.
 
