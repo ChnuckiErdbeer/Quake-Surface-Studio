@@ -1,4 +1,5 @@
 import unittest
+import math
 
 import viewport_utils
 
@@ -51,6 +52,22 @@ class ViewportUtilsTests(unittest.TestCase):
                          (0.0, 1.0, 0.0))
         with self.assertRaisesRegex(ValueError, "three-dimensional"):
             viewport_utils.face_normal_toward_view((1, 0), (0, 0, 1))
+
+    def test_viewport_fov_converts_to_blender_focal_length(self):
+        self.assertAlmostEqual(viewport_utils.viewport_lens_from_fov(90.0), 16.0, places=6)
+        self.assertAlmostEqual(
+            viewport_utils.viewport_lens_from_fov(60.0),
+            32.0 / (2.0 * math.tan(math.radians(30.0))),
+            places=6,
+        )
+
+    def test_viewport_fov_rejects_invalid_values(self):
+        for value in (0.0, 9.9, 150.1, float("nan"), float("inf")):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    viewport_utils.viewport_lens_from_fov(value)
+        with self.assertRaises(ValueError):
+            viewport_utils.viewport_lens_from_fov(90.0, sensor_width=0.0)
 
     def test_invalid_points_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "empty selection"):
