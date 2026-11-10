@@ -55,10 +55,11 @@
 
 **Immediate next technical steps**
 
-1. Fix and test the missing `QSS_PT_main` panel/registration reference so the add-on imports and enables cleanly in Blender 5.2.
-2. Trace the exact source of the 80×128/power-of-two error through the Test in Ironwail operator, export validation, external compiler invocation and resulting logs.
-3. Add regression tests for the chosen texture-dimension rule and UV/texinfo preservation; then test a painted wall through the complete export and Ironwail launch path.
-4. Keep Slipgate as the project-level name while making any QSS package/identifier migration deliberate and complete.
+1. On the next repository pass, clean the first chapter of `ai chat history/fullhisory01.txt`. The user reports that the first chapter in the clean Markdown archive has been corrected; use that corrected chapter as the source of truth, replace the wrong first chapter in the TXT, and remove PDF-rip artefacts (page counters/headers, repeated chat URLs, split words, extraction debris and broken layout) while preserving the actual conversation. Verify the first chapter against the corrected Markdown after editing.
+2. Fix and test the missing `QSS_PT_main` panel/registration reference so the add-on imports and enables cleanly in Blender 5.2.
+3. Trace the exact source of the 80×128/power-of-two error through the Test in Ironwail operator, export validation, external compiler invocation and resulting logs.
+4. Add regression tests for the chosen texture-dimension rule and UV/texinfo preservation; then test a painted wall through the complete export and Ironwail launch path.
+5. Keep Slipgate as the project-level name while making any QSS package/identifier migration deliberate and complete.
 
 ---
 
@@ -66,7 +67,7 @@
 **Coverage:** 8–10 November 2026  
 **Ordering:** Conversation exports are sorted by their recorded date and time. Posts remain in their original order within each conversation. The Quake Texture Converter transcript (10 November, 03:58) is placed before *Quake Lightmap Workflow (13)* (10 November, 05:45), correcting the order in the raw extraction.  
 **Cleanup:** Repeated PDF page headers, page counters, chat-footer URLs, citation-card scraps and extraction-status lines have been removed. Text wrapping has been reflowed; code, command sequences, lists and console output are separately formatted.  
-**Preservation:** The original `fullhisory01.txt` remains unchanged. This cleaned archive contains all 217 user posts and 212 assistant posts found in that TXT.  
+**Preservation:** The raw `fullhisory01.txt` is an extraction artifact and is not guaranteed to match the corrected clean Markdown transcript. Its first chapter is currently known to be wrong; see the 2026-11-10 handoff note at the end of this file for the requested repair. The original extraction counts (217 user posts and 212 assistant posts) describe the earlier source and must not be treated as a verified count after chapter replacement.  
 **Scope note:** `Quake Lightmap Workflow (0).pdf` is present separately in the repository but was not included in the TXT extraction, so it is not reconstructed or silently added here.
 
 ## Conversation index
@@ -14885,3 +14886,20 @@ Added a maintainer guide at the beginning of this archive. It explains the trans
 ### Reference and evidence discipline
 
 Prefer the active branch's source and README over assumptions based on older versions. Use the Blender 5.2 API docs for Blender API behavior, the Quake BSP specification and actual compiler/engine source for format constraints, and Ironwail's own source/release notes for target-engine behavior. When a report conflicts with a format rule or source implementation, record both and identify the exact layer that emits the error before changing code.
+
+
+## 2026-11-10 — Corrected first chapter in the clean transcript; raw TXT cleanup pending
+
+### You
+
+I put the wrong first chapter into the txt version. I repaired it in the readme now. You will recognize it as having pdf rip artefacts again. please clean this up when you are there the next time.
+
+### ChatGPT
+
+Acknowledged. The user corrected the first chapter in the clean Markdown conversation archive (commit `c743973c832e3fd439081a32fa282fe42e4410a7`, message `Exchanged a chapter`). The parallel raw extraction `ai chat history/fullhisory01.txt` still begins with the wrong `Setup Quake Mod Environment` chapter, while the repaired clean Markdown transcript now begins with `Quake Lightmap Workflow (1)`.
+
+**Deferred task — do on the next repository pass, not as an unrequested immediate rewrite:** clean the first chapter in `fullhisory01.txt`, using the corrected first chapter in `Slipgate_Chat_History_Clean.md` as the content source of truth. Remove PDF-rip artefacts such as page headers/counters, repeated conversation URLs, line-wrap breaks, split words, extraction debris and damaged layout. Preserve the actual user/assistant content and the other chapters. Verify that the TXT's first chapter matches the corrected clean transcript before committing.
+
+The user asked for this to be handled the next time repository work is being done. Until that task is carried out, the raw TXT must be treated as stale and must not be used as the authoritative source for the first chapter.
+
+---
