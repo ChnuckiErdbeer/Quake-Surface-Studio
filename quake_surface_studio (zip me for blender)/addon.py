@@ -9753,7 +9753,7 @@ class QSS_PT_main(Panel):
     bl_idname = "QSS_PT_main"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Quake"
+    bl_category = "Slipgate"
     bl_order = 10
 
     def draw(self, context):
@@ -9765,7 +9765,7 @@ class QSS_PT_project(Panel):
     bl_idname = "QSS_PT_project"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Quake"
+    bl_category = "Slipgate"
     bl_parent_id = "QSS_PT_main"
     bl_order = 20
 
@@ -9834,7 +9834,7 @@ class QSS_PT_lighting(Panel):
     bl_idname = "QSS_PT_lighting"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Quake"
+    bl_category = "Slipgate"
     bl_parent_id = "QSS_PT_main"
     bl_order = 30
 
@@ -9998,7 +9998,7 @@ class QSS_PT_stats(Panel):
     bl_idname = "QSS_PT_stats"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Quake"
+    bl_category = "Slipgate"
     bl_parent_id = "QSS_PT_main"
     bl_order = 40
     bl_options = {"DEFAULT_CLOSED"}

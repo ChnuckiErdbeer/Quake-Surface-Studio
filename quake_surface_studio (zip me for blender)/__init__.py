@@ -1,10 +1,10 @@
 bl_info = {
-    "name": "Quake Surface Studio",
+    "name": "Slipgate",
     "author": "OpenAI",
     "version": (0, 20, 1),
     "blender": (3, 6, 0),
-    "location": "View3D > Sidebar > Quake",
-    "description": "Quake BSP editing, lighting, map audits and engine integration",
+    "location": "View3D > Sidebar > Slipgate",
+    "description": "Quake BSP editing, texture painting, lighting, map audits and engine integration",
     "category": "Import-Export",
 }
 

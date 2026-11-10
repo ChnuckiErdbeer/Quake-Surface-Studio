@@ -35,7 +35,7 @@
 
 - Repository: [ChnuckiErdbeer/Quake-Surface-Studio](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio)
 - Working branch for this archive update: [`fix/v0.11.1-metadata-style-order-test`](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/tree/fix/v0.11.1-metadata-style-order-test)
-- The branch README identifies the add-on as **Quake Surface Studio 0.20.0**. Its package metadata still calls it “Quake Surface Studio”; the user's broader project-name decision is Slipgate.
+- The add-on patch version is **Slipgate 0.20.1**. The installable Python package folder and internal QSS identifiers remain `quake_surface_studio` / `QSS` for compatibility; Blender's visible add-on name and sidebar category are Slipgate.
 - The user is testing in **Blender 5.2** and wants the map workflow to launch/test in **Ironwail**.
 
 **Current implementation status — 2026-11-10 repository pass**
@@ -44,11 +44,11 @@
 2. **80×128 face-paint export failure — fixed in source.** The exact “width and height must be powers of two” error is raised by Slipgate's _encode_image_to_miptex() preflight in addon.py, before QBSP or Ironwail is launched. The face-local dimension helper previously rounded to multiples of eight, allowing an 80×128 paint image through to the exporter. texture_export.quake_texture_dimension() now rounds upward to the next power of two, with a minimum of 16 and maximum of 512. The face-local texinfo/UV projection retains the original texel pitch; the padded pixels sit outside the visible face footprint, while spans over 512 are downsampled. Automated tests cover this rule and projection preservation. End-to-end painting/export/Ironwail acceptance remains unverified.
 3. **Chat history — repaired in this pass.** The first chapter of fullhisory01.txt has been replaced with a plain-text rendering of the corrected Quake Lightmap Workflow (1) chapter from Slipgate_Chat_History_Clean.md. PDF-rip page headers/counters, repeated conversation URLs and extraction-status debris from the incorrect chapter are no longer carried over. The next chapter, Quake Lightmap Workflow (2), remains the original raw transcript content and its boundary was checked.
 4. **Version.** The add-on patch version is advanced from 0.20.0 to **0.20.1**. The add-on README now documents the registration and face-local texture export fixes. Package metadata remains internally named Quake Surface Studio/QSS; Slipgate remains the broader project name.
-5. **Validation limits.** No Blender GUI, QBSP compile or Ironwail process was available in this session. Do not report those as passed. GitHub Actions should run the standalone Python suite and compile check after this commit; inspect the resulting workflow before claiming CI success.
+5. **Validation.** GitHub Actions run `42769969091` for commit `3ed3abb79b699aa3f0a58c18a75127187717f6ef` completed successfully: Python module compilation, all standalone tests, version extraction, Blender package assembly and artifact upload passed. The build artifact is `Quake-Surface-Studio-v0.20.1-Blender-Install`. Blender 5.2 GUI activation, painted-wall export, QBSP and Ironwail acceptance remain unverified and require an interactive end-to-end check.
 
 **Useful source locations in the inspected branch**
 
-- `addon.py`: face-local texture dimension helper and bake path, approximately lines 840–945; creation/assignment of `QSS_Face_..._Paint` images, approximately lines 5425–5470; panel definitions and `CLASSES` registration tuple, approximately lines 9750–10100; `register()` begins around line 10225.
+- `addon.py`: face-local texture dimension helper and bake path, approximately lines 840–945; miptexture validation in `_encode_image_to_miptex`, approximately line 3475; panel definitions and `CLASSES` registration tuple, approximately lines 9750–10100; `register()` begins around line 10225.
 - `texture_export.py`: `quake_texture_dimension()` and face-local texinfo projection helpers, approximately lines 1–50.
 - `README.md`: current package feature description and validation notes.
 - `tests/`: BSP29, colour and lighting tests. Check the current tree for the complete test set before assuming these are exhaustive.
@@ -14913,3 +14913,9 @@ ok you were working on the next version of slipgate so continue and fix the chat
 ### ChatGPT
 
 Continued on fix/v0.11.1-metadata-style-order-test. Fixed the missing QSS_PT_main parent panel registration, removed the undefined QSS_PT_navigation registration entry, and added a static AST regression test for class registration and panel-parent references. Corrected face-local texture dimensions to round up to powers of two (16–512), preserving the face's original texel footprint in texinfo/UV space; added regression tests for the 80×128 case and projection preservation. Identified that the power-of-two error is raised by Slipgate's own miptexture export preflight before QBSP/Ironwail, not by the engine. Bumped the add-on patch version to 0.20.1 and documented the changes. Replaced the incorrect first chapter in fullhisory01.txt with the corrected Quake Lightmap Workflow (1) transcript from the clean Markdown archive, retaining the following chapter and removing extraction artefacts from the replaced section. Automated tests and Blender/Ironwail validation are to be verified after the commit; no interactive Blender or engine run has been claimed.
+
+## 2026-11-10 — Slipgate branding and CI verification
+
+### ChatGPT
+
+Updated the visible Blender add-on name, sidebar category and install instructions to **Slipgate**, while retaining the `quake_surface_studio` package folder and QSS internal identifiers for compatibility. GitHub Actions run `42769969091` passed module compilation, the complete standalone test suite, version extraction, Blender package assembly and artifact upload for version 0.20.1. The uploaded install artifact is available from the workflow run; interactive Blender 5.2 and Ironwail validation remain outstanding.

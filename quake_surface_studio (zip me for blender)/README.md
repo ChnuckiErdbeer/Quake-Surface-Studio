@@ -1,4 +1,4 @@
-# Quake Surface Studio 0.20.1
+# Slipgate 0.20.1
 
 ## 0.20.1 — Registration and face-paint export fixes
 
@@ -524,8 +524,8 @@ The longer-term direction is a dedicated **Quake Studio** workspace with a large
 ## Install
 
 1. Install `quake_surface_studio_0.10.0.zip` through Blender **Edit → Preferences → Add-ons / Get Extensions → Install from Disk** (wording varies by Blender version).
-2. Enable **Quake Surface Studio**.
-3. In a 3D View, press `N` and open the **Quake** sidebar tab.
+2. Enable **Slipgate**.
+3. In a 3D View, press `N` and open the **Slipgate** sidebar tab.
 4. Set the Quake game directory (the folder containing `id1`, or `id1` itself) and import a `.bsp` file.
 5. For a normal Quake BSP leave **Invert Z axis** unchecked. The default scale is 0.0254 metres per Quake unit.
 
