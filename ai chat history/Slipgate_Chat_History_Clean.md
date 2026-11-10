@@ -37,8 +37,8 @@
 - Working branch: `fix/v0.11.1-metadata-style-order-test`
 - Add-on version: **Slipgate 0.20.4** (`__init__.py` and `addon.py`).
 - Main implementation: `quake_surface_studio (zip me for blender)/addon.py`; Quake lighting helpers: `lighting.py`; tests: `tests/`.
-- Latest implementation commit recorded in this handoff: `8b342e56bc5181e1af20d5e9db4e638b7acee77c`. Latest README-only update: `0fb124e720a66501b53608a56bacc3edf6538649`.
-- Latest verified Blender install artifact for the implementation commit: `Quake-Surface-Studio-v0.20.4-Blender-Install`, artifact ID `13756980665`, SHA-256 `92e74e8d6d53d6562f5cf9e1a530b2aaecdbcc53f1abdc15f55315a1be28f4c1`. It is a GitHub Actions artifact from run 606 and expires 2027-02-08.
+- Latest implementation commit recorded in this handoff: `ad5a5c013ce1fa07fd574da15d8dcc908f092701`. Latest README-only update: `0fb124e720a66501b53608a56bacc3edf6538649`.
+- Latest verified Blender install artifact for the implementation commit: `Quake-Surface-Studio-v0.20.4-Blender-Install`, artifact ID `13755493333`, SHA-256 `62e731424fd76795e7455cfa3560263e555c737fb1b4f9af32aea8876895295b`. It is a GitHub Actions artifact from run 606 and expires 2027-02-08.
 - Package folder and internal identifiers remain `quake_surface_studio` / QSS for compatibility; visible branding is Slipgate.
 - Target interactive environment: Blender 5.2. Target engine includes Ironwail.
 
@@ -60,8 +60,8 @@
 
 **Verification status**
 
-- GitHub Actions QSS Python tests passed (run 606).
-- GitHub Actions Quake Texture Converter GUI tests passed (run 65).
+- GitHub Actions QSS Python tests passed (run 611).
+- GitHub Actions Quake Texture Converter GUI tests passed (run 68).
 - CI compiles the Python package, runs standalone tests, and assembles the Blender install artifact. It does not run Blender 5.2 GUI, a real Cycles bake, live Eevee preview, QBSP or Ironwail.
 - No Blender GUI or engine test was performed during this implementation pass. The user must verify bake-edge appearance, delay modes, folder creation and general workflow in Blender 5.2.
 
@@ -15206,6 +15206,7 @@ The user approved implementing the remaining development work and requested an i
 - Branch: `fix/v0.11.1-metadata-style-order-test`
 - Main implementation commit: `8b342e56bc5181e1af20d5e9db4e638b7acee77c`
 - Latest documentation update at this point: `0fb124e720a66501b53608a56bacc3edf6538649`
+- Final cleanup commit removed the now-unregistered legacy folder operator class: `ad5a5c013ce1fa07fd574da15d8dcc908f092701`.
 - CI package artifact: `Quake-Surface-Studio-v0.20.4-Blender-Install`, artifact ID `13756980665`, SHA-256 `92e74e8d6d53d6562f5cf9e1a530b2aaecdbcc53f1abdc15f55315a1be28f4c1`.
 
 ### Verification
