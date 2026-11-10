@@ -2767,7 +2767,7 @@ def _entity_spot_direction(entity, target_map):
 
 
 def _apply_quake_light_energy_scale(scene):
-    """Apply the live multiplier and per-map source-match calibration."""
+    """Apply the user live-light slider and any explicit per-light calibration."""
     scale = max(0.0, float(getattr(scene, 'qss_light_energy_scale', 1.0)))
     updated = 0
     for light_obj in scene.objects:
@@ -2778,16 +2778,18 @@ def _apply_quake_light_energy_scale(scene):
         if raw_value is None:
             continue
         range_scale = float(light_obj.get('qss_quake_world_range', 1.0))
-        # Keep the user's live-light scale independent of bake source matching.
-        # Atlas normalization belongs to the baked image only; applying that
-        # ratio to scene lamps can amplify every imported light dramatically.
+        # Only the explicit Auto-calibrate action may change this per-light
+        # multiplier. Cycles source-match atlas normalization never writes it.
+        manual_calibration = max(
+            0.0, float(light_obj.get('qss_manual_energy_calibration', 1.0))
+        )
         light_obj.data.energy = lighting_utils.scaled_quake_light_energy(
-            raw_value, scale
+            raw_value, scale * manual_calibration
         )
         if range_scale <= 0.0:
             light_obj.data.energy = 0.0
         light_obj['qss_applied_energy_scale'] = scale
-        light_obj['qss_applied_energy_calibration'] = 1.0
+        light_obj['qss_applied_energy_calibration'] = manual_calibration
         updated += 1
     return updated
 
@@ -2840,6 +2842,9 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
     obj['qss_world_anglescale'] = float(world_anglescale)
     obj['qss_world_maxlight'] = max(1.0, _parse_entity_float(world, '_maxlight', 255.0))
     obj['qss_light_energy_calibration'] = float(obj.get('qss_light_energy_calibration', 1.0))
+    obj['qss_manual_light_energy_calibration'] = float(
+        obj.get('qss_manual_light_energy_calibration', 1.0)
+    )
     spawn = None
     light_count = 0
     inferred_style_count = 0
@@ -2903,6 +2908,9 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
         light_obj['qss_quake_style_was_inferred'] = bool(style_inferred)
         light_obj['qss_quake_color'] = list(color_rgb)
         light_obj['qss_energy_calibration'] = float(obj.get('qss_light_energy_calibration', 1.0))
+        light_obj['qss_manual_energy_calibration'] = float(
+            obj.get('qss_manual_light_energy_calibration', 1.0)
+        )
         light_obj['qss_quake_origin'] = list(origin)
         light_obj['qss_quake_range'] = float(range_qu)
         light_obj['qss_quake_wait'] = float(wait)
