@@ -6361,7 +6361,7 @@ class QSS_OT_bake_scene_lights(Operator):
             # active BSP and its own QSS lights are render-visible. Other maps'
             # lights stay excluded; merely checking the QSS role would also
             # enable lights belonging to every hidden map in the scene.
-            active_light_set = set(imported_lights)
+            active_light_pointers = {int(light_obj.as_pointer()) for light_obj in imported_lights}
             for light_obj in scene.objects:
                 if light_obj.type != 'LIGHT':
                     continue
@@ -6371,7 +6371,7 @@ class QSS_OT_bake_scene_lights(Operator):
                     bool(light_obj.hide_viewport),
                     bool(light_obj.hide_get()),
                 ))
-                is_active_map_light = light_obj in active_light_set
+                is_active_map_light = int(light_obj.as_pointer()) in active_light_pointers
                 light_obj.hide_render = not is_active_map_light
                 if is_active_map_light:
                     light_obj.hide_viewport = False
