@@ -5900,10 +5900,16 @@ def _qss_estimate_texture_paint_memory(context, obj):
     if len(spans) != len(indices):
         # Unknown source faces are conservatively estimated as 512x512 images.
         spans.extend([(512.0, 512.0)] * (len(indices) - len(spans)))
-    return palette_utils.estimate_face_local_paint_bytes(
+    estimate = palette_utils.estimate_face_local_paint_bytes(
         spans, bytes_per_face_pixel=16 if float_buffer else 4,
         atlas_size=512, bytes_per_atlas_pixel=16,
     )
+    # The face-local bake also holds temporary float arrays while sampling and
+    # packing the images. Use a conservative 3x multiplier for those working
+    # buffers; Blender undo and GPU allocations remain additional overhead.
+    estimate["working_buffer_reserve_bytes"] = estimate["peak_pixel_bytes"] * 2
+    estimate["peak_pixel_bytes"] *= 3
+    return estimate
 
 
 def _qss_available_memory_bytes():
@@ -5967,13 +5973,12 @@ def _qss_map_image_memory_bytes(obj):
 
 
 def _qss_paint_confirmation_needed(face_count, estimated_bytes, available_bytes):
-    """Ask before unusually large selections or allocations; never hard-reject."""
+    """Ask before a paint preparation that could create substantial image buffers."""
     return bool(
-        int(face_count) > QSS_PAINT_CONFIRM_FACE_COUNT
-        or int(estimated_bytes) >= 64 * 1024 * 1024
+        int(estimated_bytes) >= 32 * 1024 * 1024
         or (
             available_bytes is not None and available_bytes > 0
-            and int(estimated_bytes) >= int(available_bytes * 0.10)
+            and int(estimated_bytes) >= int(available_bytes * 0.05)
         )
     )
 
@@ -6032,7 +6037,7 @@ def _selected_edit_face_material(obj):
 
 class QSS_OT_activate_paint(Operator):
     bl_idname = "qss.activate_texture_paint"
-    bl_label = "Enter Texture Paint"
+    bl_label = "Prepare Texture Paint Anyway"
     bl_description = "Paint the active selected face material; switches from Edit Mode automatically"
 
     warning_face_count: IntProperty(default=0, options={'HIDDEN'})
@@ -6064,24 +6069,26 @@ class QSS_OT_activate_paint(Operator):
         layout = self.layout
         layout.alert = True
         layout.label(
-            text=f"Prepare Texture Paint for {self.warning_face_count} selected faces?",
-            icon="ERROR",
+            text=f"You selected {self.warning_face_count} faces. QSS must prepare paint images for these surfaces.",
+            icon="INFO",
         )
         layout.label(
-            text=f"Estimated peak new image buffers: {palette_utils.format_mib(self.warning_peak_bytes)}"
+            text=f"Estimated extra memory, including temporary working buffers: about {palette_utils.format_mib(self.warning_peak_bytes)}"
         )
         layout.label(
-            text=f"Existing QSS map image buffers: {palette_utils.format_mib(self.warning_existing_bytes)}"
+            text=f"Existing QSS map image buffers: about {palette_utils.format_mib(self.warning_existing_bytes)}"
         )
         if self.warning_available_bytes > 0:
             layout.label(
-                text=f"System/cgroup memory currently available: {palette_utils.format_mib(self.warning_available_bytes)}"
+                text=f"Currently available system memory: about {palette_utils.format_mib(self.warning_available_bytes)}"
             )
-        else:
-            layout.label(text="Available system memory could not be queried; estimate covers image buffers only.")
         layout.label(
-            text="Estimate excludes Blender undo data, material datablocks, GPU copies and other process overhead.",
+            text="This is an estimate. Blender also uses memory for undo history, GPU copies and other data, so actual use can be higher.",
             icon="INFO",
+        )
+        layout.label(
+            text="If memory runs out, Blender may crash and unsaved work may be lost. Safest option: Cancel and paint smaller batches.",
+            icon="ERROR",
         )
         layout.alert = False
 
@@ -6260,18 +6267,18 @@ class QSS_OT_activate_lightmap_paint(Operator):
         layout = self.layout
         layout.alert = True
         layout.label(
-            text=f"Paint the lightmap on {self.warning_face_count} selected faces?",
-            icon="ERROR",
-        )
-        layout.label(
-            text="Lightmap Paint reuses the existing atlas; it does not create one texture per face."
-        )
-        layout.label(
-            text=f"Current working atlas: {palette_utils.format_mib(self.warning_atlas_bytes)}"
-        )
-        layout.label(
-            text="A large face mask can still increase brush/undo work. Continue?",
+            text=f"You selected {self.warning_face_count} faces for Lightmap Paint.",
             icon="INFO",
+        )
+        layout.label(
+            text="QSS reuses the existing atlas; it does not create a separate image for every face."
+        )
+        layout.label(
+            text=f"Current working lightmap atlas: about {palette_utils.format_mib(self.warning_atlas_bytes)}"
+        )
+        layout.label(
+            text="Large selections can still increase Blender's undo and GPU memory use. If memory runs out, Blender may crash and unsaved work may be lost.",
+            icon="ERROR",
         )
         layout.alert = False
 
@@ -10120,6 +10127,7 @@ def _unregister_qss_classes():
     for stale_name in (
         "QSS_PT_texture", "QSS_PT_light_preview", "QSS_PT_imported_lights",
         "QSS_PT_quake_bake", "QSS_PT_cycles_bake", "QSS_PT_diagnostics", "QSS_PT_export",
+        "QSS_PT_palette_converter", "QSS_OT_check_quake_converter",
     ):
         stale_cls = getattr(bpy.types, stale_name, None)
         if stale_cls is not None:
