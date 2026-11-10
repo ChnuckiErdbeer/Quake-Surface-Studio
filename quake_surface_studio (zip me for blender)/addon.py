@@ -6650,6 +6650,74 @@ def _lightmap_sample_luminances(obj, image):
     return values
 
 
+def _lightmap_face_coverage(obj, image, threshold=1e-8):
+    """Summarize how many imported faces receive nonzero sampled bake luxels."""
+    mesh = obj.data
+    attrs = _qss_validate_face_domain_attributes(
+        mesh, ('qss_lm_has_data', 'qss_lm_atlas_x', 'qss_lm_atlas_y',
+               'qss_lm_sample_w', 'qss_lm_sample_h'),
+        'measure lightmap face coverage'
+    )
+    size = int(image.size[0])
+    resolution = _qss_lightmap_pixel_scale(obj, image)
+    scale = max(1, int(obj.get('qss_lightmap_scale', 1))) * resolution
+    gutter = max(0, int(obj.get('qss_lightmap_gutter', 0))) * resolution
+    pixels = array.array('f', [0.0]) * (size * size * 4)
+    image.update()
+    image.pixels.foreach_get(pixels)
+    total_faces = lit_faces = total_luxels = lit_luxels = 0
+    face_max_luminance = 0.0
+    for poly_index, _poly in enumerate(mesh.polygons):
+        if not _qss_safe_collection_item(
+            attrs['qss_lm_has_data'].data, poly_index, 'qss_lm_has_data'
+        ).value:
+            continue
+        total_faces += 1
+        x0 = int(_qss_safe_collection_item(
+            attrs['qss_lm_atlas_x'].data, poly_index, 'qss_lm_atlas_x'
+        ).value) * resolution + gutter
+        y0 = int(_qss_safe_collection_item(
+            attrs['qss_lm_atlas_y'].data, poly_index, 'qss_lm_atlas_y'
+        ).value) * resolution + gutter
+        width = int(_qss_safe_collection_item(
+            attrs['qss_lm_sample_w'].data, poly_index, 'qss_lm_sample_w'
+        ).value)
+        height = int(_qss_safe_collection_item(
+            attrs['qss_lm_sample_h'].data, poly_index, 'qss_lm_sample_h'
+        ).value)
+        face_lit = 0
+        face_max = 0.0
+        for sy in range(height):
+            top_y = y0 + sy * scale + (scale - 1) // 2
+            blender_y = size - 1 - top_y
+            for sx in range(width):
+                px = x0 + sx * scale + (scale - 1) // 2
+                if not (0 <= px < size and 0 <= blender_y < size):
+                    continue
+                offset = (blender_y * size + px) * 4
+                luminance = (
+                    0.2126 * pixels[offset]
+                    + 0.7152 * pixels[offset + 1]
+                    + 0.0722 * pixels[offset + 2]
+                )
+                total_luxels += 1
+                face_max = max(face_max, luminance)
+                if luminance > threshold:
+                    face_lit += 1
+                    lit_luxels += 1
+        if face_lit:
+            lit_faces += 1
+        face_max_luminance = max(face_max_luminance, face_max)
+    return {
+        'total_faces': total_faces,
+        'lit_faces': lit_faces,
+        'dark_faces': max(0, total_faces - lit_faces),
+        'total_luxels': total_luxels,
+        'lit_luxels': lit_luxels,
+        'face_max_luminance': face_max_luminance,
+    }
+
+
 def _image_pixels_mean(image):
     pixels = array.array('f', [0.0]) * (int(image.size[0]) * int(image.size[1]) * 4)
     image.update()
@@ -7372,6 +7440,8 @@ class QSS_OT_bake_scene_lights(Operator):
             bake_values = _lightmap_sample_luminances(obj, bake_target)
             raw_bake_mean = (sum(bake_values) / len(bake_values)) if bake_values else 0.0
             raw_image_stats = _image_rgb_statistics(bake_target)
+            raw_face_coverage = _lightmap_face_coverage(obj, bake_target)
+            obj['qss_last_bake_attempt_face_coverage'] = str(raw_face_coverage)
             source_image = bpy.data.images.get(obj.get('qss_original_lightmap_backup', ''))
             source_values = _lightmap_sample_luminances(obj, source_image) if source_image else []
             source_mean = (sum(source_values) / len(source_values)) if source_values else 0.0
@@ -7469,7 +7539,9 @@ class QSS_OT_bake_scene_lights(Operator):
                     pass
             self.report({'INFO'},
                         f"Bake complete: {updated_lights} lights, {len(material_states)} materials, "
-                        f"{len(values)} luxels, mean {obj['qss_last_bake_luxel_mean']:.4g}, "
+                        f"{raw_face_coverage['lit_faces']}/{raw_face_coverage['total_faces']} faces lit, "
+                        f"{raw_face_coverage['lit_luxels']}/{raw_face_coverage['total_luxels']} raw luxels lit, "
+                        f"mean {obj['qss_last_bake_luxel_mean']:.4g}, "
                         f"max {obj['qss_last_bake_luxel_max']:.4g}, "
                         f"raw mean {raw_bake_mean:.4g}, source mean {source_mean:.4g}, "
                         f"atlas scale {post_scale:.4g}, {bake_bounces} diffuse bounces. "
