@@ -7545,6 +7545,7 @@ class QSS_OT_bake_scene_lights(Operator):
             except RuntimeError:
                 pass
             bake_succeeded = True
+            _bake_progress(5, 'Bake validated and atlas updated; restoring Blender scene state')
             values = _lightmap_sample_luminances(obj, image)
             obj['qss_last_bake_luxel_mean'] = float(sum(values) / max(1, len(values)))
             obj['qss_last_bake_luxel_max'] = float(max(values, default=0.0))
