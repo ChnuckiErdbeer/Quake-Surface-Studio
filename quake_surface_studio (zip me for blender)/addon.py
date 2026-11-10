@@ -78,6 +78,7 @@ _QSS_CONFIG_DEFAULTS = {
     "rebake_behavior": "ASK",
     "lighting_mode_storage": "PER_MAP",
     "global_lighting_mode": "source",
+    "palette_converter_python": "",
 }
 
 
@@ -8432,6 +8433,11 @@ class QSS_OT_settings(Operator):
                ("GLOBAL", "Global", "Use one lighting mode for every imported map")),
         default="PER_MAP",
     )
+    palette_converter_python: StringProperty(
+        name="Quake converter Python",
+        description="Python executable from an environment with NumPy, Pillow, SciPy and scikit-image; blank uses Blender's Python",
+        subtype="FILE_PATH",
+    )
     import_lightmap_resolution: EnumProperty(
         name="Default working lightmap resolution",
         items=(("1", "1× · Original", "Original packed atlas resolution"),
@@ -8451,6 +8457,7 @@ class QSS_OT_settings(Operator):
         self.rebake_behavior = str(settings.get("rebake_behavior", "ASK")).upper()
         self.lighting_mode_storage = str(settings.get("lighting_mode_storage", "PER_MAP")).upper()
         self.import_lightmap_resolution = str(settings.get("import_lightmap_resolution", "1"))
+        self.palette_converter_python = str(settings.get("palette_converter_python", "") or "")
         if self.import_behavior not in {"ASK", "ADD", "REPLACE"}:
             self.import_behavior = "ASK"
         if self.export_mode not in {"AUTO", "CLASSIC", "ENHANCED", "BOTH"}:
@@ -8474,6 +8481,8 @@ class QSS_OT_settings(Operator):
         layout.prop(self, "export_mode")
         layout.prop(self, "prefer_enhanced_last_export")
         layout.prop(self, "import_lightmap_resolution")
+        layout.prop(self, "palette_converter_python")
+        layout.label(text="The Quake palette converter needs NumPy, Pillow, SciPy and scikit-image in this Python environment.", icon="INFO")
         layout.separator()
         layout.label(text="Lighting workflow", icon="LIGHT")
         layout.prop(self, "lighting_mode_storage")
@@ -8493,6 +8502,7 @@ class QSS_OT_settings(Operator):
             "export_mode": self.export_mode,
             "prefer_enhanced_last_export": bool(self.prefer_enhanced_last_export),
             "import_lightmap_resolution": self.import_lightmap_resolution,
+            "palette_converter_python": _qss_abspath(self.palette_converter_python or ""),
             "rebake_behavior": self.rebake_behavior,
             "lighting_mode_storage": self.lighting_mode_storage,
         })
@@ -9371,6 +9381,101 @@ class QSS_PT_navigation(Panel):
         focus.operator(QSS_OT_frame_selection.bl_idname, text="Focus", icon="VIEWZOOM")
 
 
+class QSS_OT_close_active_map(Operator):
+    bl_idname = "qss.close_active_map"
+    bl_label = "Close Active Map"
+    bl_description = "Remove the selected QSS map collection and all of its imported map objects"
+
+    collection_name: StringProperty(default="", options={"HIDDEN"})
+
+    @classmethod
+    def poll(cls, context):
+        return bool(_qss_scene_map_collections(getattr(context, "scene", None)))
+
+    def invoke(self, context, event):
+        scene = context.scene
+        name = str(scene.qss_active_map_collection or "")
+        if not name or name == "__QSS_NO_MAP__":
+            obj = context.object
+            name = str(obj.get("qss_map_collection", "") if _qss_is_map_object(obj) else "")
+        collection = bpy.data.collections.get(name) if name else None
+        if collection is None or not bool(collection.get("qss_map_collection", False)):
+            self.report({"WARNING"}, "Choose a loaded QSS map before closing it.")
+            return {"CANCELLED"}
+        self.collection_name = name
+        return context.window_manager.invoke_props_dialog(self, width=440)
+
+    def draw(self, context):
+        collection = bpy.data.collections.get(self.collection_name)
+        source = str(collection.get("qss_source_path", "") if collection else "")
+        layout = self.layout
+        layout.label(text=f"Close '{os.path.basename(source) if source else self.collection_name}'?")
+        layout.label(text="Imported objects, paint images and unsaved Blender edits in this map will be removed.", icon="ERROR")
+        layout.label(text="The original BSP file on disk is not changed.")
+
+    def execute(self, context):
+        scene = context.scene
+        collection = bpy.data.collections.get(self.collection_name)
+        if collection is None or not bool(collection.get("qss_map_collection", False)):
+            self.report({"WARNING"}, "The selected QSS map collection no longer exists.")
+            return {"CANCELLED"}
+        try:
+            if context.mode != "OBJECT":
+                bpy.ops.object.mode_set(mode="OBJECT")
+            closing_objects = _qss_collection_objects(collection)
+            remaining = [
+                item for item in _qss_scene_map_collections(scene)
+                if item.name != self.collection_name
+            ]
+            active = context.view_layer.objects.active
+            if active in closing_objects and _qss_is_map_object(active):
+                if active.get("qss_preview_mode", "source") in {"realtime", "cycles"}:
+                    try:
+                        _set_lighting_preview(context, active, "source")
+                    except Exception:
+                        pass
+
+            if remaining:
+                _qss_activate_map_collection(scene, remaining[0].name, context)
+            else:
+                # When the final QSS map closes, restore objects that were hidden
+                # by QSS map isolation, including non-QSS scene content.
+                for item in list(scene.objects):
+                    try:
+                        if "qss_isolation_original_hide" in item:
+                            item.hide_set(bool(item.get("qss_isolation_original_hide", False)))
+                            del item["qss_isolation_original_hide"]
+                        if "qss_isolation_original_hide_render" in item:
+                            item.hide_render = bool(item.get("qss_isolation_original_hide_render", False))
+                            del item["qss_isolation_original_hide_render"]
+                        item.select_set(False)
+                    except (AttributeError, RuntimeError, ReferenceError):
+                        pass
+                try:
+                    context.view_layer.objects.active = None
+                except Exception:
+                    pass
+
+            if not _qss_remove_map_collection(scene, self.collection_name):
+                raise bsp.BSPError("QSS could not remove the selected map collection.")
+            if not remaining:
+                global _qss_map_switch_depth
+                _qss_map_switch_depth = True
+                try:
+                    scene.qss_active_map_collection = "__QSS_NO_MAP__"
+                finally:
+                    _qss_map_switch_depth = False
+            self.report(
+                {"INFO"},
+                f"Closed map '{self.collection_name}'. "
+                + (f"Active map is now '{remaining[0].name}'." if remaining else "The scene's non-QSS content was restored."),
+            )
+            return {"FINISHED"}
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not close QSS map: {exc}")
+            return {"CANCELLED"}
+
+
 class QSS_PT_project(Panel):
     bl_label = "MAIN"
     bl_idname = "QSS_PT_project"
@@ -9415,33 +9520,17 @@ class QSS_PT_project(Panel):
         test_button.operator(
             QSS_OT_test_in_ironwail.bl_idname, text="Test in Ironwail", icon="PLAY"
         )
-        last_path = _qss_last_export_path(obj)
-        launch_game_dir = _qss_abspath(obj.get("qss_game_dir", "") or scene.qss_game_dir or "") if _qss_is_map_object(obj) else ""
-        launch_inside_game = False
-        if last_path and launch_game_dir and os.path.isdir(launch_game_dir):
-            try:
-                relative_export = os.path.relpath(os.path.abspath(last_path), launch_game_dir)
-                launch_inside_game = relative_export != os.pardir and not relative_export.startswith(os.pardir + os.sep)
-            except ValueError:
-                launch_inside_game = False
-        last_export_button = launch.row(align=True)
-        last_export_button.enabled = bool(
-            _qss_is_map_object(obj) and last_path and os.path.isfile(last_path)
-            and launch_inside_game and scene.qss_quake_root
-            and os.path.isdir(_qss_abspath(scene.qss_quake_root))
-            and scene.qss_ironwail_executable
-            and os.path.isfile(_qss_abspath(scene.qss_ironwail_executable))
-        )
-        last_export_button.operator(
-            QSS_OT_open_last_export.bl_idname, text="Last Export", icon="FILE_FOLDER"
-        )
         maps = _qss_scene_map_collections(scene)
         if maps:
             layout.separator()
-            active_map_row = layout.row()
+            active_map_row = layout.row(align=True)
             # The map-switch callback safely exits Edit/Paint mode before
             # changing the active collection, so the selector need not be locked.
             active_map_row.prop(scene, "qss_active_map_collection", text="Loaded Map")
+            close_button = active_map_row.row(align=True)
+            close_button.operator(
+                QSS_OT_close_active_map.bl_idname, text="Close", icon="TRASH"
+            )
         else:
             layout.label(text="No imported maps yet.", icon="INFO")
         if _qss_is_map_object(obj):
