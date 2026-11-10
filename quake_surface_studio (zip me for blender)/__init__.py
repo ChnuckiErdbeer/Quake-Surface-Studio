@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Slipgate",
     "author": "OpenAI",
-    "version": (0, 20, 2),
+    "version": (0, 20, 3),
     "blender": (3, 6, 0),
     "location": "View3D > Sidebar > Slipgate",
     "description": "Quake BSP editing, texture painting, lighting, map audits and engine integration",
