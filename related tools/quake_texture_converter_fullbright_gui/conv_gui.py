@@ -359,13 +359,22 @@ class ConverterGUI(tk.Tk):
     def _show_preview(self, which, path):
         widget = self.input_preview if which == 'input' else self.output_preview
         try:
-            with Image.open(path) as im:
+            with Image.open(path) as source:
                 zoom = max(0.25, min(4.0, float(self.preview_zoom.get())))
-                target = (max(1, int(470 * zoom)), max(1, int(230 * zoom)))
-                im.thumbnail(target, Image.Resampling.LANCZOS)
-                if im.mode not in ('RGB', 'RGBA'):
-                    im = im.convert('RGBA')
-                photo = ImageTk.PhotoImage(im.copy())
+                im = source.convert('RGBA')
+                # Keep the preview widget a fixed size. Zooming in crops around
+                # the image centre; zooming out leaves a neutral margin.
+                scaled_size = (max(1, int(470 * zoom)), max(1, int(230 * zoom)))
+                im.thumbnail(scaled_size, Image.Resampling.LANCZOS)
+                canvas = Image.new('RGBA', (470, 230), (52, 52, 52, 255))
+                if zoom >= 1.0:
+                    left = max(0, (im.width - 470) // 2)
+                    top = max(0, (im.height - 230) // 2)
+                    crop = im.crop((left, top, min(im.width, left + 470), min(im.height, top + 230)))
+                    canvas.alpha_composite(crop, ((470 - crop.width) // 2, (230 - crop.height) // 2))
+                else:
+                    canvas.alpha_composite(im, ((470 - im.width) // 2, (230 - im.height) // 2))
+                photo = ImageTk.PhotoImage(canvas)
             widget.configure(image=photo, text='')
             self.preview_refs[which] = photo
         except Exception as exc:
