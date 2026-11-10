@@ -477,10 +477,18 @@ def run():
     txt = bpy.data.texts.get('QSS_Blender_SelfTest') or bpy.data.texts.new('QSS_Blender_SelfTest')
     txt.clear()
     txt.write(text)
-    desktop = os.path.expanduser('~/Desktop')
-    if not os.path.isdir(desktop):
-        desktop = os.path.expanduser('~')
-    filename = os.path.join(desktop, 'QSS_Blender_SelfTest.txt')
+    active_obj = getattr(bpy.context, 'object', None)
+    source_path = bpy.path.abspath(active_obj.get('qss_source_path', '')) if active_obj and active_obj.get('qss_object_role') == 'quake_bsp29' else ''
+    if source_path:
+        map_stem = os.path.splitext(os.path.basename(source_path))[0] or 'Map'
+        clean_stem = bpy.path.clean_name(map_stem) or 'Map'
+        artifact_dir = os.path.join(os.path.dirname(source_path), '##slipgate', clean_stem)
+        os.makedirs(artifact_dir, exist_ok=True)
+    else:
+        artifact_dir = os.path.expanduser('~/Desktop')
+        if not os.path.isdir(artifact_dir):
+            artifact_dir = os.path.expanduser('~')
+    filename = os.path.join(artifact_dir, 'QSS_Blender_SelfTest.txt')
     with open(filename, 'w', encoding='utf-8') as handle:
         handle.write(text)
     print('\n' + text)
