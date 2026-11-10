@@ -2891,7 +2891,7 @@ def _qss_enter_face_edit_mode(context, obj):
 
 
 def _frame_player_start(context, obj):
-    """Place a 3D View camera at info_player_start and face its Quake yaw."""
+    """Place every open 3D View at info_player_start and face its Quake yaw."""
     if not obj or not obj.get('qss_has_player_start'):
         return False
     from mathutils import Vector
@@ -2899,20 +2899,33 @@ def _frame_player_start(context, obj):
     yaw = math.radians(float(obj.get('qss_player_yaw', 0.0)))
     forward = Vector((math.cos(yaw), math.sin(yaw), 0.0))
     rotation = forward.to_track_quat('-Z', 'Y')
+    screens = set()
     screen = getattr(context, 'screen', None)
-    changed = False
     if screen is not None:
-        for area in screen.areas:
+        screens.add(screen)
+    window_manager = getattr(context, "window_manager", None)
+    if window_manager is not None:
+        for window in window_manager.windows:
+            if window.screen is not None:
+                screens.add(window.screen)
+    changed = False
+    for target_screen in screens:
+        for area in target_screen.areas:
             if area.type != 'VIEW_3D':
                 continue
-            for space in area.spaces:
-                if space.type == 'VIEW_3D':
-                    region_3d = space.region_3d
-                    region_3d.view_perspective = 'PERSP'
-                    region_3d.view_rotation = rotation
-                    region_3d.view_location = position
-                    region_3d.view_distance = max(0.001, float(obj.get('qss_unit_scale', DEFAULT_QUAKE_UNIT_SCALE)) * 0.5)
-                    changed = True
+            space = area.spaces.active
+            if space is None or space.type != 'VIEW_3D':
+                continue
+            region_3d = space.region_3d
+            region_3d.view_perspective = 'PERSP'
+            region_3d.view_rotation = rotation
+            region_3d.view_location = position
+            region_3d.view_distance = max(0.001, float(obj.get('qss_unit_scale', DEFAULT_QUAKE_UNIT_SCALE)) * 0.5)
+            try:
+                area.tag_redraw()
+            except Exception:
+                pass
+            changed = True
     return changed
 
 def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_file,
@@ -7062,7 +7075,10 @@ class QSS_OT_frame_selection(Operator):
             if _qss_is_texture_paint_context(context):
                 old_clip_start = float(space.clip_start)
                 old_clip_end = float(space.clip_end)
-                near_gap = max(radius * 0.15, unit_scale * 0.25, 0.01)
+                # Move the near clipping plane almost onto the selected face
+                # so nearby occluding geometry is removed without clipping
+                # the focused surface itself.
+                near_gap = max(radius * 0.02, unit_scale * 0.05, 0.005)
                 far_gap = max(radius * 1.5, unit_scale * 2.0, 0.1)
                 # The camera sits on the face normal. A tight depth slab keeps
                 # nearer occluders and far-away geometry out while preserving
@@ -8278,7 +8294,8 @@ class QSS_PT_project(Panel):
         if maps:
             layout.separator()
             active_map_row = layout.row()
-            active_map_row.enabled = context.mode == "OBJECT"
+            # The map-switch callback safely exits Edit/Paint mode before
+            # changing the active collection, so the selector need not be locked.
             active_map_row.prop(scene, "qss_active_map_collection", text="Loaded Map")
         else:
             layout.label(text="No imported maps yet.", icon="INFO")
