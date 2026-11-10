@@ -34,23 +34,27 @@
 **Repository and source state**
 
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
-- Active working branch: fix/v0.11.1-metadata-style-order-test
-- Current package version: **Slipgate 0.20.2**. Package metadata in __init__.py and diagnostic metadata in addon.py both declare 0.20.2.
-- The installable folder and internal QSS identifiers remain quake_surface_studio / QSS for compatibility. Blender's visible add-on name and sidebar category are Slipgate.
-- Target interactive environment: Blender 5.2. Ironwail remains a target engine.
+- Active working branch: `fix/v0.11.1-metadata-style-order-test`
+- Current source/package version: **Slipgate 0.20.3**. `addon.py` ADDON_VERSION and package `__init__.py` metadata declare 0.20.3.
+- Latest CI-tested code commit: `0755aec7070b9b4010afadd85496823d1792df2f`. Later change `3463c51b73cd5f8af28137e9feb0b0df9726cb7c` only extends the package README's explanation of the manual light calibration action.
+- Install artifact: `Quake-Surface-Studio-v0.20.3-Blender-Install`, artifact ID `13749247827`, SHA-256 `6c46995851369427bbb1bf847b1c9086dd7e5a7693ec1c0e19b27eac7ec7d02c`. Downloaded and ZIP integrity test passed.
+- The install folder and internal QSS identifiers remain `quake_surface_studio` / QSS for compatibility. Visible branding and sidebar category are Slipgate.
+- Target interactive environment: Blender 5.2; target engine includes Ironwail.
 
-**Current implementation status — latest source commit pending final CI at time of this note**
+**Current implementation and verification status**
 
 1. **Blender 5.2 activation and Edit Mode appearance — user-reported PASS on 0.20.1.** The add-on enables and the greyish Edit Mode hue is gone.
-2. **Face texture painting and export — user-reported PASS on 0.20.1.** The user painted and exported the same wall that previously triggered the 80×128 image-dimension error. This verifies the face-local dimension repair, but does not yet verify 0.20.2's new material-zone BSP quantizer.
-3. **Material-zone conversion is now in the BSP export path.** The old nearest-colour-only encoder was removed. addon.py's _encode_image_to_miptex() now calls palette_utils.convert_rgba8_mip_chain(); each of the four mip levels is segmented/quantized through the material-zone algorithm with the configured five candidate ramps per zone. Standard BSP export performs conversion automatically. The separate Convert Image to Quake Palette button was removed from the regular Lighting panel; its operator remains available as an optional advanced image utility.
-4. **Transparency and fullbright handling.** Brace textures use alpha and Quake index 255 for transparent pixels; ordinary miptexes ignore Blender alpha. Embedded original fullbright indices are reused when source and edited image dimensions match; a sibling *_fullbrights.png mask can be used for loose source images. A differently-sized detached face-local image may not inherit the original embedded fullbright mask. This remains an edge case to test/refine.
-5. **Mip alpha regression fix — source and CI verified.** A follow-up source change ensures non-brace textures are made fully opaque before lower-mip downsampling, so alpha in Blender's source image cannot remove/darken RGB in lower mip levels. A regression test compares all four mip outputs for otherwise identical images with differing alpha. Final code commit 1ded23ae63965b47e87a3d4fb2aa0fb52f15fcaa passed the QSS Python and converter GUI workflows.
-6. **Lightmap-paint warning.** User supplied the full message for one face, a 64.0 MiB working atlas and 4881.2 MiB available RAM. The previous 32 MiB fixed minimum prompted even though the user had ample RAM. 0.20.2 changes the lightmap-specific threshold to 256 MiB or 10% of detected available memory and fixes singular/plural wording. Blender 5.2 verification remains outstanding.
-7. **Cycles bake preview still appears black — new user report, with a concrete calibration issue identified.** The 2026-11-10 repeat bake reported 165,763 luxels, mean 0.2597, max 744, raw mean 0.003793, source mean 0.2597 and atlas scale 68.47, then switched to Baked Lightmaps preview. These nonzero sampled statistics indicate the bake data is not simply all-zero. Source inspection found that the same source/raw ratio is used both for baked-atlas normalization and for new_calibration, which is then written to each imported light and reapplied through _apply_quake_light_energy_scale(). At energy scale 1 this can raise live light energy by about 68.47x. The atlas normalization and live-light calibration must be decoupled; the former is needed for source-matching, while the latter must not silently amplify the user's scene lights. The remaining all-black appearance needs to be separated into image-data vs viewport-preview failure in Blender 5.2.
-8. **Layer toggles — user-reported limitation remains open.** Source controls are intended to permit Object and Edit Mesh modes but are disabled during Texture Paint. The exact user's failure mode must be reproduced in Blender 5.2 before changing the mode transitions.
-9. **Shader suggestion.** BSP export now invokes the sophisticated Python material-zone converter. It is not a shader implementation. A palette-LUT shader could be a separate live preview feature but does not replace SLIC/material-zone segmentation and ramp selection.
-10. **CI/build evidence.** Final code commit 1ded23ae63965b47e87a3d4fb2aa0fb52f15fcaa passed QSS Python tests (run 42776124261) and converter GUI tests (run 42776124464). Compilation, standalone tests, version extraction, Blender package assembly and artifact upload all passed. Artifact Quake-Surface-Studio-v0.20.2-Blender-Install: ID 13743782618, SHA-256 d58877bc09972477b376fe155bc303f2f7271550e1c02a73223d3847c60710ba. The ZIP was retrieved and all entries passed unzip integrity testing. No interactive Blender GUI, QBSP or Ironwail test is claimed.
+2. **Texture paint/export dimensions — user-reported PASS on 0.20.1.** The user painted and exported the same wall that previously triggered the 80×128 image-dimension error. This predates the 0.20.3 colour conversion boundary change.
+3. **Material-zone Quake palette conversion is integrated into BSP export.** Edited and newly detached images are passed through `palette_utils.convert_rgba8_mip_chain()`, with zone segmentation and candidate ramp fitting at all four mip levels. Standard BSP export converts automatically; manual pre-conversion is not required.
+4. **New Ironwail brightness report — user-reported outstanding issue.** The user says the painted texture looks correct in Blender but brighter after BSP export in Ironwail. Source inspection found that `_qss_image_pixels_to_rgba8()` previously applied an sRGB transfer based only on the image colour-space label. 0.20.3 now distinguishes byte-backed images from float buffers: byte-backed sRGB codes are preserved, while float-buffer values are encoded from scene-linear to sRGB before palette conversion. This is intended to prevent double encoding. The new export still requires a fresh user export and Ironwail comparison; no engine acceptance is claimed.
+5. **Transparency/fullbright handling.** Brace textures encode alpha as Quake palette index 255; ordinary miptexes ignore Blender alpha at all mip levels. Embedded fullbright masks are reused when dimensions match; sibling `*_fullbrights.png` is supported for loose sources. Differently sized detached face-local images may still not inherit original embedded fullbright masks; validate this edge case.
+6. **Imported BSP face normals — source-level correction in 0.20.3, GUI verification pending.** Import now checks each face's vertex winding against its BSP plane normal plus `dface.side`, including optional Z reflection. Inconsistent winding is reversed before mesh construction while the vertex order used for UV assignment is reversed in lockstep. This is a plausible cause of sparse diffuse baking, not a confirmed root cause. Existing .blend maps are unchanged; the BSP must be re-imported for the correction to take effect.
+7. **Cycles bake still looks mostly black — user-reported failure.** Latest supplied log: 252 lights, 88 materials, 165763 luxels, mean 0.2597, max 743.9, raw mean 0.003793, source mean 0.2597, atlas scale 68.47, 2 diffuse bounces. User says `QSS_Lightmap_e1m1.bsp` is mostly black with a few connected ceiling-beam faces illuminated. The nonzero sampled mean shows some light is calculated, but does not show how broadly it is distributed. 0.20.3 records raw per-face/per-luxel coverage and adds `faces lit` and `raw luxels lit` to the bake report. A fresh re-import and bake are required to test the normal correction and see whether coverage improves.
+8. **Imported live-light energy.** A prior bug applied the source/raw atlas match factor to live lamps too, which could multiply them by ~68.47. Automatic source matching now scales only the baked atlas. An explicit per-light manual calibration multiplier is preserved separately and is changed only by the Auto-calibrate Live Lights to Source action. The user reports that the overly bright lights are gone and that Cycles falloff seems plausible; Eevee still falls off too fast. Eevee falloff remains an open tuning issue; no speculative range increase has been made.
+9. **Quick Actions — restored in 0.20.3.** A `QUICK ACTIONS` sidebar panel contains one horizontal row for WASD, Player Start, Isolate and Focus. It was absent from the preceding 0.20.2 UI.
+10. **`##slipgate` folder action — added in 0.20.3.** The Quick Actions panel has a button that creates `##slipgate` beside the currently loaded source BSP and stores the path on the map object. The folder is created on the user's machine only when the button is clicked in Blender; it has not been created in the user's local map directory by this remote repository edit.
+11. **Layer toggles.** The prior user report that painted texture/lightmap layers could only be disabled in Object Mode remains open; exact Blender 5.2 reproduction is still needed.
+12. **CI/build evidence.** Final code revision `0755aec7070b9b4010afadd85496823d1792df2f` passed QSS Python tests (workflow `42786501702`, job `unittest`) and converter GUI tests (workflow `42786501756`, job `converter-gui`). Python module compilation, standalone tests, version extraction, package assembly and artifact upload passed. Artifact digest matches the downloaded ZIP; `unzip -t` reported no errors. CI does not run Blender's interactive GUI, Cycles bake, QBSP or Ironwail.
 
 **Useful source locations**
 
@@ -15039,3 +15043,50 @@ Code commits: `485801435111bfdaba0d528cb9f08788b12fb2de` and `4b973246b6ee4d11b1
 ### Follow-up CI and install artifact verification
 
 The live-light calibration correction passed QSS Python tests (workflow run 42779159445) and converter GUI tests (workflow run 42779159701). The Blender install artifact was retrieved from the QSS workflow: artifact ID 13745646185, SHA-256 142a4ab9abe4b7c9f4ecdb1b4d40cc00a95cecb86297ef319ad66067e6ec893a. ZIP integrity check passed. No interactive Blender 5.2 test is claimed.
+
+
+## 2026-11-10 — Slipgate 0.20.3: Ironwail texture brightness, sparse Cycles bake, Quick Actions and map folder
+
+### You
+
+```text
+the painted texture still gets brighter on export in ironwil but not in blender
+
+No overly bright lighs anymore. The cycles lights even seem to have kind of the
+right falloff while the eevee ones still fall off to fast.
+
+Baked again black again.
+
+Bake complete: 252 lights, 88 materials, 165763 luxels, mean 0.2597, max 743.9,
+raw mean 0.003793, source mean 0.2597, atlas scale 68.47, 2 diffuse bounces.
+Switches to Baked Lightmaps preview.
+
+the QSS_Lightmap_e1m1.bsp is now mainly black but some faces are lit. But very
+few. They seem to belong together tho. Specifically some beam structures
+running on a ceiling.
+
+Where are the quick action buttons? The
+
+Create a ##slipgate folder in the current map
+```
+
+### ChatGPT
+
+Implemented Slipgate 0.20.3 changes on the active feature branch. The BSP export image reader now distinguishes byte-backed sRGB pixels from float-buffer scene-linear pixels, avoiding a second sRGB encoding step for byte textures before the existing material-zone Quake palette conversion. This is intended to correct the Ironwail brightness shift and still needs a fresh export/engine check.
+
+BSP import now validates face winding against the oriented plane normal and dface side flag, accounting for optional Z reflection. Inconsistent face vertices are reversed in lockstep with their positions used for texture UV generation. Existing Blender scenes need the BSP re-imported. This is a plausible correction for sparse Cycles illumination, not a proven fix.
+
+The Cycles bake report now includes the number of faces and raw luxels that receive nonzero light; Lighting Diagnostics stores the raw face-coverage dictionary. This will help distinguish a sparse bake from an image-preview issue on the next user bake.
+
+Automatic source matching is kept on the baked atlas only; it no longer boosts imported live lamp energy by the large source/raw ratio. The separate Auto-calibrate Live Lights to Source action retains an explicit manual multiplier, now stored separately from atlas normalization. User reports that lights are no longer excessively bright; Eevee's faster falloff remains an open engine-preview issue.
+
+Restored the QUICK ACTIONS panel with WASD, Player Start, Isolate and Focus on one row. Added Create ##slipgate Folder, which creates a folder beside the loaded BSP's source file when clicked in Blender. The repository change itself cannot create a folder in the user's local map directory.
+
+Version 0.20.3 CI passed. QSS Python workflow 42786501702 and converter GUI workflow 42786501756 both completed successfully. Artifact 13749247827 has SHA-256 6c46995851369427bbb1bf847b1c9086dd7e5a7693ec1c0e19b27eac7ec7d02c; the downloaded ZIP passed integrity testing. No Blender GUI, Cycles bake, QBSP or Ironwail test is claimed.
+
+### Next user validation
+
+1. Install 0.20.3, re-import the BSP, and export the same painted wall to compare with Ironwail.
+2. Re-bake after re-import and report the new `faces lit` and `raw luxels lit` counts. Save Lighting Diagnostics if coverage remains sparse.
+3. Confirm Quick Actions appear in the Slipgate sidebar and click Create ##slipgate Folder; the button displays the resolved directory path.
+4. Compare Eevee and Cycles falloff after the manual calibration state has been kept separate from automatic atlas matching.
