@@ -6326,6 +6326,14 @@ class QSS_OT_bake_scene_lights(Operator):
         }
         old_bake_settings = {}
         old_light_render_states = []
+        old_object_visibility = (
+            bool(obj.hide_render), bool(obj.hide_viewport), bool(obj.hide_get())
+        )
+        active_map_collection = bpy.data.collections.get(obj.get("qss_map_collection", ""))
+        old_map_collection_visibility = (
+            (bool(active_map_collection.hide_render), bool(active_map_collection.hide_viewport))
+            if active_map_collection is not None else None
+        )
         material_states = []
         bake_succeeded = False
         old_preview_mode = obj.get('qss_preview_mode', 'lightmap')
@@ -6349,14 +6357,42 @@ class QSS_OT_bake_scene_lights(Operator):
             obj['qss_last_bake_attempt_target'] = str(getattr(scene.render.bake, 'target', 'unavailable'))
             obj['qss_last_bake_attempt_type'] = 'DIFFUSE'
             obj['qss_last_bake_attempt_uv'] = light_uv.name
+            # Cycles renders the scene, so temporarily guarantee that the
+            # active BSP and its own QSS lights are render-visible. Other maps'
+            # lights stay excluded; merely checking the QSS role would also
+            # enable lights belonging to every hidden map in the scene.
+            active_light_set = set(imported_lights)
             for light_obj in scene.objects:
                 if light_obj.type != 'LIGHT':
                     continue
-                old_light_render_states.append((light_obj, bool(light_obj.hide_render)))
-                is_quake = light_obj.get('qss_light_role') in {
-                    'quake_entity_light', 'quake_world_sunlight'
-                }
-                light_obj.hide_render = not is_quake
+                old_light_render_states.append((
+                    light_obj,
+                    bool(light_obj.hide_render),
+                    bool(light_obj.hide_viewport),
+                    bool(light_obj.hide_get()),
+                ))
+                is_active_map_light = light_obj in active_light_set
+                light_obj.hide_render = not is_active_map_light
+                if is_active_map_light:
+                    light_obj.hide_viewport = False
+                    try:
+                        light_obj.hide_set(False)
+                    except Exception:
+                        pass
+            obj.hide_render = False
+            obj.hide_viewport = False
+            try:
+                obj.hide_set(False)
+            except Exception:
+                pass
+            if active_map_collection is not None:
+                active_map_collection.hide_render = False
+                active_map_collection.hide_viewport = False
+            context.view_layer.update()
+            obj['qss_last_bake_attempt_scene_visibility'] = (
+                f"mesh hide_render={bool(obj.hide_render)} hide_viewport={bool(obj.hide_viewport)} "
+                f"hide_get={bool(obj.hide_get())}; active_map={active_map_collection.name if active_map_collection else 'none'}"
+            )
 
             for name in ('target', 'use_pass_color', 'use_pass_diffuse', 'use_pass_emit', 'use_pass_glossy', 'use_pass_transmission', 'use_pass_direct', 'use_pass_indirect', 'use_clear', 'margin'):
                 if hasattr(scene.render.bake, name):
@@ -6468,7 +6504,9 @@ class QSS_OT_bake_scene_lights(Operator):
             if bool(getattr(scene, 'qss_bake_match_source', True)) and source_mean > 1e-8:
                 if raw_bake_mean <= 1e-8:
                     obj['qss_last_bake_attempt_lights'] = '; '.join(
-                        f'{lamp.name}: {float(lamp.data.energy):.6g}W hide_render={bool(lamp.hide_render)} hide_viewport={bool(lamp.hide_viewport)}'
+                        f'{lamp.name}: {float(lamp.data.energy):.6g}W type={lamp.data.type} '
+                        f'hide_render={bool(lamp.hide_render)} hide_viewport={bool(lamp.hide_viewport)} '
+                        f'hide_get={bool(lamp.hide_get())} cutoff={float(getattr(lamp.data, "cutoff_distance", 0.0)):.4g}'
                         for lamp in imported_lights
                     )
                     raise bsp.BSPError(
@@ -6586,9 +6624,22 @@ class QSS_OT_bake_scene_lights(Operator):
                         node.select = (node.get('qss_role') == 'lightmap')
                         if node.select:
                             mat.node_tree.nodes.active = node
-            for light_obj, was_hidden in old_light_render_states:
+            for light_obj, was_hidden_render, was_hidden_viewport, was_hidden_set in old_light_render_states:
                 try:
-                    light_obj.hide_render = was_hidden
+                    light_obj.hide_render = was_hidden_render
+                    light_obj.hide_viewport = was_hidden_viewport
+                    light_obj.hide_set(was_hidden_set)
+                except Exception:
+                    pass
+            try:
+                obj.hide_render, obj.hide_viewport = old_object_visibility[0], old_object_visibility[1]
+                obj.hide_set(old_object_visibility[2])
+            except Exception:
+                pass
+            if active_map_collection is not None and old_map_collection_visibility is not None:
+                try:
+                    active_map_collection.hide_render = old_map_collection_visibility[0]
+                    active_map_collection.hide_viewport = old_map_collection_visibility[1]
                 except Exception:
                     pass
             try:
@@ -7296,6 +7347,7 @@ def _qss_diagnostics_text(context, obj):
         f'Last Cycles bake operator result: {obj.get("qss_last_bake_attempt_operator_result", "n/a")}',
         f'Last Cycles attempt config: engine={obj.get("qss_last_bake_attempt_engine", "n/a")} target={obj.get("qss_last_bake_attempt_target", "n/a")} type={obj.get("qss_last_bake_attempt_type", "n/a")} uv={obj.get("qss_last_bake_attempt_uv", "n/a")}',
         f'Last attempted lamp states: {obj.get("qss_last_bake_attempt_lights", "n/a")}',
+        f'Last attempted scene visibility: {obj.get("qss_last_bake_attempt_scene_visibility", "n/a")}',
         f'Current (restored) bake settings: engine={context.scene.render.engine} target={getattr(context.scene.render.bake, "target", "n/a")} samples={getattr(getattr(context.scene, "cycles", None), "samples", "n/a")} diffuse_bounces={getattr(getattr(context.scene, "cycles", None), "diffuse_bounces", "n/a")} color={getattr(context.scene.render.bake, "use_pass_color", "n/a")} diffuse={getattr(context.scene.render.bake, "use_pass_diffuse", "n/a")} direct={getattr(context.scene.render.bake, "use_pass_direct", "n/a")} indirect={getattr(context.scene.render.bake, "use_pass_indirect", "n/a")}',
         f'Color management: view_transform={context.scene.view_settings.view_transform} look={context.scene.view_settings.look} exposure={context.scene.view_settings.exposure} gamma={context.scene.view_settings.gamma}',
         f'Compiler bounce: {obj.get("qss_world_bounce", 0)}',
@@ -8293,24 +8345,57 @@ class QSS_PT_lighting(Panel):
             depress=(_qss_is_texture_paint_context(context) and is_lightmap_paint),
         )
 
-        row = layout.row()
-        row.enabled = context.mode == "OBJECT"
-        row.operator(QSS_OT_toggle_textures.bl_idname,
-                     text="Diffuse Textures: " + ("ON" if obj.get("qss_base_textures_enabled", True) else "OFF"),
-                     depress=bool(obj.get("qss_base_textures_enabled", True)))
+        # A small source/paint matrix keeps all four display layers together.
+        table = layout.box()
+        header = table.row(align=True)
+        header.label(text="")
+        header.label(text="Painted")
+        header.label(text="Source")
 
-        row = layout.row()
-        row.enabled = context.mode == "OBJECT" and _qss_has_painted_texture_faces(obj)
-        row.operator(QSS_OT_toggle_painted_textures.bl_idname,
-                     text="Painted Textures: " + ("ON" if obj.get("qss_painted_textures_enabled", True) else "OFF"),
-                     depress=bool(obj.get("qss_painted_textures_enabled", True)))
+        texture_row = table.row(align=True)
+        texture_row.label(text="Textures")
+        painted_texture = texture_row.row(align=True)
+        painted_texture.enabled = context.mode == "OBJECT" and _qss_has_painted_texture_faces(obj)
+        painted_texture.operator(
+            QSS_OT_toggle_painted_textures.bl_idname,
+            text="",
+            icon="CHECKBOX_HLT" if bool(obj.get("qss_painted_textures_enabled", True)) else "CHECKBOX_DEHLT",
+            depress=bool(obj.get("qss_painted_textures_enabled", True)),
+        )
+        source_texture = texture_row.row(align=True)
+        source_texture.enabled = context.mode == "OBJECT"
+        source_texture.operator(
+            QSS_OT_toggle_textures.bl_idname,
+            text="",
+            icon="CHECKBOX_HLT" if bool(obj.get("qss_base_textures_enabled", True)) else "CHECKBOX_DEHLT",
+            depress=bool(obj.get("qss_base_textures_enabled", True)),
+        )
 
-        mode_has_paint = bool(obj.get("qss_painted_original_lightmap", "")) if mode == "source" else bool(obj.get("qss_painted_baked_lightmap", ""))
-        row = layout.row()
-        row.enabled = context.mode == "OBJECT" and mode in {"source", "baked"} and mode_has_paint
-        row.operator(QSS_OT_toggle_painted_lightmaps.bl_idname,
-                     text="Painted Lightmaps: " + ("ON" if obj.get("qss_painted_lightmaps_enabled", True) else "OFF"),
-                     depress=bool(obj.get("qss_painted_lightmaps_enabled", True)))
+        lightmap_row = table.row(align=True)
+        lightmap_row.label(text="Lightmaps")
+        painted_lightmap = lightmap_row.row(align=True)
+        mode_has_paint = (
+            bool(obj.get("qss_painted_original_lightmap", "")) if mode == "source"
+            else bool(obj.get("qss_painted_baked_lightmap", "")) if mode == "baked"
+            else False
+        )
+        painted_lightmap.enabled = (
+            context.mode == "OBJECT" and mode in {"source", "baked"} and mode_has_paint
+        )
+        painted_lightmap.operator(
+            QSS_OT_toggle_painted_lightmaps.bl_idname,
+            text="",
+            icon="CHECKBOX_HLT" if bool(obj.get("qss_painted_lightmaps_enabled", True)) else "CHECKBOX_DEHLT",
+            depress=bool(obj.get("qss_painted_lightmaps_enabled", True)),
+        )
+        source_lightmap = lightmap_row.row(align=True)
+        source_lightmap.enabled = context.mode == "OBJECT" and mode in {"source", "baked"}
+        source_lightmap.operator(
+            QSS_OT_toggle_source_lightmaps.bl_idname,
+            text="",
+            icon="CHECKBOX_HLT" if bool(obj.get("qss_source_lightmaps_enabled", True)) else "CHECKBOX_DEHLT",
+            depress=bool(obj.get("qss_source_lightmaps_enabled", True)),
+        )
 
         bake = layout.row()
         bake.enabled = context.mode == "OBJECT" and mode in {"realtime", "cycles"} and obj.get("qss_light_entity_count", 0) > 0
