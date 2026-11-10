@@ -7,6 +7,12 @@ import texture_export
 
 
 class TextureExportHelperTests(unittest.TestCase):
+    def test_quake_texture_dimensions_use_eight_pixel_alignment(self):
+        self.assertEqual(texture_export.quake_texture_dimension(65), 72)
+        self.assertEqual(texture_export.quake_texture_dimension(128), 128)
+        self.assertEqual(texture_export.quake_texture_dimension(520), 512)
+        self.assertEqual(texture_export.quake_texture_dimension(2), 8)
+
     def test_allocates_contiguous_indices_for_multiple_images(self):
         entries = ["source-a", "source-b"]
         indices = {}
