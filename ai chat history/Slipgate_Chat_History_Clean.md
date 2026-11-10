@@ -38,6 +38,7 @@
 - Add-on version: **Slipgate 0.20.6** (`__init__.py` and `addon.py`).
 - Main implementation: `quake_surface_studio (zip me for blender)/addon.py`; Quake lighting helpers: `lighting.py`; tests: `tests/`.
 - Latest overlay/mode implementation commit: `4b316e572df59de3f5e8573f8ae47487f3d014c8`. Version metadata commit: `f4f62fdcb61213966f5b7ebb04f5f0792fd52dd2`. Latest README commit: `2609eb3d636199486f6df29e21bc2393eb02df4f`.
+- Slipgate 0.20.6 install artifact: `Quake-Surface-Studio-v0.20.6-Blender-Install`, artifact ID `13761780232`, SHA-256 `a8aae3a77a5bd505a0a0297927809de585099dce64852c720a797395461a4bc7`; GitHub Actions run 621.
 - Blender install artifact: `Quake-Surface-Studio-v0.20.5-Blender-Install`, artifact ID `13757062978`, SHA-256 `1b8298070a36322f2c304b81d76d9bd122b74b0468adbb7f364e0d5bccc4f0b7`. GitHub Actions run 616. Artifact expires 2027-02-08.
 - Package folder and internal identifiers remain `quake_surface_studio` / QSS for compatibility; visible branding is Slipgate.
 - Target interactive environment: Blender 5.2. Target engine includes Ironwail.
@@ -15278,6 +15279,6 @@ The 0.20.5 ZIP was downloaded from GitHub Actions and its contents and SHA-256 v
 - Calibration map is not yet available; no energy constants were changed in 0.20.6.
 
 ### Verification boundary
-- QSS Python CI run 620 passed on the implementation commit; converter GUI run 73 passed. Version bump commit has QSS CI run 621 pending at the time of this note.
+- QSS Python CI run 621 passed; converter GUI run 73 passed on the implementation commit. Package artifact `Quake-Surface-Studio-v0.20.6-Blender-Install`, ID `13761780232`, SHA-256 `a8aae3a77a5bd505a0a0297927809de585099dce64852c720a797395461a4bc7` (GitHub Actions run 621; expires 2027-02-08). The ZIP was downloaded, archive contents inspected and `compileall` passed.
 - No interactive Blender 5.2 test was run. The second-map overlay, floor restoration, and Edit Mode controls must be checked in Blender. No lighting calibration or Cycles brightness changes have been made yet.
 
