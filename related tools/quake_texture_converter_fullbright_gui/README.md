@@ -204,7 +204,7 @@ The GUI is `conv_gui.py`. Launch it with the same Python environment that has Pi
 .venv/bin/python conv_gui.py
 ```
 
-The GUI provides side-by-side source and converted-image previews. In folder mode, it updates the previews for each image as it is processed and shows per-image progress. Enable **Convert subfolders recursively** to include nested directories; the output directory mirrors the input directory structure, with each converted image written as a PNG. The output directory is excluded from input scanning when it is inside the source tree.
+The GUI provides side-by-side source and converted-image previews. The zoom slider magnifies the centre of each preview while keeping both preview panes at a fixed size; this is useful for small game textures. The palette-ramp families are selectable as individual checkboxes and each has a short illustrative gradient swatch. The checked ramp list is written to the settings file and used for subsequent conversions. In folder mode, previews update only after a file has finished converting. Enable **Convert subfolders recursively** to include nested directories; the output directory mirrors the input directory structure, with each converted image written as a PNG. The output directory is excluded from input scanning when it is inside the source tree.
 
 The GUI starts the converter with `sys.executable`, so it uses the same Python interpreter and virtual environment as the GUI itself.
 
@@ -223,6 +223,8 @@ For example, `source_folder/doors/metal.tga` becomes `output_folder/doors/metal.
 The GUI's preview is updated only after a source file has completed conversion. It keeps the last completed input/output pair visible while the next file is being processed. Uncheck **Display previews** to skip image loading/display work during a batch.
 
 **Pause after current file** lets the current conversion finish, then pauses before starting the next file. While paused, settings can be edited; clicking **Resume conversion** saves the current settings and applies them to files that have not started yet. Use **Previous** and **Next** to browse completed source/output pairs. **Reconvert selected** runs the selected source again to its previous output path using the current settings; it does not silently rewrite other completed files.
+
+When an ORA project exists for the selected image, the GUI lists its layers in stack order and displays the selected layer over a checkerboard transparency background. Use the layer selector or arrow buttons to inspect the diagnostic layers. If a separate ORA destination is selected, recursive batches preserve the same relative subfolder structure there.
 
 
 ## Fullbright mask support
