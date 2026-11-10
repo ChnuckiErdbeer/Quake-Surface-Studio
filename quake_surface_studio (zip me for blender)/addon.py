@@ -217,6 +217,42 @@ def _qss_remove_map_collection(scene, name):
     if collection is None or not collection.get("qss_map_collection", False):
         return False
 
+    # Track datablocks owned/referenced by this map before removing its objects.
+    # Shared images/materials stay alive when another scene object still uses them.
+    materials = {}
+    images = {}
+    for obj in _qss_collection_objects(collection):
+        if getattr(obj, "type", "") == "MESH" and getattr(obj, "data", None) is not None:
+            for material in obj.data.materials:
+                if material is None:
+                    continue
+                try:
+                    materials[int(material.as_pointer())] = material
+                except Exception:
+                    materials[id(material)] = material
+                if material.use_nodes and material.node_tree is not None:
+                    for node in material.node_tree.nodes:
+                        image = getattr(node, "image", None)
+                        if image is not None:
+                            try:
+                                images[int(image.as_pointer())] = image
+                            except Exception:
+                                images[id(image)] = image
+        # QSS map objects also keep lightmap image datablocks by name.
+        for key in (
+            "qss_lightmap_image_name",
+            "qss_original_lightmap_backup",
+            "qss_painted_original_lightmap",
+            "qss_painted_baked_lightmap",
+        ):
+            image_name = str(obj.get(key, "") or "")
+            image = bpy.data.images.get(image_name) if image_name else None
+            if image is not None:
+                try:
+                    images[int(image.as_pointer())] = image
+                except Exception:
+                    images[id(image)] = image
+
     def remove_tree(item):
         for child in list(item.children):
             remove_tree(child)
@@ -247,6 +283,22 @@ def _qss_remove_map_collection(scene, name):
             pass
 
     remove_tree(collection)
+
+    # Remove only datablocks that became truly orphaned. Fake-user and shared
+    # assets are deliberately retained, so closing one map cannot delete
+    # textures or materials still used by unrelated scene content.
+    for material in materials.values():
+        try:
+            if material.users == 0 and not material.use_fake_user:
+                bpy.data.materials.remove(material)
+        except (ReferenceError, RuntimeError):
+            pass
+    for image in images.values():
+        try:
+            if image.users == 0 and not image.use_fake_user:
+                bpy.data.images.remove(image, do_unlink=True)
+        except (ReferenceError, RuntimeError):
+            pass
     return True
 
 
