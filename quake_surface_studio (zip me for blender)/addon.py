@@ -29,7 +29,6 @@ from . import export_validation, quake_paths, external_tools, texture_export, na
 
 
 ADDON_VERSION = (0, 19, 0)
-QSS_PAINT_CONFIRM_FACE_COUNT = 64
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -6243,6 +6242,7 @@ class QSS_OT_activate_lightmap_paint(Operator):
     bl_description = "Paint the working lightmap atlas, restricted to selected lightmapped faces"
     warning_face_count: IntProperty(default=0, options={'HIDDEN'})
     warning_atlas_bytes: FloatProperty(default=0.0, options={'HIDDEN'})
+    warning_available_bytes: FloatProperty(default=0.0, options={'HIDDEN'})
 
     def invoke(self, context, event):
         obj = context.object
@@ -6259,7 +6259,11 @@ class QSS_OT_activate_lightmap_paint(Operator):
         if image is not None:
             bpp = 16 if bool(getattr(image, "is_float", False)) else 4
             self.warning_atlas_bytes = max(1, int(image.size[0])) * max(1, int(image.size[1])) * bpp
-        if count > QSS_PAINT_CONFIRM_FACE_COUNT:
+        available = _qss_available_memory_bytes()
+        self.warning_available_bytes = float(available or 0)
+        if _qss_paint_confirmation_needed(
+            count, int(self.warning_atlas_bytes * 2), available
+        ):
             return context.window_manager.invoke_props_dialog(self, width=460)
         return self.execute(context)
 
@@ -6276,8 +6280,12 @@ class QSS_OT_activate_lightmap_paint(Operator):
         layout.label(
             text=f"Current working lightmap atlas: about {palette_utils.format_mib(self.warning_atlas_bytes)}"
         )
+        if self.warning_available_bytes > 0:
+            layout.label(
+                text=f"Currently available system memory: about {palette_utils.format_mib(self.warning_available_bytes)}"
+            )
         layout.label(
-            text="Large selections can still increase Blender's undo and GPU memory use. If memory runs out, Blender may crash and unsaved work may be lost.",
+            text="Blender may also need memory for undo history and GPU copies. If memory runs out, Blender may crash and unsaved work may be lost.",
             icon="ERROR",
         )
         layout.alert = False
