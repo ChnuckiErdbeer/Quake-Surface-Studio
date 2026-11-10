@@ -113,6 +113,19 @@ class ExternalToolsTests(unittest.TestCase):
             "-verbose", "-world_units_per_luxel", "1"
         ])
 
+    def test_launch_process_handle_exposes_process_lifecycle(self):
+        with tempfile.TemporaryDirectory() as temp:
+            log_path = os.path.join(temp, "launch.log")
+            process = external_tools.launch_process_handle(
+                [sys.executable, "-c", "print('qss-process-ok')"],
+                cwd=temp,
+                log_path=log_path,
+            )
+            self.assertGreater(process.pid, 0)
+            self.assertEqual(process.wait(timeout=10), 0)
+            with open(log_path, "r", encoding="utf-8") as handle:
+                self.assertIn("qss-process-ok", handle.read())
+
     def test_external_command_captures_output_and_return_code(self):
         result = external_tools.run_command(
             sys.executable, ["-c", "print('qss-external-ok')"], timeout=10
