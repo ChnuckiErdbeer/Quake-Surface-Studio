@@ -909,6 +909,10 @@ def convert_rgba8_mip_chain(
         if not transparent:
             for offset in range(3, len(conversion_rgba), 4):
                 conversion_rgba[offset] = 255
+            # Ordinary miptexes have no alpha channel. Carry fully opaque RGBA
+            # into the next mip reduction too, or transparent source pixels
+            # could incorrectly darken/drop colour in lower mip levels.
+            current_rgba = bytes(conversion_rgba)
 
         opaque_count = sum(
             1 for offset in range(3, len(conversion_rgba), 4)
