@@ -4054,6 +4054,13 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
         self.unit_scale = float(getattr(context.scene, "qss_quake_unit_scale", DEFAULT_QUAKE_UNIT_SCALE))
         self.lightmap_resolution = getattr(context.scene, "qss_import_lightmap_resolution", "1")
         self.flip_z = False
+        # Start in the active game's maps directory instead of making users
+        # navigate from Blender's last unrelated file-browser location.
+        game_dir = _qss_abspath(self.game_dir or "")
+        maps_dir = os.path.join(game_dir, "maps") if game_dir else ""
+        start_dir = maps_dir if maps_dir and os.path.isdir(maps_dir) else game_dir
+        if start_dir and os.path.isdir(start_dir):
+            self.filepath = os.path.join(start_dir, "")
         return ImportHelper.invoke(self, context, event)
 
     def draw(self, context):
@@ -9906,7 +9913,9 @@ class QSS_OT_open_quake_palette(Operator):
         try:
             _qss_assign_quake_palette(context, context.object)
             context.scene.qss_paint_color_picker = "QUAKE"
-            return context.window_manager.invoke_props_dialog(self, width=520)
+            # invoke_popup anchors the palette to the current mouse position.
+            # This is used by the Paint-mode right-click context menu.
+            return context.window_manager.invoke_popup(self, width=380)
         except Exception as exc:
             self.report({"ERROR"}, f"Could not open the Quake palette: {exc}")
             return {"CANCELLED"}
@@ -10138,9 +10147,10 @@ class QSS_PT_project(Panel):
             and scene.qss_game_dir
             and os.path.isdir(_qss_abspath(scene.qss_game_dir))
         )
-        browse = layout.row()
-        browse.enabled = game_ready
-        browse.operator(QSS_OT_browse_game_maps.bl_idname, text="Browse Game Maps", icon="FILEBROWSER")
+        # Import BSP opens Blender's standard file selector directly in the
+        # active game's maps directory. Keep the archive-aware browser operator
+        # registered for compatibility/F3 access, but don't spend sidebar space
+        # on a second map-browsing workflow.
         row = layout.row(align=True)
         import_button = row.row()
         import_button.enabled = game_ready
@@ -10252,6 +10262,9 @@ class QSS_PT_lighting(Panel):
                     if image_paint.palette is None or not bool(image_paint.palette.get("qss_quake_palette", False)):
                         _qss_assign_quake_palette(context, obj)
                     layout.template_ID(image_paint, "palette", new="palette.new")
+                    # Blender's native palette template computes its columns
+                    # from the available layout width and draws square swatches.
+                    # Keep this native widget so it resizes with the sidebar.
                     layout.template_palette(image_paint, "palette")
                     layout.label(text="224–254 fullbright · 255 transparent", icon="INFO")
                 except Exception as exc:
