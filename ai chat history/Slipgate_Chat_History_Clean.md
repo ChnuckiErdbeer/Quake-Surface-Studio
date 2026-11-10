@@ -35,9 +35,9 @@
 
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
 - Working branch: `fix/v0.11.1-metadata-style-order-test`
-- Add-on version: **Slipgate 0.20.5** (`__init__.py` and `addon.py`).
+- Add-on version: **Slipgate 0.20.6** (`__init__.py` and `addon.py`).
 - Main implementation: `quake_surface_studio (zip me for blender)/addon.py`; Quake lighting helpers: `lighting.py`; tests: `tests/`.
-- Latest UI implementation commit: `2c8d202e1a9550093a00776025e3205aaac1e8d0`. Version metadata commit: `8499d5b42ebf0de5fc1bf6424732cb68185e6b57`. Latest README commit: `2efede40796644507dada8ef1400d534ecddd3ee`.
+- Latest overlay/mode implementation commit: `4b316e572df59de3f5e8573f8ae47487f3d014c8`. Version metadata commit: `f4f62fdcb61213966f5b7ebb04f5f0792fd52dd2`. Latest README commit: `2609eb3d636199486f6df29e21bc2393eb02df4f`.
 - Blender install artifact: `Quake-Surface-Studio-v0.20.5-Blender-Install`, artifact ID `13757062978`, SHA-256 `1b8298070a36322f2c304b81d76d9bd122b74b0468adbb7f364e0d5bccc4f0b7`. GitHub Actions run 616. Artifact expires 2027-02-08.
 - Package folder and internal identifiers remain `quake_surface_studio` / QSS for compatibility; visible branding is Slipgate.
 - Target interactive environment: Blender 5.2. Target engine includes Ironwail.
@@ -51,6 +51,9 @@
 - Version 0.20.4 introduced delay-aware Live Lights calibration with documented native-Blender limitations and per-map non-BSP artifact folders.
 - User now wants non-game-rendered/tool textures (examples: trigger, origin, clip) hidden through a dedicated View Options popup, not more controls in the narrow sidebar. They want a gradual TrenchBroom-inspired view-filtering system.
 - User explicitly requires: **never remove existing add-on features unless they explicitly ask for removal.** Preserve existing controls and workflows; ask before retiring or replacing anything.
+
+- User's latest 0.20.5 test notes: the pale grey/white face tint reappears on the second map; Cycles viewport preview looks too bright; Cycles bake is dark, while original and bake are brighter and close in Ironwail; some light placements still look wrong; user proposes a controlled delay calibration map with 6 groups × 3 lights, one active wall per test group, and three values per delay. User confirms bake works without seams and Quick Actions work well.
+- User also requests removing the viewport floor/grid override while working with Slipgate, and allowing lighting modes in Edit Mode while keeping them unavailable in Texture Paint.
 
 **Implemented in Slipgate 0.20.5**
 
@@ -15247,4 +15250,34 @@ The user wants a TrenchBroom-inspired way to hide common tool/special textures t
 
 ### Testing boundary
 The 0.20.5 ZIP was downloaded from GitHub Actions and its contents and SHA-256 verified. CI passed, but no Blender GUI test was performed. User should install 0.20.5 to verify the restored header controls.
+
+## 2026-11-10 — Slipgate 0.20.6 viewport regression fixes
+
+### User feedback from 0.20.5
+- Whitish/grey material tint returns after loading a second level.
+- Bake now works without seams.
+- Cycles lighting preview is noticeably too bright; Cycles bake is dark, similar to the original in Blender viewport.
+- In Ironwail, original and baked lighting are both brighter and fairly close, but some light placement/results remain visibly inaccurate.
+- User proposes a controlled calibration map with six delay groups, three lights per delay and three values per delay, each illuminating its own wall.
+- Remove the viewport floor override while working with Slipgate.
+- Lighting modes should be switchable in Object and Edit Mode, but not Texture Paint mode.
+- Quick Actions and related controls work well.
+
+### Implemented in source
+- Fixed the edit-face overlay watcher lifecycle. One watcher is maintained per 3D View area and retargeted to the newly active/imported QSS map. Previously, the watcher stayed attached to the first BSP; the second map's Edit Mode entry skipped watcher creation and allowed Blender's face-fill overlay to return. The watcher now preserves the original face-fill and floor-grid settings and restores them when the active object is no longer a QSS map.
+- The watcher hides the 3D View floor grid while a QSS map is active, and restores the user's previous floor setting when leaving QSS.
+- Lighting-mode operator and panel controls now allow Object and Edit Mode, but remain disabled in Texture Paint. Baked mode still requires an existing baked lightmap.
+- Version bumped to 0.20.6. Implementation commit `4b316e572df59de3f5e8573f8ae47487f3d014c8`; metadata commit `f4f62fdcb61213966f5b7ebb04f5f0792fd52dd2`; README commit `2609eb3d636199486f6df29e21bc2393eb02df4f`.
+
+### Lighting calibration proposal
+- Do not tune global brightness by eye or conflate viewport appearance with engine lightmap values. The Cycles preview and bake have separate scene/render/color-management paths and should be measured independently.
+- Build a reproducible reference map with six delay groups (delay 0–5), three lights per group with different values, and a dedicated wall/receiver per light. Prevent cross-illumination using spacing and opaque partitions; only the target light should reach its receiver. Keep wall material, normal, distance, light color, style, worldspawn settings and compiler options controlled.
+- Supply both the source `.map` and compiled BSP, plus the exact ericw-tools `light` command line and settings. Include the reference lightmaps in the BSP. For each sample, record entity keys `light`, `delay`, `wait`, `_falloff`, `_anglescale`, `_color`, and origin-to-wall distance.
+- Slipgate should parse the BSP light entities and use the Quake Direct CPU solver / source BSP lightmap as the reference. Sample the centre of each receiver wall, avoiding edges and seams. Then measure Blender Live Lights and Cycles bake at corresponding sample points. Fit per-delay energy and attenuation parameters against all three values, not just one value. Keep per-delay calibration coefficients separate from global exposure/color management.
+- Use an objective error metric (per-channel absolute/relative luxel error, plus mean/peak error) and store the calibration report as a generated per-map artifact. Preserve the exact Quake attenuation implementation in the CPU solver.
+- Calibration map is not yet available; no energy constants were changed in 0.20.6.
+
+### Verification boundary
+- QSS Python CI run 620 passed on the implementation commit; converter GUI run 73 passed. Version bump commit has QSS CI run 621 pending at the time of this note.
+- No interactive Blender 5.2 test was run. The second-map overlay, floor restoration, and Edit Mode controls must be checked in Blender. No lighting calibration or Cycles brightness changes have been made yet.
 
