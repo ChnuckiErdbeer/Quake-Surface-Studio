@@ -8953,7 +8953,7 @@ class QSS_OT_run_blender_selftest(Operator):
                 '__package__': '',
             }
             exec(compile(source, script_path, 'exec'), namespace, namespace)
-            output = _qss_map_artifact_path(context.object, 'Blender_SelfTest.txt', create=True) if _qss_is_map_object(context.object) else os.path.expanduser('~/Desktop/QSS_Blender_SelfTest.txt')
+            output = _qss_map_artifact_path(context.object, 'QSS_Blender_SelfTest.txt', create=False) if _qss_is_map_object(context.object) else os.path.expanduser('~/Desktop/QSS_Blender_SelfTest.txt')
             if not os.path.isfile(output):
                 output = os.path.expanduser('~/QSS_Blender_SelfTest.txt')
             self.report({'INFO'}, f'Self-test complete. Report: {output}')
