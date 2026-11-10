@@ -283,6 +283,48 @@ class EricwLuxelEvaluationTests(unittest.TestCase):
         # The larger additive contribution wins; the local-minlight does not add.
         self.assertAlmostEqual(result[0], baseline[0])
 
+    def test_local_minlight_ignores_anglescale_and_spotlight_cone(self):
+        minlight = self._light(
+            delay=4, value=100, color=(1, 0, 1), anglescale=1.0,
+            is_spot=True, direction=(0, 0, 1), outer_angle=10,
+        )
+        result = lighting.evaluate_quake_luxel(
+            (0, 0, 0), (1, 0, 0), [minlight], [0], world_range=1.0
+        )
+        self.assertAlmostEqual(result[0], 100 / 255.0)
+        self.assertEqual(result[1], 0.0)
+        self.assertAlmostEqual(result[2], 100 / 255.0)
+
+    def test_local_minlight_skips_clamp_when_existing_average_is_high_enough(self):
+        bright_red = self._light(
+            delay=3, value=300, color=(1, 0, 0), anglescale=0.0
+        )
+        white_minlight = self._light(
+            delay=4, value=100, color=(1, 1, 1), anglescale=1.0
+        )
+        result = lighting.evaluate_quake_luxel(
+            (0, 0, 0), (0, 0, 1), [bright_red, white_minlight], [0],
+            world_range=1.0,
+        )
+        # Mean brightness is exactly 100, so ericw's strict '< threshold'
+        # condition skips the white clamp and leaves the red contribution alone.
+        self.assertEqual(result, (1.0, 0.0, 0.0))
+
+    def test_local_minlight_clamps_channels_only_when_average_is_below_threshold(self):
+        dim_red = self._light(
+            delay=3, value=150, color=(1, 0, 0), anglescale=0.0
+        )
+        white_minlight = self._light(
+            delay=4, value=100, color=(1, 1, 1), anglescale=0.0
+        )
+        result = lighting.evaluate_quake_luxel(
+            (0, 0, 0), (0, 0, 1), [dim_red, white_minlight], [0],
+            world_range=1.0,
+        )
+        self.assertAlmostEqual(result[0], 150 / 255.0)
+        self.assertAlmostEqual(result[1], 100 / 255.0)
+        self.assertAlmostEqual(result[2], 100 / 255.0)
+
     def test_spotlight_cone_rejects_sample_behind_cone(self):
         spot = self._light(is_spot=True, direction=(0, 0, -1), outer_angle=40)
         result = lighting.evaluate_quake_luxel(
