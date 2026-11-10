@@ -1,4 +1,35 @@
-# Quake Surface Studio 0.19.0
+# Quake Surface Studio 0.20.0
+
+## 0.20.0 — Quake brush palette, in-process conversion and viewport controls
+
+### FOV and face focus
+- Adds **Viewport FOV** to QSS Settings. The default is 90° horizontal FOV; the setting is stored in QSS's user `config.json` and applied to open 3D Views.
+- **Focus on Face** uses the same configured FOV when calculating a face-fit distance, accounting for viewport aspect ratio.
+
+### Quake palette painting
+- Fixes Quake palette creation by importing the missing hashing module and using Blender 5.2's native palette selector and swatch template.
+- The Standard / Quake brush-color switch is now part of the existing **LIGHTING** panel rather than a separate sidebar section.
+- Adds **Quake Palette Colors…** to the paint-mode brush/property right-click menus. It opens a palette dialog populated from the active map's actual 256-entry Quake palette.
+- Native UI calls use Blender's `template_ID(settings, "palette")` and `template_palette(settings, "palette")` pattern; the previous unsupported palette-template argument is removed.
+
+### Material-zone conversion inside Blender
+- The **Convert Image to Quake Palette…** action is now inside the existing Lighting panel. It runs directly in Blender's Python process using QSS's standard-library implementation in `palette_utils.py`; it does not launch an external program and does not require NumPy, Pillow, SciPy or scikit-image.
+- Retains OKLab color analysis, SLIC-style superpixels, adjacency-based material-zone merging, the curated 14 palette ramps, five candidate ramps per zone, alpha transparency at index 255, and optional sibling `*_fullbrights.png` masks.
+- The generated PNG is indexed and uses the active map's exact Quake palette. QSS loads and packs the output as a new Blender image; the source is not overwritten.
+- Render Result is saved through Blender's render I/O before conversion, so the scene's view transform is included in the pixels being converted.
+- The shader suggestion is not used as the converter itself: a shader can map individual pixels to palette colors, but this converter also needs whole-image superpixels, connected material-zone merging and per-zone ramp fitting. Those image-wide operations belong in a Python image-processing pass.
+
+### Paint preparation and Edit Mode appearance
+- Removes the arbitrary 64-face threshold. QSS estimates face-image/atlas buffers from selected face UV footprints and adds a conservative 3× working-buffer reserve for temporary sampling and packing arrays. A confirmation appears at 32 MiB estimated preparation memory or 5% of available system/cgroup memory.
+- Warning text now explains in plain language what QSS is about to allocate, why the estimate may be low, the risk of Blender running out of memory, and that painting smaller batches is the safest choice.
+- Lightmap Paint warnings use the current atlas size and available memory rather than a fixed face-count threshold. These warnings remain estimates, not a guarantee that Blender cannot run out of memory.
+- In Edit Mode, QSS temporarily disables Blender's face-fill selection overlay for imported QSS maps, while retaining selection outlines. It restores the previous overlay setting outside Edit Mode. This specifically targets the grey Edit Mode face-fill tint reported in Material Preview/Eevee/Cycles; the actual Blender 5.2 GUI behavior still needs local verification.
+
+### Validation
+- The converter now runs without any external converter runtime or third-party package installation.
+- The standalone suite includes tests for five candidate ramps, indexed PNG chunks/palette transparency, fullbright handling, and in-process RGBA-to-index conversion.
+- Interactive Blender 5.2 verification is still required for the brush/right-click palette picker, large image conversion performance, FOV in newly opened views, the Edit Mode overlay appearance, and the paint confirmation behavior.
+
 
 ## 0.19.0 — Quake palette painting, conversion and safer map workflow
 
