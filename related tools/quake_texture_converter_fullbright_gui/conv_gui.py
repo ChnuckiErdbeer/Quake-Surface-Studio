@@ -10,6 +10,8 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser
 from PIL import Image, ImageTk
 
+from ora_preview import read_ora_layers, load_ora_layer
+
 HERE = Path(__file__).resolve().parent
 SCRIPT = HERE / 'conv_layers.py'
 SETTINGS = HERE / 'conv_settings.ini'
@@ -21,7 +23,7 @@ DEFAULTS = {
     'fullbright_start': '224', 'segments': '180', 'compactness': '10.0',
     'detail': '0.35', 'detail_radius': '1.2', 'coherence': '0.025',
     'material_merge_threshold': '0.055', 'material_luminance_weight': '0.20',
-    'material_chroma_limit': '0.075', 'ramp_candidates_per_zone': '3',
+    'material_chroma_limit': '0.075', 'ramp_candidates_per_zone': '5',
     'alpha_threshold': '128', 'color_key_tolerance': '0',
 }
 
@@ -45,6 +47,11 @@ class ConverterGUI(tk.Tk):
         self.recursive_var = tk.BooleanVar(value=False)
         self.preview_refs = {'input': None, 'output': None}
         self.preview_enabled = tk.BooleanVar(value=True)
+        self.preview_zoom = tk.DoubleVar(value=1.0)
+        self.ramp_vars = {}
+        self.ora_layers = []
+        self.ora_path = None
+        self.ora_photo = None
         self.pause_gate = threading.Event(); self.pause_gate.set()
         self.pause_requested = False
         self.completed_files = []
@@ -107,6 +114,9 @@ class ConverterGUI(tk.Tk):
         ttk.Button(preview_controls, text='◀ Previous', command=lambda: self._navigate_preview(-1)).pack(side='right', padx=2)
         ttk.Button(preview_controls, text='Next ▶', command=lambda: self._navigate_preview(1)).pack(side='right', padx=2)
         ttk.Button(preview_controls, text='Reconvert selected', command=self._reconvert_selected).pack(side='right', padx=8)
+        ttk.Label(preview_controls, text='Zoom').pack(side='left', padx=(12, 3))
+        zoom = ttk.Scale(preview_controls, from_=0.25, to=4.0, variable=self.preview_zoom, command=lambda _v: self._refresh_review())
+        zoom.pack(side='left', fill='x', expand=True, padx=(0, 8))
         self.preview_status = tk.StringVar(value='No completed files yet')
         ttk.Label(preview_controls, textvariable=self.preview_status).pack(side='left', padx=10)
         previews = ttk.Frame(preview); previews.pack(fill='both', expand=True)
@@ -114,6 +124,16 @@ class ConverterGUI(tk.Tk):
         self.input_preview.pack(side='left', fill='both', expand=True, padx=(0, 4), ipady=4)
         self.output_preview = ttk.Label(previews, text='Converted output\n(will appear after conversion)', anchor='center', relief='groove')
         self.output_preview.pack(side='left', fill='both', expand=True, padx=(4, 0), ipady=4)
+        ora_bar = ttk.Frame(preview); ora_bar.pack(fill='x', pady=(7, 2))
+        ttk.Label(ora_bar, text='ORA layer:').pack(side='left')
+        self.ora_layer_var = tk.StringVar(value='(no ORA for selected image)')
+        self.ora_layer_combo = ttk.Combobox(ora_bar, textvariable=self.ora_layer_var, state='readonly', width=42)
+        self.ora_layer_combo.pack(side='left', padx=6)
+        self.ora_layer_combo.bind('<<ComboboxSelected>>', self._show_ora_layer)
+        ttk.Button(ora_bar, text='◀', width=3, command=lambda: self._step_ora_layer(-1)).pack(side='left')
+        ttk.Button(ora_bar, text='▶', width=3, command=lambda: self._step_ora_layer(1)).pack(side='left', padx=(3, 8))
+        self.ora_preview = ttk.Label(preview, text='Pause or review a completed file with ORA export enabled to inspect its layers.', anchor='center', relief='groove')
+        self.ora_preview.pack(fill='x', ipady=3)
 
         trans = ttk.LabelFrame(root, text='3. Transparency', padding=10); trans.pack(fill='x', pady=5)
         row = ttk.Frame(trans); row.pack(fill='x')
@@ -151,6 +171,39 @@ class ConverterGUI(tk.Tk):
             if key == 'palette':
                 ttk.Button(inner, text='Browse…', command=self._choose_palette).grid(row=i, column=2, padx=4)
         inner.columnconfigure(1, weight=1)
+        ramp_frame = ttk.LabelFrame(inner, text='Palette ramp families', padding=6)
+        ramp_frame.grid(row=len(fields), column=0, columnspan=3, sticky='ew', padx=5, pady=(8, 4))
+        ramp_names = ['neutral', 'dark_earth', 'blue_grey', 'olive_dark', 'red', 'ochre', 'warm_earth', 'tan', 'purple_dark', 'purple_warm', 'stone', 'green_grey', 'yellow_ochre', 'blue']
+        ramp_colors = {
+            'neutral': ['#080808', '#777777', '#eeeeee'], 'dark_earth': ['#18100c', '#70452d', '#c28b5b'],
+            'blue_grey': ['#182430', '#526b7c', '#b0c5d2'], 'olive_dark': ['#171b0b', '#58602b', '#a1a35a'],
+            'red': ['#250b0b', '#a52c26', '#f08068'], 'ochre': ['#291d0c', '#9a702b', '#e8c16c'],
+            'warm_earth': ['#21130d', '#87502e', '#d59a69'], 'tan': ['#292014', '#a18a5e', '#e4d2a0'],
+            'purple_dark': ['#170e20', '#59406e', '#a78ac0'], 'purple_warm': ['#25101d', '#8d456d', '#d89ab6'],
+            'stone': ['#282828', '#858078', '#d1c9b8'], 'green_grey': ['#101d16', '#526e58', '#a7c0a3'],
+            'yellow_ochre': ['#2a2108', '#a58a22', '#f0d56a'], 'blue': ['#08162b', '#235ba1', '#83b9f0']
+        }
+        current_ramps = {name.strip() for name in self.vars['ramps'].get().split(',') if name.strip()}
+        self.ramp_vars = {}
+        for i, name in enumerate(ramp_names):
+            cell = ttk.Frame(ramp_frame)
+            cell.grid(row=i // 4, column=i % 4, sticky='ew', padx=4, pady=3)
+            var = tk.BooleanVar(value=name in current_ramps)
+            self.ramp_vars[name] = var
+            ttk.Checkbutton(cell, text=name.replace('_', ' '), variable=var, command=self._sync_ramps).pack(anchor='w')
+            swatch = tk.Canvas(cell, width=112, height=12, highlightthickness=0)
+            swatch.pack(anchor='w')
+            cols = ramp_colors[name]
+            for px in range(112):
+                t = px / 111
+                seg = t * (len(cols) - 1)
+                j = min(int(seg), len(cols) - 2)
+                f = seg - j
+                a = tuple(int(cols[j][k:k+2], 16) for k in (1, 3, 5))
+                b = tuple(int(cols[j+1][k:k+2], 16) for k in (1, 3, 5))
+                rgb = tuple(round(a[c] + (b[c] - a[c]) * f) for c in range(3))
+                swatch.create_line(px, 0, px, 12, fill='#%02x%02x%02x' % rgb)
+        for col in range(4): ramp_frame.columnconfigure(col, weight=1)
         buttons = ttk.Frame(root); buttons.pack(fill='x', pady=(7, 5))
         ttk.Button(buttons, text='Save settings', command=self._save_settings).pack(side='left')
         self.pause_button = ttk.Button(buttons, text='Pause after current file', command=self._toggle_pause, state='disabled')
@@ -165,6 +218,75 @@ class ConverterGUI(tk.Tk):
         self.log = tk.Text(logframe, height=9, wrap='word', state='disabled')
         sb = ttk.Scrollbar(logframe, command=self.log.yview); self.log.configure(yscrollcommand=sb.set)
         self.log.pack(side='left', fill='both', expand=True); sb.pack(side='right', fill='y')
+
+    def _sync_ramps(self):
+        selected = [name for name, var in self.ramp_vars.items() if var.get()]
+        if not selected:
+            # Keep at least one ramp enabled; the converter requires a usable family.
+            first = next(iter(self.ramp_vars))
+            self.ramp_vars[first].set(True)
+            selected = [first]
+        self.vars['ramps'].set(','.join(selected))
+
+    def _refresh_review(self):
+        if self.completed_files and self.review_index >= 0:
+            self._display_review(self.review_index)
+
+    def _refresh_ora_for_review(self):
+        self.ora_layers = []
+        self.ora_path = None
+        self.ora_photo = None
+        if not self.completed_files or self.review_index < 0:
+            self.ora_layer_combo['values'] = []
+            self.ora_layer_var.set('(no ORA for selected image)')
+            self.ora_preview.configure(image='', text='No ORA layer selected.')
+            return
+        _source, output = self.completed_files[self.review_index]
+        output_path = Path(output)
+        candidates = [output_path.with_suffix('.ora')]
+        if self.ora_dir_var.get().strip():
+            candidates.insert(0, Path(self.ora_dir_var.get()).expanduser() / output_path.with_suffix('.ora').name)
+        ora = next((p for p in candidates if p.is_file()), None)
+        if ora is None:
+            self.ora_layer_combo['values'] = []
+            self.ora_layer_var.set('(ORA not found)')
+            self.ora_preview.configure(image='', text='No ORA project was created for this image.')
+            return
+        try:
+            _w, _h, self.ora_layers = read_ora_layers(ora)
+            self.ora_path = ora
+            names = [layer['name'] for layer in self.ora_layers]
+            self.ora_layer_combo['values'] = names
+            visible = next((i for i, layer in enumerate(self.ora_layers) if layer['visible']), 0)
+            self.ora_layer_combo.current(visible)
+            self._render_ora_layer(visible)
+        except Exception as exc:
+            self.ora_layer_combo['values'] = []
+            self.ora_layer_var.set('(ORA read error)')
+            self.ora_preview.configure(image='', text=f'Cannot read ORA: {exc}')
+
+    def _render_ora_layer(self, index):
+        if not self.ora_path or not self.ora_layers:
+            return
+        index = max(0, min(index, len(self.ora_layers) - 1))
+        try:
+            image = load_ora_layer(self.ora_path, self.ora_layers[index])
+            image.thumbnail((940, 280), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(image)
+            self.ora_preview.configure(image=photo, text='')
+            self.ora_photo = photo
+            self.ora_layer_combo.current(index)
+        except Exception as exc:
+            self.ora_preview.configure(image='', text=f'Cannot preview ORA layer: {exc}')
+
+    def _show_ora_layer(self, _event=None):
+        index = self.ora_layer_combo.current()
+        if index >= 0: self._render_ora_layer(index)
+
+    def _step_ora_layer(self, step):
+        if self.ora_layers:
+            index = self.ora_layer_combo.current()
+            self._render_ora_layer((max(0, index) + step) % len(self.ora_layers))
 
     def _toggle_preview(self):
         if not self.preview_enabled.get():
@@ -183,6 +305,7 @@ class ConverterGUI(tk.Tk):
         self._show_preview('input', source)
         self._show_preview('output', output)
         self.preview_status.set(f'Completed file {index+1} / {len(self.completed_files)}')
+        self._refresh_ora_for_review()
 
     def _navigate_preview(self, step):
         if self.completed_files:
@@ -228,7 +351,9 @@ class ConverterGUI(tk.Tk):
         widget = self.input_preview if which == 'input' else self.output_preview
         try:
             with Image.open(path) as im:
-                im.thumbnail((470, 230), Image.Resampling.LANCZOS)
+                zoom = max(0.25, min(4.0, float(self.preview_zoom.get())))
+                target = (max(1, int(470 * zoom)), max(1, int(230 * zoom)))
+                im.thumbnail(target, Image.Resampling.LANCZOS)
                 if im.mode not in ('RGB', 'RGBA'):
                     im = im.convert('RGBA')
                 photo = ImageTk.PhotoImage(im.copy())
@@ -357,7 +482,16 @@ class ConverterGUI(tk.Tk):
                     out_path = dst
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 self.events.put(('current', (index, len(files), str(image_path))))
-                cmd = [sys.executable, str(SCRIPT), str(image_path), str(out_path), *list(self.current_options)]
+                per_file_options = list(self.current_options)
+                ora_base = None
+                if '--ora-dir' in per_file_options:
+                    ora_i = per_file_options.index('--ora-dir')
+                    if ora_i + 1 < len(per_file_options): ora_base = Path(per_file_options[ora_i + 1]).expanduser()
+                    del per_file_options[ora_i:ora_i + 2]
+                if ora_base is not None:
+                    ora_rel_parent = image_path.relative_to(src).parent if src.is_dir() and recursive else Path('.')
+                    per_file_options += ['--ora-dir', str(ora_base / ora_rel_parent)]
+                cmd = [sys.executable, str(SCRIPT), str(image_path), str(out_path), *per_file_options]
                 self.events.put(('log', '$ ' + ' '.join(cmd)))
                 proc = subprocess.Popen(cmd, cwd=HERE, stdout=subprocess.PIPE,
                                         stderr=subprocess.STDOUT, text=True, bufsize=1)
