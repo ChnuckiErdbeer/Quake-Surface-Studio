@@ -5782,9 +5782,9 @@ class QSS_OT_activate_paint(Operator):
     bl_description = "Paint the active selected face material; switches from Edit Mode automatically"
 
     warning_face_count: IntProperty(default=0, options={'HIDDEN'})
-    warning_peak_bytes: IntProperty(default=0, options={'HIDDEN'})
-    warning_available_bytes: IntProperty(default=0, options={'HIDDEN'})
-    warning_existing_bytes: IntProperty(default=0, options={'HIDDEN'})
+    warning_peak_bytes: FloatProperty(default=0.0, options={'HIDDEN'})
+    warning_available_bytes: FloatProperty(default=0.0, options={'HIDDEN'})
+    warning_existing_bytes: FloatProperty(default=0.0, options={'HIDDEN'})
 
     def invoke(self, context, event):
         obj = context.object
@@ -5981,7 +5981,7 @@ class QSS_OT_activate_lightmap_paint(Operator):
     bl_label = "Enter Lightmap Paint"
     bl_description = "Paint the working lightmap atlas, restricted to selected lightmapped faces"
     warning_face_count: IntProperty(default=0, options={'HIDDEN'})
-    warning_atlas_bytes: IntProperty(default=0, options={'HIDDEN'})
+    warning_atlas_bytes: FloatProperty(default=0.0, options={'HIDDEN'})
 
     def invoke(self, context, event):
         obj = context.object
@@ -9459,6 +9459,7 @@ class QSS_OT_close_active_map(Operator):
             if context.mode != "OBJECT":
                 bpy.ops.object.mode_set(mode="OBJECT")
             closing_objects = _qss_collection_objects(collection)
+            current_active_name = str(getattr(scene, "qss_active_map_collection", "") or "")
             remaining = [
                 item for item in _qss_scene_map_collections(scene)
                 if item.name != self.collection_name
@@ -9472,7 +9473,12 @@ class QSS_OT_close_active_map(Operator):
                         pass
 
             if remaining:
-                _qss_activate_map_collection(scene, remaining[0].name, context)
+                next_active = next(
+                    (item for item in remaining if item.name == current_active_name),
+                    remaining[0],
+                )
+                if current_active_name == self.collection_name:
+                    _qss_activate_map_collection(scene, next_active.name, context)
             else:
                 # When the final QSS map closes, restore objects that were hidden
                 # by QSS map isolation, including non-QSS scene content.
