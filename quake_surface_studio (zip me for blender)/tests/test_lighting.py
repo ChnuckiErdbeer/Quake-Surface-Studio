@@ -95,6 +95,51 @@ class LightingHelpersTests(unittest.TestCase):
             lighting.extract_rgb_samples(bytes(6), -1, 1)
 
 
+class BlenderLivePreviewCalibrationTests(unittest.TestCase):
+    def test_cycles_margin_scales_with_atlas_resolution(self):
+        self.assertEqual(lighting.lightmap_bake_margin_pixels(2, 1), 2)
+        self.assertEqual(lighting.lightmap_bake_margin_pixels(2, 4), 8)
+        self.assertEqual(lighting.lightmap_bake_margin_pixels(0, 8), 0)
+
+    def test_cycles_margin_rejects_invalid_values(self):
+        with self.assertRaises(ValueError):
+            lighting.lightmap_bake_margin_pixels(-1, 1)
+        with self.assertRaises(ValueError):
+            lighting.lightmap_bake_margin_pixels(2, 0)
+
+    def test_delay_two_preview_is_inverse_square_calibrated(self):
+        result = lighting.blender_live_light_preview_parameters(
+            300, 300, 2, wait=1, world_dist=1, unit_scale=0.0254
+        )
+        reference = 128 * 0.0254
+        self.assertAlmostEqual(result['energy'], 300 * reference ** 2)
+        self.assertEqual(result['profile'], 'delay2_inverse_square_exact')
+        # At the ericw 128-unit reference distance, native E/r^2 is 300.
+        self.assertAlmostEqual(result['energy'] / reference ** 2, 300)
+
+    def test_delay_zero_honours_explicit_falloff_radius(self):
+        result = lighting.blender_live_light_preview_parameters(
+            300, 300, 0, wait=9, world_dist=2, falloff=100, unit_scale=0.01
+        )
+        self.assertAlmostEqual(result['cutoff_distance'], 2.0)
+        self.assertEqual(result['profile'], 'delay0_linear_midpoint_approximation')
+
+    def test_delay_one_and_five_use_reference_calibrations(self):
+        inverse = lighting.blender_live_light_preview_parameters(200, 200, 1, unit_scale=0.01)
+        soft = lighting.blender_live_light_preview_parameters(200, 200, 5, unit_scale=0.01)
+        self.assertAlmostEqual(inverse['energy'], 200 * 1.28 ** 2)
+        self.assertAlmostEqual(soft['energy'], inverse['energy'] / 4.0)
+        self.assertGreater(soft['shadow_soft_size'], inverse['shadow_soft_size'])
+
+    def test_delay_three_and_four_are_labelled_as_unmatched_fallbacks(self):
+        constant = lighting.blender_live_light_preview_parameters(100, 100, 3)
+        minlight = lighting.blender_live_light_preview_parameters(100, 100, 4)
+        self.assertIn('fallback', constant['profile'])
+        self.assertIn('fallback', minlight['profile'])
+        self.assertEqual(constant['energy'], 100)
+        self.assertEqual(minlight['energy'], 100)
+
+
 if __name__ == '__main__':
     unittest.main()
 
