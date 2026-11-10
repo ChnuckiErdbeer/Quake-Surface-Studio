@@ -28,7 +28,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils
 
 
-ADDON_VERSION = (0, 20, 4)
+ADDON_VERSION = (0, 20, 5)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -10033,7 +10033,25 @@ class QSS_PT_main(Panel):
     bl_order = 10
 
     def draw(self, context):
-        self.layout.label(text="Quake BSP editing and export", icon="WORLD")
+        layout = self.layout
+        # Keep the root panel compact: version, settings and direct config edit.
+        # These controls existed in the original v0.18.0 sidebar header.
+        header = layout.row(align=True)
+        header.label(
+            text=f"v{'.'.join(str(part) for part in ADDON_VERSION)}",
+            icon="INFO",
+        )
+        header.operator(
+            QSS_OT_settings.bl_idname,
+            text="",
+            icon="PREFERENCES",
+        )
+        header.operator(
+            QSS_OT_open_config_text.bl_idname,
+            text="",
+            icon="TEXT",
+        )
+        layout.label(text="Quake BSP editing and export", icon="WORLD")
 
 
 class QSS_PT_quick_actions(Panel):
