@@ -766,9 +766,7 @@ def _next_pow2_clamped(value, minimum=16, maximum=512):
 
 def _next_quake_texture_dimension(value, maximum=512):
     """Round a face-local texture dimension up to a Quake-valid multiple of 8."""
-    value = max(8, int(math.ceil(float(value))))
-    dimension = int(math.ceil(value / 8.0)) * 8
-    return max(8, min(int(maximum), dimension))
+    return texture_export.quake_texture_dimension(value, maximum)
 
 
 def _bake_face_local_texture(source_image, uv_layer, poly, image_name):
