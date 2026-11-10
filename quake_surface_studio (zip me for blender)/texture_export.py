@@ -28,8 +28,12 @@ def face_local_texinfo_projection(projection, bounds, output_size) -> tuple[floa
     edges; they must not stretch the visible face's texture mapping. Only
     spans larger than the supported miptexture size are resampled.
     """
+    # BSP29 dtexinfo_t stores the two 4-float axes followed by
+    # miptex index and flags. Ignore those trailing metadata fields here.
+    if len(projection) == 10:
+        projection = projection[:8]
     if len(projection) != 8 or len(bounds) != 4 or len(output_size) != 2:
-        raise ValueError("A face-local projection requires 8 axis values, 4 bounds and 2 output dimensions.")
+        raise ValueError("A face-local projection requires 8 axis values (or a 10-field BSP29 texinfo record), 4 bounds and 2 output dimensions.")
     min_s, min_t, span_s, span_t = (float(value) for value in bounds)
     width, height = int(output_size[0]), int(output_size[1])
     if width <= 0 or height <= 0 or span_s <= 0.0 or span_t <= 0.0:
