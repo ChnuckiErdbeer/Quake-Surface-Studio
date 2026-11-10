@@ -7,18 +7,27 @@ import texture_export
 
 
 class TextureExportHelperTests(unittest.TestCase):
-    def test_quake_texture_dimensions_use_eight_pixel_alignment(self):
-        self.assertEqual(texture_export.quake_texture_dimension(65), 72)
+    def test_quake_texture_dimensions_are_power_of_two(self):
+        self.assertEqual(texture_export.quake_texture_dimension(65), 128)
+        self.assertEqual(texture_export.quake_texture_dimension(80), 128)
         self.assertEqual(texture_export.quake_texture_dimension(128), 128)
+        self.assertEqual(texture_export.quake_texture_dimension(129), 256)
         self.assertEqual(texture_export.quake_texture_dimension(520), 512)
-        self.assertEqual(texture_export.quake_texture_dimension(2), 8)
+        self.assertEqual(texture_export.quake_texture_dimension(2), 16)
+        self.assertEqual(texture_export.quake_texture_dimension(0), 16)
 
-    def test_face_local_padded_dimensions_do_not_stretch_source_texels(self):
-        # A 65-texel source span padded to 72 pixels keeps its original
-        # texinfo axis unchanged; only a span beyond 512 is resampled.
+    def test_quake_texture_dimension_rejects_invalid_limits_and_non_finite_values(self):
+        with self.assertRaises(ValueError):
+            texture_export.quake_texture_dimension(64, maximum=8)
+        with self.assertRaises(ValueError):
+            texture_export.quake_texture_dimension(float("inf"))
+
+    def test_face_local_power_of_two_padding_does_not_stretch_source_texels(self):
+        # An 80x65 source span padded to 128x128 keeps the original
+        # texinfo axes unchanged; only spans beyond 512 are resampled.
         projection = (2, 0, 0, 16, 0, 4, 0, 8)
         padded = texture_export.face_local_texinfo_projection(
-            projection, (10, 5, 65, 33), (72, 40)
+            projection, (10, 5, 80, 65), (128, 128)
         )
         self.assertEqual(padded, (2, 0, 0, 6, 0, 4, 0, 3))
         scaled = texture_export.face_local_texinfo_projection(
@@ -33,7 +42,7 @@ class TextureExportHelperTests(unittest.TestCase):
         # dtexinfo_t has eight projection floats plus miptex and flags.
         record = (2, 0, 0, 16, 0, 4, 0, 8, 12, 3)
         result = texture_export.face_local_texinfo_projection(
-            record, (10, 5, 65, 33), (72, 40)
+            record, (10, 5, 80, 65), (128, 128)
         )
         self.assertEqual(result, (2, 0, 0, 6, 0, 4, 0, 3))
 

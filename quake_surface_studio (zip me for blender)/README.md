@@ -1,4 +1,20 @@
-# Quake Surface Studio 0.20.0
+# Quake Surface Studio 0.20.1
+
+## 0.20.1 — Registration and face-paint export fixes
+
+### Blender panel registration
+- Restores the missing QSS_PT_main parent panel used by the Project, Lighting and Stats sections.
+- Removes the stale QSS_PT_navigation registration entry; the current quick actions are integrated into the existing panels.
+- Adds a Blender-independent AST regression test that checks every class in CLASSES is defined and every panel parent resolves to a registered panel.
+
+### Face-local texture export
+- Face-local paint images are padded upward to power-of-two dimensions between 16 and 512 pixels, matching Slipgate's indexed miptexture exporter.
+- Padding does not stretch the visible face's texinfo/UV footprint. Source texel density is retained; only spans above 512 pixels are downsampled.
+- Adds regression coverage for 80×128, 65×65, minimum-size and maximum-size dimension handling, plus projection preservation.
+
+### Validation
+- The standalone Python suite and GitHub Actions compile/test workflow are the automated validation path.
+- Blender 5.2 GUI activation, painting, BSP export and Ironwail acceptance still require an interactive end-to-end test.
 
 ## 0.20.0 — Quake brush palette, in-process conversion and viewport controls
 

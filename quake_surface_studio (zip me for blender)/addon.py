@@ -832,7 +832,7 @@ def _next_pow2_clamped(value, minimum=16, maximum=512):
 
 
 def _next_quake_texture_dimension(value, maximum=512):
-    """Round a face-local texture dimension up to a Quake-valid multiple of 8."""
+    """Round a face-local texture dimension up to the next supported power of two."""
     return texture_export.quake_texture_dimension(value, maximum)
 
 
@@ -888,10 +888,9 @@ def _bake_face_local_texture(source_image, uv_layer, poly, image_name):
     span_s = max(max_s - min_s, 1.0)
     span_t = max(max_t - min_t, 1.0)
 
-    # Quake miptex width/height are required to be multiples of eight; they
-    # are not required to be powers of two. Rounding to the nearest valid
-    # footprint reduces needless resampling and keeps texel density closer
-    # to the original texinfo projection.
+    # Slipgate's indexed miptex exporter requires power-of-two dimensions.
+    # Pad each face-local image upward without stretching the face UV
+    # footprint; only spans beyond 512 px are resampled.
     width_out = _next_quake_texture_dimension(span_s)
     height_out = _next_quake_texture_dimension(span_t)
     source_pixels = array.array('f', [0.0]) * (width_src * height_src * 4)
@@ -902,8 +901,8 @@ def _bake_face_local_texture(source_image, uv_layer, poly, image_name):
     scale_t = texture_export.face_local_projection_scale(span_t, height_out)
 
     # Blender image pixels are bottom-up. Keep the original texel pitch when
-    # the valid Quake dimension is padded to a multiple of eight. Only spans
-    # beyond 512 px are resampled to fit the classic miptexture limit.
+    # the face-local image is padded to a power of two. Only spans beyond
+    # 512 px are resampled to fit the classic miptexture limit.
     for y in range(height_out):
         t = min_t + (height_out - (y + 0.5)) / scale_t
         v_src = (1.0 - (t / height_src)) % 1.0
@@ -9748,6 +9747,19 @@ class QSS_OT_close_active_map(Operator):
             return {"CANCELLED"}
 
 
+class QSS_PT_main(Panel):
+    """Root container for the Slipgate sidebar workflow panels."""
+    bl_label = "SLIPGATE"
+    bl_idname = "QSS_PT_main"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Quake"
+    bl_order = 10
+
+    def draw(self, context):
+        self.layout.label(text="Quake BSP editing and export", icon="WORLD")
+
+
 class QSS_PT_project(Panel):
     bl_label = "MAIN"
     bl_idname = "QSS_PT_project"
@@ -10083,7 +10095,7 @@ CLASSES = (
     QSS_OT_restore_original_lightmap, QSS_OT_refresh_lightmap_preview,
     QSS_OT_apply_light_energy_scale, QSS_OT_calibrate_lights_to_source,
     QSS_OT_write_diagnostics, QSS_OT_run_blender_selftest, QSS_OT_export_bsp,
-    QSS_PT_main, QSS_PT_navigation, QSS_PT_project, QSS_PT_lighting, QSS_PT_stats,
+    QSS_PT_main, QSS_PT_project, QSS_PT_lighting, QSS_PT_stats,
 )
 
 def _remove_qss_keymaps():

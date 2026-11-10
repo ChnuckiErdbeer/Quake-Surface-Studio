@@ -6,10 +6,17 @@ from typing import Sequence
 
 
 def quake_texture_dimension(value: float, maximum: int = 512) -> int:
-    """Round up to a Quake miptexture dimension (multiple of eight)."""
-    limit = max(8, int(maximum) // 8 * 8)
-    parsed = max(8, int(math.ceil(float(value))))
-    return max(8, min(limit, int(math.ceil(parsed / 8.0)) * 8))
+    """Round up to a power-of-two miptexture dimension in the 16..maximum range."""
+    parsed_value = float(value)
+    if not math.isfinite(parsed_value):
+        raise ValueError("Texture dimensions must be finite numbers.")
+    limit_value = int(maximum)
+    if limit_value < 16:
+        raise ValueError("The maximum Quake texture dimension must be at least 16.")
+    limit = 1 << (limit_value.bit_length() - 1)
+    parsed = max(16, int(math.ceil(parsed_value)))
+    dimension = 1 << (parsed - 1).bit_length()
+    return min(limit, dimension)
 
 
 def face_local_projection_scale(span: float, output_dimension: int) -> float:
@@ -24,7 +31,7 @@ def face_local_projection_scale(span: float, output_dimension: int) -> float:
 def face_local_texinfo_projection(projection, bounds, output_size) -> tuple[float, ...]:
     """Project source Quake texinfo coordinates into a padded face-local texture.
 
-    Dimensions padded up to an 8-pixel multiple leave unused pixels at the
+    Dimensions padded up to the next power of two leave unused pixels at the
     edges; they must not stretch the visible face's texture mapping. Only
     spans larger than the supported miptexture size are resampled.
     """

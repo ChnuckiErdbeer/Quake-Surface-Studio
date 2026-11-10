@@ -1,1130 +1,289 @@
 11/8/26, 6:20 PM
-Setup Quake Mod Environment
-You said:
-I am planning to make a mod for quake.
-It should at least run on the rerelease and on ironwail.
-It will have new enemies and weapons.
-I know how to craft assets.
-I downloaded the source from here:
-https://github.com/id-Software/quake-rerelease-qc
-All i want for now is how to setup en enviroment where i can
-compile and run this. For now i dont want to know anything more.
-I am on pop!os by the way so if there are native linux versionms of
-tools i would prefer them, but using wine is also ok.
-Worked for 14s
-ChatGPT said:
-For your setup, I would aim for a native Linux development environment on
-Pop!_OS,
-with Wine only if a particular tool turns out to require Windows.
-There are two things to keep separate:
-1. Compiling the QuakeC source into game code.
-2. Running and testing the resulting mod in the Quake rerelease and Ironwail.
-You shouldn't need a Windows development environment for either of these.
-I'll keep this strictly to environment setup, installation, compilation and
-launching. No
-weapon/enemy implementation or mod-design discussion.
-1. Install the QuakeC compiler
-The official repository explicitly recommends FTEQCC. It supports the advanced
-QuakeC
-features used by the rerelease source.
-id-Software/… +1
-Good news: FTEQCC has a native 64-bit Linux command-line version. No Wine
-required.
-Download it here:
-FTEQCC official website
-Choose Linux x86_64.
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-1/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-Extract the archive somewhere convenient, for example ~/tools/fteqcc/ .
-Make the compiler executable:
-chmod +x ~/tools/fteqcc/fteqcc64
-You can test it with:
-~/tools/fteqcc/fteqcc64
-You should see its command-line help.
-You can also install the packaged version through APT:
-sudo apt update
-sudo apt install fteqcc
-However, I recommend the official binary to avoid potential differences between
-compiler
-versions.
-2. Prepare your project directory
-I recommend keeping your development files separate from your original game
-installation.
-For example:
-~/quake-dev/
-├── source/
-│
-└── quake-rerelease-qc/
-│├── quakec/
-│├── quakec_ctf/
-│├── quakec_hipnotic/
-│├── quakec_mg1/
-│├── quakec_mg3/
-│└── quakec_rogue/
-│
-└── builds/
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-2/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-└── mymod/
-└── progs.dat
-Clone the repository:
-mkdir -p ~/quake-dev/source
-cd ~/quake-dev/source
-git clone https://github.com/id-Software/quake-rerelease-qc.git
-The repository contains six separate QuakeC codebases. For now, start with
-quakec , which
-is the base Quake campaign.
-3. Compile the source
-One important detail: the repository's quakec/progs.src specifies the output as:
-../progs.dat
-This means the compiler places the resulting progs.dat in the parent directory
-of quakec .
-GitHub
-Compile it with:
-cd ~/quake-dev/source/quake-rerelease-qc/quakec
-~/tools/fteqcc/fteqcc64
-FTEQCC automatically looks for progs.src in its current working directory.
-After compilation, you should have:
-quake-rerelease-qc/
-├── progs.dat
-└── quakec/
-├── progs.src
-├── defs.qc
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-3/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-├── weapons.qc
-├── monsters.qc
-└── ...
-If compilation succeeds, you've got your first compiled QuakeC binary.
-You can also use the compiler's -src argument when invoking it from another
-directory.
-4. Set up a test mod directory
-Find your Quake installation. For a typical Steam installation on Pop!_OS, it
-will be
-somewhere under:
-~/.steam/steam/steamapps/common/Quake/
-Create a mod directory alongside the game's id1 directory:
-mkdir -p "/path/to/Quake/mymod"
-For your first test, copy the compiled binary:
-cp ~/quake-dev/source/quake-rerelease-qc/progs.dat \
-"/path/to/Quake/mymod/progs.dat"
-Your game directory should look something like this:
-Quake/
-├── id1/
-├── rerelease/
-└── mymod/
-└── progs.dat
-Keep your source code in ~/quake-dev ; you don't need to put the entire source
-repository
-inside the game installation.
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-4/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-5. Install and run Ironwail
-Ironwail has native Linux builds.
-Download it from:
-Ironwail GitHub releases
-Download the Linux x86_64 release and extract it somewhere convenient, for
-example:
-~/tools/ironwail/
-The current release notes specify glibc 2.31 or newer, so Pop!_OS should meet
-that
-requirement on a reasonably recent installation.
-GitHub
-Run your mod from the Quake installation directory:
-cd "/path/to/Quake"
-~/tools/ironwail/ironwail -game mymod
-This is also convenient for development: compile, copy the new progs.dat ,
-restart or
-reload the game, and test.
-6. Running the mod in the official rerelease
-You can keep the same mod directory and test it in the official rerelease as
-well.
-The important distinction is that the rerelease and Ironwail are separate
-engines. Although
-Ironwail supports rerelease content, you should not assume that every
-KEX-specific QuakeC
-feature in the official source is supported identically by Ironwail.
-I'd establish a working baseline in the official rerelease first, then test the
-same compiled
-binary in Ironwail.
-One correction to the directory layout above: for the official rerelease, the
-mod should live
-inside Quake/rerelease/ , whereas Ironwail can use a mod directory alongside its
-id1
-game data. The safest approach is to keep separate copies of the mod folder for
-the two
-engines.
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-5/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-For the rerelease, the typical layout is:
-Quake/
-└── rerelease/
-├── id1/
-└── mymod/
-└── progs.dat
-You can switch to it from the in-game console using:
-game mymod
-This is documented in the community's rerelease modding guide
-.
-Steam Com… +1
-7. Your initial toolchain
-Here's what I'd install and use initially:
-ToolPurposePlatform
-FTEQCCQuakeC compilerNative Linux
-GitSource controlNative Linux
-VS Code or VSCodiumSource editingNative Linux
-IronwailTestingNative Linux
-Quake rereleaseTestingNative Linux Steam version
-No Wine necessary.
-One compatibility caveat: the official source targets the rerelease. Ironwail's
-compatibility
-with rerelease content does not automatically guarantee compatibility with every
-rerelease-
-specific QuakeC extension. That will need to be verified with an actual compiled
-build.
-That's all you need to get started. I'd first get the unmodified base quakec
-source compiling
-successfully before changing anything.
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-6/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-Useful references:
-Official Quake rerelease source
-FTEQCC downloads
-Ironwail downloads
-Rerelease modding guide
-You said:
-Ok good paradgm. Will follow this thru and ask questions.
-first one:
-when i set up a source folder. I put the original files there. Then i
-modify them hence making a mod. What if i work on several mods
-tho? I guess i will have to make a new copy of the original source
-everytime. But wouldnt that mean that putting a separate source
-folder into each wip mod folder along the other assets wuild be
-way more practical?
-ChatGPT said:
-Yes. In fact, I think your proposed approach is the better one.
-Each mod should be a self-contained project, including its own copy of the
-QuakeC
-source, compiled files and custom assets.
-That way, you can work on multiple mods independently without worrying about one
-project's changes affecting another.
-I'd organize things like this:
-~/quake-dev/
-│
-├── tools/
-│├── fteqcc/
-│└── ironwail/
-│
-├── base-source/
-│
-└── quake-rerelease-qc/
-│
-└── projects/
-│
-├── my-first-mod/
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-7/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-│├── source/
-││├── quakec/
-││├── quakec_hipnotic/
-││└── ...
-│││├── assets/
-│├── build/
-│└── README.md
-│
-├── my-second-mod/
-│├── source/
-│├── assets/
-│├── build/
-│└── README.md
-│
-└── my-third-mod/
-├── source/
-├── assets/
-├── build/
-└── README.md
-The advantage is that you can simply copy the original repository into each
-project when you
-start a new mod.
-A slightly better approach: use Git
-I would recommend making every mod its own Git repository.
-For example:
-cd ~/quake-dev/projects/my-first-mod
-git init
-git add .
-git commit -m "Initial project based on Quake rerelease QC"
-Now you have a history of all your modifications and can revert changes if
-something
-breaks.
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-8/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-The original repository is licensed under GPLv2, so keep its COPYING.txt and
-licensing
-information when copying its source.
-id-Software/… +1
-What about the original source?
-Keep one untouched copy in:
-~/quake-dev/base-source/quake-rerelease-qc/
-Whenever you start a new project, copy it:
-cp -a ~/quake-dev/base-source/quake-rerelease-qc \
-~/quake-dev/projects/my-new-mod/source
-This gives you:
-An untouched reference copy.
-Completely independent source code for every mod.
-Independent Git histories.
-No risk of accidentally sharing modifications between projects.
-My recommendation: Do exactly what you suggested. A separate source folder
-inside each
-mod project is a sensible and straightforward workflow.
-Later, if you develop several mods that share code, you can look into Git
-submodules or
-shared libraries. But don't introduce that complexity yet.
-You said:
-ok how to add a new enemy. just the basic workflow
-ChatGPT said:
-The basic workflow is:
-Create the enemy's QuakeC logic → register its source file → connect its model
-and
-animations → compile → place it in a map → test it.
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-9/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-In the Quake rerelease source, enemies are implemented in QuakeC. The engine
-loads the
-compiled progs.dat , not the individual .qc files.
-id-Software/… +1
-1. Create a new enemy source file
-For example, suppose your enemy is called monster_guard .
-Inside your project's source directory, create:
-quakec/
-└── monsters/
-├── ...
-└── guard.qc
-I'd keep custom enemies in their own files rather than putting all their code
-into
-monsters.qc .
-2. Implement the enemy
-Your new .qc file will contain several things:
-Model and sound precaching.
-Animation frame definitions.
-Idle and standing behaviour.
-Walking and chasing behaviour.
-Attack behaviour.
-Pain reaction.
-Death behaviour.
-Main spawn function.
-The spawn function is particularly important. It initializes the enemy's
-properties, such as:
-Health
-Collision box
-Movement type
-Model
-AI behaviour functions
-Starting animation
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-10/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-For reference, look at the existing monster_tarbaby implementation in the
-original source.
-It is a useful example of a complete enemy spawn function.
-GitHub
-3. Register the new source file
-This is an important step.
-Open:
-quakec/progs.src
-You'll find a list of all source files that the compiler should include.
-Near the bottom, you'll see something like:
-monsters/ogre.qc
-monsters/fiend.qc
-monsters/shambler.qc
-monsters/knight.qc
-...
-monsters/enforcer.qc
-monsters/shub.qc
-Add your file:
-monsters/guard.qc
-Without this entry, FTEQCC won't compile your new enemy's code.
-GitHub
-4. Add the enemy's assets
-Your mod's game directory needs the enemy's model and sounds.
-For example:
-mymod/
-├── progs.dat
-├── progs/
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-11/2611/8/26, 6:20 PM
-│
-Setup Quake Mod Environment
-└── guard.mdl
-└── sound/
-└── guard/
-├── attack.wav
-├── pain.wav
-└── death.wav
-Your QuakeC code references these paths when precaching the assets.
-For example:
-precache_model2("progs/guard.mdl");
-precache_sound2("guard/attack.wav");
-The paths must match the actual locations of the files.
-5. Compile
-Run FTEQCC again.
-It will compile all the source files listed in progs.src into a new progs.dat .
-Copy the resulting file into your mod's game directory.
-6. Place the enemy in a map
-This is how you actually get your enemy into the game world.
-In Quake, map entities have a classname property.
-Your enemy's spawn function is:
-void() monster_guard =
-{
-// Initialization
-};
-The corresponding map entity must have:
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-12/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-"classname" "monster_guard"
-You can place it using a Quake map editor, such as TrenchBroom.
-7. Test
-1. Launch your mod.
-2. Load the test map containing your enemy.
-3. Check that the model appears.
-4. Check animations and movement.
-5. Test attacks, damage and death.
-6. Check the console for missing assets or runtime errors.
-The whole workflow at a glance
-1 Create monsters/guard.qc
-Write the enemy's QuakeC logic.
-2 Register it in progs.src
-Tell the compiler about the new file.
-3 Add assets
-Put models and sounds in the mod directory.
-4 Compile
-Generate a new progs.dat .
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-13/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-5 Place it in a map
-Add an entity with classname monster_guard .
-6 Test
-Run the map and verify its behaviour.
-One important distinction: monsters.qc contains shared monster infrastructure,
-while
-individual monster files contain the actual implementations. You generally want
-to follow the
-latter approach for your own enemies.
-For your first experiment, I'd actually recommend copying an existing monster's
-.qc file,
-renaming its functions and spawn function, and getting that working as a
-separate enemy.
-It's a much easier starting point than implementing everything from scratch.
-You said:
-this is the hellnight.qc
-give me a detailly commented version of it.
-ChatGPT said:
-Absolutely. I can annotate it line by line, explaining both what the code does
-and why it is
-written that way.
-However, I don't see the hellnight.qc file attached to your message.
-Please upload hellnight.qc here.
-I'll return a fully commented version that:
-Explains every function and important variable.
-Explains the QuakeC syntax and engine-specific functions.
-Describes the enemy's AI, movement, attacks and animation logic.
-Explains how the different functions call each other.
-Preserves the original code and behaviour exactly.
-I'll write the comments with someone learning QuakeC modding in mind, rather
-than
-assuming you already know the engine internals.
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-14/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-You said:
-Pasted text(8).txt
-Document
-Worked for 2m 22s
-ChatGPT said:
-Completed
-Annotated Hell Knight source
-Download hellknight_commented.qc
-I've added detailed comments covering:
-Model and animation frame declarations.
-QuakeC function syntax and frame sequencing.
-Projectile creation and aiming.
-Enemy AI, chasing and charging.
-Melee and ranged attacks.
-Pain reactions, death and gibbing.
-Enemy initialization and spawn configuration.
-Important: I preserved the original executable code. I verified that removing
-comments
-from the annotated version leaves the original code and model directives
-unchanged.
-I haven't run it through FTEQCC, but no functional code changes were made. Keep
-your
-original file as a clean reference.
-You said:
-how intelligent can a quake monster get?
-Worked for 19s
-ChatGPT said:
-Surprisingly intelligent. You can make a Quake monster considerably more
-sophisticated than the original monsters. You're not limited to the classic
-behaviour of
-walking towards the player, getting close and attacking.
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-15/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-QuakeC is a programming language, not a fixed monster-behaviour scripting
-system. You
-can implement your own decision-making, memory, perception, tactical behaviour
-and
-coordination.
-The important distinction is between what QuakeC can implement and what the
-engine
-makes convenient to implement.
-1. What levels of intelligence are possible?
-Here is a rough progression:
-LevelBehaviour
-1. BasicSees player, chases and attacks.
-2. ReactiveDodges, retreats, strafes and chooses between attacks.
-3. TacticalUses cover, maintains distance, flanks and repositions.
-4. PerceptiveHears sounds, investigates noises, remembers last known player
-position.
-5. StrategicUses different tactics depending on health, ammunition, distance and
-surroundings.
-6. CoordinatedCommunicates with other monsters, surrounds players, calls for
-reinforcements.
-7. AdaptiveRemembers previous encounters and changes its tactics based on player
-behaviour.
-These are not engine-defined tiers. They're examples of increasingly
-sophisticated systems
-you could implement.
-2. What does the Quake rerelease source already give you?
-This is where things get interesting. The source you downloaded already contains
-much of
-the infrastructure you need.
-For example, look at quakec/ai.qc .
-Existing functionalityWhat it allows
-visible()Check whether another entity can be seen.
-infront()Determine whether a target is in front of the monster.
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-16/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-range()Categorize target distance.
-FindTarget()Find potential enemies.
-ai_run()Handle enemy pursuit and attack decisions.
-ai_run_slide()Strafe sideways while fighting.
-walkpathtogoal()Use the rerelease engine's navigation system.
-GitHub +2
-There are also some useful additions in the rerelease:
-self.oldenemy lets monsters remember a previous target.
-self.search_time tracks how long they retain knowledge of an enemy.
-self.attack_state supports different combat states.
-self.combat_style distinguishes ranged, melee and mixed combat.
-self.allowPathFind controls whether advanced pathfinding is used.
-GitHub
-Interestingly, the rerelease source already contains an advanced movement
-implementation
-called ai_pathtogoal() . It supports using the engine's bot navigation system to
-move
-monsters towards their enemies. It's conditional and disabled by default in the
-original id1
-configuration.
-GitHub
-3. The biggest limitation: navigation
-This is probably the biggest technical challenge when making genuinely
-intelligent
-monsters.
-Consider a monster that wants to flank the player.
-It needs to:
-1. Understand where the player is.
-2. Find a suitable position to approach from.
-3. Find a route to that position.
-4. Navigate around walls and obstacles.
-5. Reconsider its plan if the player moves.
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-17/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-The rerelease has walkpathtogoal() for navigation using available engine
-navigation
-nodes.
-However, there is an important compatibility issue for your project:
-The rerelease implements walkpathtogoal() .
-Ironwail currently exposes the function but returns zero and does not move the
-entity.
-QuakeBook +1
-So you shouldn't build your entire monster AI around that function if Ironwail
-compatibility
-is important.
-You can implement your own waypoint-based navigation in QuakeC, though that
-involves
-additional work.
-4. What about hearing and memory?
-There is an important distinction here.
-Quake already has mechanisms for monsters to become aware of hostile activity.
-For
-example, the original targeting code uses hostile events and fake entities
-representing
-projectile impacts to alert monsters.
-But sound() itself is a sound-playing function, not a general-purpose hearing
-system.
-You could implement your own sensory system:
-Hearing:
-Detect a player firing a weapon.
-Detect nearby explosions.
-Investigate the location of a stimulus.
-Remember where the sound originated.
-Memory:
-Store the last known player position.
-Remember where the player was last seen.
-Search nearby rooms after losing sight.
-Eventually abandon the search.
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-18/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-The relevant building blocks are already available in QuakeC, including entity
-fields, vectors,
-distance calculations and collision traces.
-GitHub +2
-5. What I'd consider achievable
-Imagine creating a particularly intelligent Knight-type enemy.
-9
-Its behaviour could look something like this:
-When idle
-It patrols a designated area. Occasionally it looks around and reacts to
-suspicious activity.
-When it detects the player
-It doesn't immediately charge. It evaluates the distance and selects an
-appropriate tactic.
-During combat
-At long range, it uses magic.
-At medium range, it approaches while dodging incoming projectiles.
-At close range, it switches to melee.
-When surrounded, it attempts to retreat.
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-19/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-When low on health, it becomes more aggressive or defensive, depending on its
-personality.
-When it loses sight of the player
-It goes to the last known position and investigates. It might search nearby
-areas rather than
-immediately returning to its idle state.
-When fighting alongside other monsters
-It communicates its target to nearby allies. One monster engages the player
-while another
-attempts to flank.
-All of this is achievable with conventional QuakeC programming, although
-navigation and
-coordination require custom systems.
-6. My recommendation: don't think of monsters as animation sequences
-Looking at your hellnight.qc , you can see that its behaviour is primarily
-organized
-around animation frames and a handful of decisions.
-For more sophisticated enemies, I'd gradually move towards a structure like
-this:
-Monster AI architecture
-Perception system
-Sight · Hearing · Damage · Memory
-Decision-making system
-Evaluate threats · Select tactics · Choose goals
-Behaviour system
-Attack · Chase · Dodge · Retreat · Investigate
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-20/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-Animation system
-Play the appropriate model animations
-The key is separating the monster's decision-making from its animation. Its AI
-decides what
-it wants to do; its animation system handles how it visually performs that
-action.
-My take: QuakeC is capable of much more sophisticated enemy AI than Quake's
-original
-monsters demonstrate. Your main limitations will be navigation, engine
-compatibility and
-the amount of code you're willing to write—not the basic intelligence you can
-implement.
-I'd aim for tactical, reactive monsters rather than trying to simulate human
-intelligence.
-That's where you can get some very impressive results without fighting the
-engine
-unnecessarily.
-You said:
-can a monster cast rays?
-Worked for 10s
-ChatGPT said:
-Absolutely. QuakeC has a built-in function called traceline() , which performs a
-raycast.
-And the good news: it's a standard Quake engine builtin, so it's suitable for
-your rerelease
-and Ironwail compatibility target.
-GitHub +1
-1. Basic raycast
-The function signature is:
-traceline(start, end, nomonsters, ignore_entity);
-For example:
-local vector start;
-local vector destination;
-start = self.origin + '0 0 24';
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-21/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-destination = self.enemy.origin;
-traceline(start, destination, FALSE, self);
-This casts an invisible ray from the monster towards its enemy.
-The parameters:
-ParameterMeaning
-startRay origin
-endRay destination
-nomonstersWhether other monsters should be ignored
-ignore_entityEntity to exclude from collision testing, usually self
-2. How do you know what the ray hit?
-QuakeC provides several global variables that are populated by traceline() :
-VariableMeaning
-trace_fractionHow far the ray travelled (1.0 = unobstructed)
-trace_endposWhere the ray stopped
-trace_entEntity hit by the ray
-trace_plane_normalSurface normal at the impact point
-trace_startsolidWhether the ray started inside solid geometry
-These are declared in the rerelease's defs.qc .
-GitHub
-For example:
-if (trace_fraction < 1)
-{
-// Something obstructed the ray.
-}
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-22/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-Or:
-if (trace_ent == self.enemy)
-{
-// The ray hit our enemy.
-}
-3. Practical example: monster vision
-Imagine a monster that can only see the player when there is no wall between
-them.
-float() MonsterCanSeeEnemy =
-{
-local vector start;
-local vector destination;
-// Start the ray around the monster's upper body.
-start = self.origin + '0 0 24';
-// Aim towards the enemy.
-destination = self.enemy.origin;
-// Cast the ray.
-// FALSE means other monsters can block the ray.
-// self is ignored during collision testing.
-traceline(start, destination, FALSE, self);
-// Did we hit the intended target?
-if (trace_ent == self.enemy)
-return TRUE;
-// No obstruction along the ray.
-if (trace_fraction == 1)
-return TRUE;
-// Something is blocking the monster's view.
-return FALSE;
-};
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-23/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-This is a simplified visibility test, but illustrates the principle.
-4. You can cast multiple rays!
-This is where things get interesting.
-Instead of casting one ray, you can cast several:
-For example, a monster could cast:
-One ray towards the player's head.
-One ray towards the player's torso.
-One ray towards the player's feet.
-This allows you to distinguish between situations where the player is completely
-hidden and
-situations where only part of the player is visible.
-You could also use multiple rays for obstacle detection, checking whether a
-monster can
-move forward, and choosing an unobstructed direction for a projectile.
-One important technical detail: traceline() performs a collision test, not a
-visible laser
-effect. Also, its results are stored in global trace variables, so save any
-results you need
-before performing another trace.
-My recommendation: Get comfortable with traceline() early. It's one of the most
-useful
-tools for implementing sophisticated monster behaviour in QuakeC.
-You said:
-but it only casts for other entities or is also the pixel of a wall
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-24/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-texture possible?
-Worked for 19s
-ChatGPT said:
-No. traceline() cannot test individual pixels of a wall texture. It tests the
-map's
-collision geometry, not the rendered image.
-There are three different things to distinguish:
-What you want to detecttraceline()
-A wall or solid piece of world geometryYes
-A solid entity, such as a door or monsterYes
-An individual pixel of a wall textureNo
-For example, imagine a wall with a window painted onto its texture. Visually,
-the player can
-see through the window, but the underlying map geometry is still a solid wall.
-A ray will hit that wall regardless of which part of the texture it appears to
-hit.
-What about transparent textures?
-This is particularly relevant in Quake.
-Ironwail supports alpha-tested fence textures (usually texture names beginning
-with { ).
-They can visually contain holes, but those holes are a rendering feature, not
-automatically
-holes in the collision geometry.
-QuakeBook
-So a monster might see the player through a fence visually, while traceline()
-still reports
-that a wall blocks its view.
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-25/2611/8/26, 6:20 PM
-Setup Quake Mod Environment
-What can you do instead?
-You have a few options:
-1. Actual geometric openings: Build the wall with real gaps. Rays will pass
-through them
-naturally.
-2. Non-solid geometry: Use non-solid entities for objects that should not block
-vision or
-projectiles.
-3. Custom visibility system: Represent special transparent areas using helper
-entities or
-map-defined information and account for them in your AI.
-There are also engine-specific extensions in some Quake engines that can
-retrieve surface
-texture information, but these aren't a portable way to sample individual
-pixels. The
-rerelease's standard QuakeC trace globals provide collision information, not
-texture pixel
-data.
-GitHub +1
-For your monster AI: I'd distinguish between visual visibility and physical line
-of sight.
-Those don't always have to be the same thing. A monster might see you through a
-grate but
-still be unable to shoot you through it, for example.
-https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85
-26/2611/8/26, 6:20 PM
 Quake Lightmap Workflow (1)
+
+Source pages: 27
+
 You said:
+
 Ok! Lets use the the continued chat for some checks first.
+
 Features that work right now:
-importing the map
-color is applied to all relevant faces.
-light preview.
-... probalbly a lot more
-Just give me a list of what is done, what is buggy and what has jet
-to be implemented. No long explanations. Just pure overview.
+
+importing the map color is applied to all relevant faces. light preview. ... probalbly a lot more Just give me a list of what is done, what is buggy and what has jet to be implemented. No long explanations. Just pure overview.
+
 ChatGPT said:
+
 You said:
-Ok! Im gonna be away some hours in about 15 minutes. If you
-need some info i can provide it befoire i leave. Then you will have
-have a lot of time. Try to get rid of the bugs. remember you have
-access to the source of ericw, the map, blender and trenchbroom
-if you need it. Everything is open source here.
-Worked for 1m 3s
+
+Ok! Im gonna be away some hours in about 15 minutes. If you need some info i can provide it befoire i leave. Then you will have have a lot of time. Try to get rid of the bugs. remember you have access to the source of ericw, the map, blender and trenchbroom if you need it. Everything is open source here.
+
 ChatGPT said:
+
 You said:
-Here come all your requests.
-I connected a github with you. you shold be authorized to work
-there now.
-https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
-your original extracted qss v0.11.0 zip
-a folder containing the blenderfile i used
-a folder containing an updated map file (a simple cube mao with
-a pillow in the middle, one info_player_start and 8 lights all 16mu
-from the wall, each has "light" "50", one is red, one is blue one is
-green and the five others each have a different "delay" value.
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-1/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
-go for it
-Here is the output of the compile chain and running the map in
+
+Here come all your requests. I connected a github with you. you shold be authorized to work there now. https://github.com/ChnuckiErdbeer/Quake-Surface-Studio your original extracted qss v0.11.0 zip a folder containing the blenderfile i used a folder containing an updated map file (a simple cube mao with a pillow in the middle, one infoplayerstart and 8 lights all 16mu from the wall, each has "light" "50", one is red, one is blue one is
+
+green and the five others each have a different "delay" value. go for it Here is the output of the compile chain and running the map in
+
 ironwail:
-#### Using working directory
-'/mnt/sde1/FPS/IdTech2/QuakeDev/##mapping/blender_lightmap
-_tests'
-#### Exporting map file
-'/mnt/sde1/FPS/IdTech2/QuakeDev/##mapping/blender_lightmap
-_tests/test02_compile.map'
-#### Copying to '/mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/':
+
+Using working directory '/mnt/sde1/FPS/IdTech2/QuakeDev/##mapping/blenderlightmap tests' #### Exporting map file '/mnt/sde1/FPS/IdTech2/QuakeDev/##mapping/blenderlightmap tests/test02_compile.map'
+
+Copying to '/mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/':
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/##mapping/blender_lightmap
-_tests/test02_compile.map
-#### Executing
-'/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-
-alpha11-Linux/qbsp -litwater
+
+tests/test02compile.map #### Executing '/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0alpha11-Linux/qbsp -litwater
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.map'
 ---- qbsp / ericw-tools 2.0.0-alpha11 ----
-low priority not compiled into this version
-logging to
+
+low priority not compiled into this version logging to
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.log
+
 (truncate)
+
 --- Options Summary ---
+
 "litwater" was set to "1" (from command line)
+
 Input file:
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.map
+
 Output file:
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.bsp
 INFO: using built-in palette.
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-2/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
 ---- LoadMapFile ----
-12 entities
-5 unique textures
-21 texinfos
-32 unique planes
+
+12 entities 5 unique textures 21 texinfos 32 unique planes
+
 ---- ProcessMapBrushes ----
 INFO: world extents calculated to 1352 units
 [100%] time elapsed: 00:00:00.000109
-7 brushes
-42 sides
-0 texture frames added
+
+7 brushes 42 sides 0 texture frames added
+
 WARNING: unable to find texture skip
+
 Processing hull 0...
+
 ---- Brush_LoadEntity ----
 [100%] time elapsed: 00:00:00.000107
 ---- CountBrushes ----
-7 SOLID brushes
-7 brushes total
-42 visible sides
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-3/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
+
+7 SOLID brushes 7 brushes total 42 visible sides
+
 INFO: calculating BSP for 7 brushes with 42 sides
 ---- BrushBSP ----
-7 brushes
-42 visible faces
+
+7 brushes 42 visible faces
+
 [done] time elapsed: 00:00:00.000449
-24 nodes
-24 expensive split nodes
-25 leaves
+
+24 nodes 24 expensive split nodes 25 leaves
+
 ---- CountLeafs ----
-7 SOLID leafs
-18 EMPTY leafs
-25 leafs total
-12 max tree height
-7 avg tree height
+
+7 SOLID leafs 18 EMPTY leafs 25 leafs total 12 max tree height 7 avg tree height
+
 ---- MakeTreePortals ----
 [100%] time elapsed: 00:00:00.000226
 ---- CalcTreeBounds ----
 [done] time elapsed: 00:00:00.000026
+
 118 tree portals
+
 ---- FillOutside ----
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-4/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
+
 14 outside leaves
+
 [done] time elapsed: 00:00:00.000019
 ---- FillDetail ----
+
 0 detail filled leafs
+
 ---- BrushBSP ----
-7 brushes
-10 visible faces
-32 non-visible faces
+
+7 brushes 10 visible faces 32 non-visible faces
+
 [done] time elapsed: 00:00:00.000319
-28 nodes
-18 non-visible nodes
-28 expensive split nodes
-29 leaves
+
+28 nodes 18 non-visible nodes 28 expensive split nodes 29 leaves
+
 ---- CountLeafs ----
-7 SOLID leafs
-22 EMPTY leafs
-29 leafs total
-11 max tree height
-6 avg tree height
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-5/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
+
+7 SOLID leafs 22 EMPTY leafs 29 leafs total 11 max tree height 6 avg tree height
+
 ---- MakeTreePortals ----
 [100%] time elapsed: 00:00:00.000193
 ---- CalcTreeBounds ----
 [done] time elapsed: 00:00:00.000022
+
 134 tree portals
+
 ---- FillOutside ----
+
 18 outside leaves
+
 [done] time elapsed: 00:00:00.000015
 ---- FillDetail ----
+
 0 detail filled leafs
+
 ---- MakeTreePortals ----
 [100%] time elapsed: 00:00:00.000134
 ---- CalcTreeBounds ----
 [done] time elapsed: 00:00:00.000018
+
 134 tree portals
+
 ---- MarkVisibleSides ----
+
 40 sides visible
+
 ---- MakeFaces ----
-20 makefaces
-4 merged
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-6/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
-16 subdivided
+
+20 makefaces 4 merged 16 subdivided
+
 ---- PruneNodes ----
+
 18 nodes pruned
+
 ---- WritePortalFile ----
 [done] time elapsed: 00:00:00.000095
-4 player-occupiable leaves
-4 clusters of leaves
-4 vis portals
+
+4 player-occupiable leaves 4 clusters of leaves 4 vis portals
+
 ---- CountLeafs ----
-4 EMPTY leafs
-7 SOLID leafs
-11 leafs total
-11 max tree height
-6 avg tree height
+
+4 EMPTY leafs 7 SOLID leafs 11 leafs total 11 max tree height 6 avg tree height
+
 ---- TJunc ----
 [100%] time elapsed: 00:00:00.000167
-28 edges added by tjunctions
-32 faces optimized through MWT
-92 triangles computed from MWT
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-7/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
-8 faces created via optimization of MWT triangles
+
+28 edges added by tjunctions 32 faces optimized through MWT 92 triangles computed from MWT 8 faces created via optimization of MWT triangles
+
 ---- EmitFaces ----
-86 edges
-40 faces
-Processing hull 1...
-Processing hull 2...0
+
+86 edges 40 faces Processing hull 1... Processing hull 2...0
+
 ---- FinishBSPFile ----
+
 Writing
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.bsp
+
 as Quake BSP bsp29
+
 Wrote
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.bsp
-count lump name
-byte size
-1 models64
-29 planes580
-46 vertexes552
-10 nodes240
-9 texinfos360
-40 faces800
-26 clipnodes
-5 leafs
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-208
-140
-8/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
-42 marksurfaces
-87 edges
-84
-348
-172 surfedges
-688
-5 textures21944
-lightdata0
-visdata0
-entdata947
-0.017s seconds elapsed
-#### Finished with exit code 0
-#### Executing
-'/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-
-alpha11-Linux/vis
+
+count lump name byte size 1 models64 29 planes580 46 vertexes552 10 nodes240 9 texinfos360 40 faces800 26 clipnodes 5 leafs 208 140 42 marksurfaces 87 edges 84 348 172 surfedges 688 5 textures21944 lightdata0 visdata0 entdata947 0.017s seconds elapsed #### Finished with exit code 0 #### Executing '/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0alpha11-Linux/vis
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile'
 ---- vis / ericw-tools 2.0.0-alpha11 ----
-low priority not compiled into this version
-logging to
+
+low priority not compiled into this version logging to
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile-
+
 vis.log (truncate)
+
 --- Options Summary ---
+
 LoadBSPFile:
+
 '/mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.bsp'
+
 BSP is version Quake BSP bsp29
+
 INFO: using built-in palette.
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-9/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
+
 Loading extended texinfo flags from
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.texin
-fo.json...
-4 leafs
-4 clusters
-4 portals
+
+fo.json... 4 leafs 4 clusters 4 portals
+
 Calculating Base Vis:
+
 [100%] time elapsed: 00:00:00.000015
+
 Calculating Full Vis:
+
 [100%] time elapsed: 00:00:00.000014
-Expanding clusters...
-average leafs visible: 3
-c_noclip: 0
-c_chains: 12
-visdatasize:4 compressed from 4
+
+Expanding clusters... average leafs visible: 3 cnoclip: 0 cchains: 12 visdatasize:4 compressed from 4
+
 ---- CalcAmbientSounds ----
 [100%] time elapsed: 00:00:00.000010
+
 Writing
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.bsp
-as Quake BSP bsp29
-0.00s elapsed
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-10/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
-#### Finished with exit code 0
-#### Executing
-'/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-
-alpha11-Linux/light
+
+as Quake BSP bsp29 0.00s elapsed #### Finished with exit code 0 #### Executing '/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0alpha11-Linux/light
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile'
 ---- ClearLightmapSurfaces ----
 ---- light / ericw-tools 2.0.0-alpha11 ----
-low priority not compiled into this version
-logging to
+
+low priority not compiled into this version logging to
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile-
+
 light.log (truncate)
+
 LoadBSPFile:
+
 '/mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.bsp'
+
 BSP is version Quake BSP bsp29
+
 INFO: using built-in palette.
 ---- load_textures ----
+
 load: WARNING: filesystem error: cannot get file size: Is a
+
 directory [/mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/]
+
 ConvertTextures: WARNING: invalid size data for
+
 Loading extended texinfo flags from
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.texin
+
 fo.json...
+
 Loading extended content flags from
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.cont
+
 ent.json...
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-11/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
+
 ---- LoadEntities ----
+
 12 entities read, 10 are lights.
+
 --- Options Summary ---
-"bounce" was set to "2" (from map)
-"bouncescale" was set to "1.000000" (from map)
-"bouncecolorscale" was set to "1.000000" (from map)
-Embree_TraceInit: Embree version: 4.4.0
+
+"bounce" was set to "2" (from map) "bouncescale" was set to "1.000000" (from map) "bouncecolorscale" was set to "1.000000" (from map) Embree_TraceInit: Embree version: 4.4.0
+
 Embree_TraceInit:
-0 sky faces
-40 solid faces
-0 filtered faces
-0 shadow-casting skip faces
-SetupLights: 10 initial lights
+
+0 sky faces 40 solid faces 0 filtered faces 0 shadow-casting skip faces SetupLights: 10 initial lights
+
 ---- MakeSurfaceLights ----
-SetupLights: 10 after surface lights
-SetupLights: 10 after jittering
-Final count: 10 lights, 0 suns in use.
+
+SetupLights: 10 after surface lights SetupLights: 10 after jittering Final count: 10 lights, 0 suns in use.
+
 ---- LightWorld ----
 ---- ClearLightmapSurfaces ----
 ---- CalculateVertexNormals ----
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-12/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
 [100%] time elapsed: 00:00:00.000117
 ---- MakeFaceCache ----
 [100%] time elapsed: 00:00:00.000118
@@ -1132,7 +291,9 @@ Quake Lightmap Workflow (1)
 [100%] time elapsed: 00:00:00.000169
 ---- MakeRadiositySurfaceLights ----
 [100%] time elapsed: 00:00:00.000006
+
 0 surface light points in use.
+
 ---- Direct Lighting ----
 [100%] time elapsed: 00:00:00.000410
 ---- MakeBounceLights ----
@@ -1144,178 +305,110 @@ Quake Lightmap Workflow (1)
 ---- Indirect Lighting (pass 1) ----
 [100%] time elapsed: 00:00:00.001596
 ---- Post-Processing ----
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-13/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
 [100%] time elapsed: 00:00:00.000020
 ---- SaveLightmapSurfaces ----
 [100%] time elapsed: 00:00:00.000026
-map uses color: true
-Colored light entities/settings detected: .lit output enabled.
-lightmap size (total): 15696
+
+map uses color: true Colored light entities/settings detected:.lit output enabled. lightmap size (total): 15696
+
 [100%] time elapsed: 00:00:00.000033
+
 Lighting Completed.
+
 Writing
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.lit
 ---- ClearLightmapSurfaces ----
+
 0 switchable light styles (32 max)
+
 Writing
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test02_compile.bsp
-as Quake BSP bsp29
-0.006s seconds elapsed
-0 empty lightmaps
-#### Finished with exit code 0
-#### Executing '/mnt/sde1/FPS/IdTech2/QuakeDev/ironwail
-+game hellojam26map +map test02_compile +developer 1'
-Command line: /mnt/sde1/FPS/IdTech2/QuakeDev/ironwail
-+game hellojam26map +map test02_compile +developer 1
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-14/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
-Found SDL version 2.30.0
-Terminal input not available.
-Detected 8 CPUs.
-Initializing Ironwail v0.8.2
-Host_Init
-Using add-on server "https://kexquake.s3.amazonaws.com"
-Playing registered version.
-Using renderer/network isolation.
-Console initialized.
-UDP Initialized
-Server using protocol 999 (RMQ)
-Exe: 22:41:55 Aug 11 2026 (Linux 64-bit)
-384.0 megabyte heap
-Video initialization
-Video mode: 1280 x 636 24bit Z24 S8 60Hz
-GL_VENDOR: NVIDIA Corporation
-GL_RENDERER: NVIDIA GeForce RTX 3080/PCIe/SSE2
-GL_VERSION: 4.3.0 NVIDIA 580.178.04
-FOUND: EXT_texture_filter_anisotropic
-FOUND: ARB_buffer_storage
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-15/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
-FOUND: ARB_multi_bind
-FOUND: ARB_bindless_texture
-FOUND: ARB_shader_draw_parameters
-FOUND: ARB_clip_control
-Sound Initialization
-SDL audio spec : 44100 Hz, 1024 samples, 2 channels
-SDL audio driver: pulseaudio - X-USB Multichannel, 65536 bytes
-buffer
-Audio: 16 bit, stereo, 44100 Hz
-Language initialization
-Loaded 1679 strings from 'localization/loc_english.txt'
-========= Quake Initialized =========
-Level editing environment detected, enabling map_checks
-(pass -nomapchecks or set map_checks to 0 to disable)
-Note: map_checks overrides gl_zfix, r_oit, and r_alphasort
+
+as Quake BSP bsp29 0.006s seconds elapsed 0 empty lightmaps #### Finished with exit code 0 #### Executing '/mnt/sde1/FPS/IdTech2/QuakeDev/ironwail +game hellojam26map +map test02compile +developer 1' Command line: /mnt/sde1/FPS/IdTech2/QuakeDev/ironwail +game hellojam26map +map test02compile +developer 1 Found SDL version 2.30.0 Terminal input not available.
+
+Detected 8 CPUs. Initializing Ironwail v0.8.2 HostInit Using add-on server "https://kexquake.s3.amazonaws.com" Playing registered version. Using renderer/network isolation. Console initialized. UDP Initialized Server using protocol 999 (RMQ) Exe: 22:41:55 Aug 11 2026 (Linux 64-bit) 384.0 megabyte heap Video initialization Video mode: 1280 x 636 24bit Z24 S8 60Hz GLVENDOR: NVIDIA Corporation GL_RENDERER: NVIDIA GeForce RTX 3080/PCIe/SSE2
+
+GLVERSION: 4.3.0 NVIDIA 580.178.04 FOUND: EXTtexturefilteranisotropic FOUND: ARBbufferstorage FOUND: ARBmultibind FOUND: ARBbindlesstexture FOUND: ARBshaderdrawparameters FOUND: ARBclipcontrol Sound Initialization SDL audio spec: 44100 Hz, 1024 samples, 2 channels SDL audio driver: pulseaudio - X-USB Multichannel, 65536 bytes buffer Audio: 16 bit, stereo, 44100 Hz Language initialization Loaded 1679 strings from 'localization/locenglish.txt'
+
+========= Quake Initialized ========= Level editing environment detected, enabling mapchecks (pass -nomapchecks or set mapchecks to 0 to disable) Note: mapchecks overrides glzfix, roit, and ralphasort
+
 Add-on server status:
-29 add-ons available for download
-0 add-ons already installed
-execing quake.rc
-execing default.cfg
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-16/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
-execing ironwail.cfg
-couldn't exec autoexec.cfg
-Wrote ironwail.cfg.
-----------------------------------------
-"game" changed to "id1;hellojam26map"
-Loaded 1679 strings from 'localization/loc_english.txt'
-=====================================
+
+29 add-ons available for download 0 add-ons already installed execing quake.rc execing default.cfg execing ironwail.cfg couldn't exec autoexec.cfg Wrote ironwail.cfg.
+
+"game" changed to "id1;hellojam26map" Loaded 1679 strings from 'localization/loc_english.txt' =====================================
+
 Map checklist (test02_compile.bsp):
+
 [x] lightmap data
 [x] vis data
 [ ] trigger_changelevel
 [ ] info_intermission
 [ ] skill spawnflags/triggers
-[ ] info_player_coop (0/3+)
-[ ] info_player_deathmatch (0/5+)
+[ ] infoplayercoop (0/3+)
+[ ] infoplayerdeathmatch (0/5+)
 [ ] music track (worldspawn "sounds" field)
 [ ] map title (worldspawn "message" field)
-=====================================
-3 demo(s) in loop
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-17/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
-execing quake.rc
-execing default.cfg
-execing ironwail.cfg
-FindFile: can't find autoexec.cfg
-couldn't exec autoexec.cfg
-"game" is already "id1;hellojam26map"
-Sending clc_disconnect
-SpawnServer: test02_compile
-Clearing memory
-Programs occupy 2403K.
-trying to open external vis file
-maps/test02_compile.vis not found, trying hellojam26map.vis
-external vis not found
-"mapversion" is not a field
-[WORLDSPAWN] function started ...
+
+===================================== 3 demo(s) in loop execing quake.rc execing default.cfg execing ironwail.cfg FindFile: can't find autoexec.cfg couldn't exec autoexec.cfg "game" is already "id1;hellojam26map" Sending clcdisconnect SpawnServer: test02compile Clearing memory Programs occupy 2403K. trying to open external vis file maps/test02_compile.vis not found, trying hellojam26map.vis external vis not found "mapversion" is not a field
+
+[WORLDSPAWN] function started...
 [ENGINE] Advanced Engine
 [WORLD] Reading SAVED1-4 console variables
 [WORLD] Reading TEMP1 console variable (1024)
 [WORLD] Max particles (512)
 [PCHAIN] Creating controller
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-18/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
 [WORLD] Switchable lights start (32)
 [WORLD] Setup Light style array
 [WORLD] Setup Pendulum vector array
 [WORLD] Setup Map Var bitflag array
 [WORLD] Setup Shadow lightstyle array
-0 entities inhibited
-Server spawned.
-=====================================
+
+0 entities inhibited Server spawned. =====================================
+
 Map checklist (test02_compile.bsp):
+
 [x] lightmap data
 [x] vis data
 [ ] trigger_changelevel
 [ ] info_intermission
 [ ] skill spawnflags/triggers
-[ ] info_player_coop (0/3+)
-[ ] info_player_deathmatch (0/5+)
+[ ] infoplayercoop (0/3+)
+[ ] infoplayerdeathmatch (0/5+)
 [ ] music track (worldspawn "sounds" field)
 [ ] map title (worldspawn "message" field)
-=====================================
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-19/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
-CL_EstablishConnection: connected to local
-changes will not take effect until the next level load.
+
+===================================== CL_EstablishConnection: connected to local changes will not take effect until the next level load.
+
 Client LOCAL connected
+
 [CLIENT] SetNewParms
-[SVRFLAG] Info_Player_Start2 RESET
+[SVRFLAG] InfoPlayerStart2 RESET
 [SVRFLAG] Bef (0) BITs (112) Aft (0)
 [SVRFLAG] Inventory detection RESET
 [SVRFLAG] Bef (0) BITs (128) Aft (0)
 [SetNewParms] RESETTING Map Variables
 [SKILL4] EvilMode Disabled!
-FITZQUAKE 0.85 SERVER (53716 CRC)
-Serverinfo packet received.
-----------------------------------------
-Using protocol 999
-Lightmap size: 256 x 256 (1/1 blocks)
-Lightmap memory: 0.2 MB (5.9% efficiency)
-FindFile: can't find music/track00.mp3
-Couldn't find a cdrip for track 0
-CL_SignonReply: 1
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-20/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
-Programs occupy 94K.
+
+FITZQUAKE 0.85 SERVER (53716 CRC) Serverinfo packet received.
+
+Using protocol 999 Lightmap size: 256 x 256 (1/1 blocks) Lightmap memory: 0.2 MB (5.9% efficiency) FindFile: can't find music/track00.mp3 Couldn't find a cdrip for track 0 CL_SignonReply: 1 Programs occupy 94K.
+
 Warning: [CL] check "FRIK_FILE" before calling strcat
-(csqc_hudad.qc: prior*CSQC_Init)
+
+(csqchudad.qc: prior*CSQCInit)
+
 [RND_SYNC] Chaos Mode Disabled!
 [PCHAIN] Part bank (0 / 512)
+
 CL_SignonReply: 2
-Warning: [SV] check "DP_QC_TOKENIZE_CONSOLE" before calling
-tokenize_console (csqc_hudad.qc: SV_ParseClientCommand)
-player entered the game
+
+Warning: [SV] check "DPQCTOKENIZE_CONSOLE" before calling
+
+tokenizeconsole (csqchudad.qc: SV_ParseClientCommand) player entered the game
+
 [CLIENT] PutClientInServer
 [SKILL4] EvilMode Disabled!
 [COOP] Spawn locations Missing!
@@ -1325,48 +418,37 @@ player entered the game
 [LevelParms] Reading Map Variables
 [RND_LOAD] Checking load exceptions!
 [CONFIG] MOD Settings
---------------------------------------
-- Particle System disabled
-+ Engine selects particle system
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-21/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
-- Weather System disabled
-+ Client Server QC HUD enabled
-+ Scratch1 CSQC Hud (5) active
-+ Shotgun projectiles system
-+ Shotgun casing enabled
-+ Large Projectile Collision
-+ MWheel ng/sng skip enabled
-+ Z Aware Monster combat enabled
-+ footstep sounds enabled
-+ monster liquid damage enabled
-+ Dev helpers (mark/arrow) enabled
-- All items use corner origin
-+ All items are randomly rotated
-+ Player weapon autoaim disabled
-+ Arcane Key Inventory Msg enabled
-+ No fade away for monster bodies
-- No floor checks for monster bodies
-+ Missile tracking uses default
+
+- Particle System disabled + Engine selects particle system
+
+- Weather System disabled + Client Server QC HUD enabled + Scratch1 CSQC Hud (5) active + Shotgun projectiles system + Shotgun casing enabled + Large Projectile Collision + MWheel ng/sng skip enabled + Z Aware Monster combat enabled + footstep sounds enabled + monster liquid damage enabled + Dev helpers (mark/arrow) enabled
+
+- All items use corner origin + All items are randomly rotated + Player weapon autoaim disabled + Arcane Key Inventory Msg enabled + No fade away for monster bodies
+
+- No floor checks for monster bodies + Missile tracking uses default
+
 * Global fog default not defined
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-22/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
-* Sky fog default not defined
-+ Lightstyle compiler lights at (32)
-+ DP features ( )
---------------------------------------
-CL_SignonReply: 3
-368.5 megabyte data cache
+
+* Sky fog default not defined + Lightstyle compiler lights at (32) + DP features ( )
+
+CL_SignonReply: 3 368.5 megabyte data cache
+
 [INFO] Arcane Dimensions V1.90 (Beta4)
+
 CL_SignonReply: 4
-Warning: [CL] check "DP_QC_SINCOSSQRTPOW" before calling
-pow (csqc_hudad.qc: CSQC_DrawHud)
+
+Warning: [CL] check "DPQCSINCOSSQRTPOW" before calling
+
+pow (csqchudad.qc: CSQCDrawHud)
+
 Warning: [CL] check "FRIK_FILE" before calling strlen
-(csqc_hudad.qc: Hud_DrawNoFont24)
+
+(csqchudad.qc: HudDrawNoFont24)
+
 Warning: [CL] check "FTE_STRINGS" before calling str2chr
-(csqc_hudad.qc: Hud_DrawNoFont24)
+
+(csqchudad.qc: HudDrawNoFont24)
+
 [PCHAIN] Part bank (64 / 512)
 [PCHAIN] Part bank (128 / 512)
 [PCHAIN] Part bank (192 / 512)
@@ -1374,121 +456,125 @@ Warning: [CL] check "FTE_STRINGS" before calling str2chr
 [PCHAIN] Part bank (320 / 512)
 [PCHAIN] Part bank (384 / 512)
 [PCHAIN] Part bank (448 / 512)
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-23/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
-Sending clc_disconnect
-Client player removed
-Wrote ironwail.cfg.
-Shutting down SDL sound
-#### Finished with exit code 0
-Worked for 18s
+
+Sending clc_disconnect Client player removed Wrote ironwail.cfg. Shutting down SDL sound #### Finished with exit code 0
+
 ChatGPT said:
+
 You said:
+
 Its all there:
+
 https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
+
 there should be 3 folders:
-"quake_surface_studio (zip me for blender)" contains the
-extracted zip with all the source and tests
-"blenderfile" containst a single .blend file i used to test the addon
-"mapandbsp" a .map file a.bsp file and all files created alongside
-the .bsp creation.
-can you really not see this files?
-Worked for 1m 51s
+
+"quakesurfacestudio (zip me for blender)" contains the extracted zip with all the source and tests "blenderfile" containst a single.blend file i used to test the addon "mapandbsp" a.map file a.bsp file and all files created alongside the.bsp creation. can you really not see this files?
+
 ChatGPT said:
+
 You said:
+
 very good.
-Worked for 3m 5s
+
 ChatGPT said:
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-24/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
+
 You said:
-close :D you are right that 8 was the wrong entity count. But 10 is
-also wrong. ich has 9: six containing delay values 0 - 5 and three
-with different color values. 40 face sounds right. The original map
-file consists of 6 cubuids formimg the room (four walls, ceiling
-and floor) and a sixth forming the pillar. This originally makes 42
-brushes but since the compiling process removes non visible
-faces and splits some for vis / light optimization the bsp face
-numer can differ. Everything seems fine. Keep on developing until
-you need me to test somethin or have questions.
-Worked for 5m 41s
+
+close:D you are right that 8 was the wrong entity count. But 10 is also wrong. ich has 9: six containing delay values 0 - 5 and three with different color values. 40 face sounds right. The original map file consists of 6 cubuids formimg the room (four walls, ceiling and floor) and a sixth forming the pillar. This originally makes 42 brushes but since the compiling process removes non visible faces and splits some for vis / light optimization the bsp face
+
+numer can differ. Everything seems fine. Keep on developing until you need me to test somethin or have questions.
+
 ChatGPT said:
+
 You said:
+
 Imported 40 faces, 10 light entities. Palette:
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/gfx/palette.lmp. Textures:
+
 4 embedded, 0 WAD, 0 external, 0 white fallback. RGB lightmaps:
-QLIT v1 .lit sidecar. Spawn view set to info_player_start.
+
+QLIT v1.lit sidecar. Spawn view set to infoplayerstart.
+
 bpy.ops.object.editmode_toggle()
-bpy.ops.mesh.select_mode(use_extend=False, use_expand=False,
+bpy.ops.mesh.selectmode(useextend=False, use_expand=False,
+
 type='FACE')
+
 bpy.ops.object.editmode_toggle()
 bpy.ops.object.editmode_toggle()
-bpy.ops.qss.detach_selected_faces()
-Detached 1 face(s) into separate 0–1 paint textures. Use 'Enter
-Texture Paint' to paint the active selected face.
+bpy.ops.qss.detachselectedfaces()
+
+Detached 1 face(s) into separate 0–1 paint textures. Use 'Enter Texture Paint' to paint the active selected face.
+
 bpy.ops.object.editmode_toggle()
-bpy.ops.paint.texture_paint_toggle()
-Painting image: QSS_Face_00037_Paint
+bpy.ops.paint.texturepainttoggle()
+
+Painting image: QSSFace00037_Paint
+
 ChatGPT said:
+
 You said:
-painting the face in paint mode does not leave any visibnle marks.
-seems to not work or paint on a not visible texture "layer"
-Worked for 1m 48s
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-25/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
+
+painting the face in paint mode does not leave any visibnle marks. seems to not work or paint on a not visible texture "layer"
+
 ChatGPT said:
+
 You said:
+
 it works now.. kind of:
-the paint appears but strangley offset from my mouse cursor. on
-the detached face tho.
+
+the paint appears but strangley offset from my mouse cursor. on the detached face tho.
+
 Heres the output:
+
 bpy.ops.object.delete(use_global=False, confirm=False)
+
 Deleted 1 object(s)
-bpy.context.space_data.system_bookmarks_active = 3
-Modules Installed (quake_surface_studio) from
-'/home/chnucki/Downloads/quake_surface_studiofix⁄v0.11.1-
-metadata-style-order-test.zip' into
-'/home/chnucki/.var/app/org.blender.Blender/config/blender/5.2/
-scripts/addons'
-bpy.context.region.active_panel_category = 'Quake'
-bpy.context.space_data.recent_folders_active = 2
+
+bpy.context.spacedata.systembookmarks_active = 3
+
+Modules Installed (quakesurfacestudio) from '/home/chnucki/Downloads/quakesurfacestudiofix⁄v0.11.1metadata-style-order-test.zip' into '/home/chnucki/.var/app/org.blender.Blender/config/blender/5.2/ scripts/addons'
+
+bpy.context.region.activepanelcategory = 'Quake'
+bpy.context.spacedata.recentfolders_active = 2
 bpy.data.screens["temp.002"]. = "QuakeDev"
-bpy.context.space_data.recent_folders_active = 2
+bpy.context.spacedata.recentfolders_active = 2
+
 Imported 40 faces, 10 light entities. Palette:
+
 /mnt/sde1/FPS/IdTech2/QuakeDev/id1/gfx/palette.lmp. Textures:
+
 4 embedded, 0 WAD, 0 external, 0 white fallback. RGB lightmaps:
-QLIT v1 .lit sidecar. Spawn view set to info_player_start.
+
+QLIT v1.lit sidecar. Spawn view set to infoplayerstart.
+
 bpy.context.space_data.shading.type = 'RENDERED'
 bpy.ops.object.editmode_toggle()
-bpy.ops.mesh.select_mode(use_extend=False, use_expand=False,
+bpy.ops.mesh.selectmode(useextend=False, use_expand=False,
+
 type='FACE')
+
 bpy.ops.object.editmode_toggle()
 bpy.ops.object.editmode_toggle()
-bpy.ops.qss.detach_selected_faces()
-Detached 1 face(s) into separate 0–1 paint textures. Use 'Enter
-Texture Paint' to paint the active selected face.
+bpy.ops.qss.detachselectedfaces()
+
+Detached 1 face(s) into separate 0–1 paint textures. Use 'Enter Texture Paint' to paint the active selected face.
+
 bpy.ops.object.editmode_toggle()
-bpy.ops.paint.texture_paint_toggle()
-Painting image (Single Image canvas): QSS_Face_00037_Paint
-I guess you can also work in the main branch or at least give me
-some versioned release zips again so i dont have to puzzle them
-togeher by hand for blender.
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-26/2711/8/26, 6:20 PM
-Quake Lightmap Workflow (1)
-Worked for 3m 55s
+bpy.ops.paint.texturepainttoggle()
+
+Painting image (Single Image canvas): QSSFace00037_Paint I guess you can also work in the main branch or at least give me some versioned release zips again so i dont have to puzzle them togeher by hand for blender.
+
 ChatGPT said:
+
 You said:
-Ok something is off. I detach a face, click enter texture paint, the
-paint appears on the faces left to the one detached. Then i
-detached another one and the paint is nowhere to be found.
-Worked for 3m 25s
+
+Ok something is off. I detach a face, click enter texture paint, the paint appears on the faces left to the one detached. Then i detached another one and the paint is nowhere to be found.
+
 ChatGPT said:
-https://chatgpt.com/c/6aef961e-1c78-83ed-bcfd-979b4858a133
-27/27
+
 11/8/26, 6:21 PM
 Quake Lightmap Workflow (2)
 You said:
