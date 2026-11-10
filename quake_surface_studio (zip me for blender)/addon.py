@@ -28,7 +28,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils
 
 
-ADDON_VERSION = (0, 20, 1)
+ADDON_VERSION = (0, 20, 2)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -3419,24 +3419,45 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
     return obj
 
 
-def _miptex_fullbright_mask(entry, width, height, fullbright_start=224):
-    """Recover an original miptex's fullbright texels when the dimensions match."""
-    if entry is None or entry.blob is None:
+def _miptex_fullbright_mask(
+    entry, width, height, fullbright_start=224, source_image=None
+):
+    """Recover fullbright texels from the source miptex or a sibling mask image."""
+    if entry is not None and entry.blob is not None:
+        try:
+            _name_raw, source_width, source_height, o0, _o1, _o2, _o3 = struct.unpack_from(
+                '<16s6I', entry.blob, 0
+            )
+            if (int(source_width), int(source_height)) == (int(width), int(height)):
+                count = int(source_width) * int(source_height)
+                if o0 > 0 and o0 + count <= len(entry.blob):
+                    indices = entry.blob[o0:o0 + count]
+                    return bytearray(
+                        1 if fullbright_start <= index < 255 else 0
+                        for index in indices
+                    )
+        except (struct.error, TypeError, ValueError):
+            pass
+
+    source_path = str(
+        getattr(source_image, "filepath_raw", "")
+        or getattr(source_image, "filepath", "")
+        or ""
+    ) if source_image is not None else ""
+    if not source_path:
         return None
     try:
-        name_raw, source_width, source_height, o0, _o1, _o2, _o3 = struct.unpack_from(
-            '<16s6I', entry.blob, 0
-        )
-        if (int(source_width), int(source_height)) != (int(width), int(height)):
+        source_path = bpy.path.abspath(source_path)
+        if not os.path.isfile(source_path):
             return None
-        count = int(source_width) * int(source_height)
-        if o0 <= 0 or o0 + count > len(entry.blob):
-            return None
-        indices = entry.blob[o0:o0 + count]
-        return bytearray(
-            1 if fullbright_start <= index < 255 else 0 for index in indices
-        )
-    except (struct.error, TypeError, ValueError):
+        mask, mask_image = _qss_read_fullbright_mask(source_path, width, height)
+        if mask_image is not None:
+            try:
+                bpy.data.images.remove(mask_image, do_unlink=True)
+            except Exception:
+                pass
+        return mask
+    except Exception:
         return None
 
 
@@ -3551,7 +3572,7 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
                 source_id = int(mat.get("qss_fullbright_source_texture_id", -1))
                 source_entry = entries[source_id] if 0 <= source_id < len(entries) else None
                 fullbright_mask = _miptex_fullbright_mask(
-                    source_entry, image.size[0], image.size[1], fullbright_start
+                    source_entry, image.size[0], image.size[1], fullbright_start, image
                 )
                 blob = _encode_image_to_miptex(
                     image, palette, tex_name, fullbright_mask=fullbright_mask,
@@ -3569,7 +3590,7 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
             tex_name = _safe_texture_name(mat.get('qss_export_name', ''), fallback)
             source_entry = entries[source_texture_id]
             fullbright_mask = _miptex_fullbright_mask(
-                source_entry, image.size[0], image.size[1], fullbright_start
+                source_entry, image.size[0], image.size[1], fullbright_start, image
             )
             blob = _encode_image_to_miptex(
                 image, palette, tex_name, fullbright_mask=fullbright_mask,
@@ -5440,7 +5461,10 @@ class QSS_OT_detach_faces(Operator):
                 new_mat['qss_texture_index'] = -1
                 new_mat['qss_is_new_texture'] = True
                 new_mat['qss_fullbright_source_texture_id'] = int(
-                    plan['source_mat'].get('qss_texture_index', -1)
+                    plan['source_mat'].get(
+                        'qss_fullbright_source_texture_id',
+                        plan['source_mat'].get('qss_texture_index', -1),
+                    )
                 )
                 source_texture_name = str(plan['source_mat'].get('qss_texture_name', ''))
                 if source_texture_name.startswith('sky'):
@@ -9402,7 +9426,7 @@ class QSS_OT_load_quake_palette(Operator):
 
 class QSS_OT_convert_quake_palette(Operator):
     bl_idname = "qss.convert_quake_palette"
-    bl_label = "Convert Image to Quake Palette"
+    bl_label = "Optional: Convert Image to Quake Palette"
     bl_description = "Run the material-zone Quake converter inside Blender's own Python process"
 
     output_filepath: StringProperty(
@@ -9898,19 +9922,9 @@ class QSS_PT_lighting(Panel):
                 color_controls.prop(brush, "color", text="Primary")
                 color_controls.prop(brush, "secondary_color", text="Secondary")
                 layout.template_color_picker(brush, "color", value_slider=True)
-            active_image = _qss_current_paint_image(context)
         else:
             picker_row = layout.row(align=True)
             picker_row.prop(context.scene, "qss_paint_color_picker", expand=True)
-            active_image = _qss_converter_source_image(context)
-
-        conversion_row = layout.row(align=True)
-        conversion_row.enabled = active_image is not None
-        conversion_row.operator(
-            QSS_OT_convert_quake_palette.bl_idname,
-            text="Convert Image to Quake Palette…",
-            icon="IMAGE_DATA",
-        )
 
         # Three explicit fixed-width columns keep labels and checkboxes aligned.
         table = layout.box()
