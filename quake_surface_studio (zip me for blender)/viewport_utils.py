@@ -78,3 +78,16 @@ def face_focus_distance(half_width, half_height, aspect, radius, unit_scale,
     fit_width = half_width / (tangent * aspect)
     return max(0.25, unit_scale * 4.0, radius * 2.9,
                max(fit_height, fit_width) * margin)
+
+
+
+def face_normal_toward_view(normal, camera_side):
+    """Orient a face normal toward the side occupied by the current viewport."""
+    normal = tuple(float(value) for value in normal)
+    camera_side = tuple(float(value) for value in camera_side)
+    if len(normal) != 3 or len(camera_side) != 3:
+        raise ValueError("Face normal and camera side must be three-dimensional.")
+    if not all(math.isfinite(value) for value in normal + camera_side):
+        raise ValueError("Face normal and camera side must be finite.")
+    dot = sum(a * b for a, b in zip(normal, camera_side))
+    return tuple(-value for value in normal) if dot < 0.0 else normal
