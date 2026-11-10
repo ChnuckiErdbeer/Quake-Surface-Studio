@@ -2778,7 +2778,6 @@ def _apply_quake_light_energy_scale(scene):
         if raw_value is None:
             continue
         range_scale = float(light_obj.get('qss_quake_world_range', 1.0))
-        calibration = max(0.0, float(light_obj.get('qss_energy_calibration', 1.0)))
         # Keep the user's live-light scale independent of bake source matching.
         # Atlas normalization belongs to the baked image only; applying that
         # ratio to scene lamps can amplify every imported light dramatically.
@@ -2788,7 +2787,7 @@ def _apply_quake_light_energy_scale(scene):
         if range_scale <= 0.0:
             light_obj.data.energy = 0.0
         light_obj['qss_applied_energy_scale'] = scale
-        light_obj['qss_applied_energy_calibration'] = calibration
+        light_obj['qss_applied_energy_calibration'] = 1.0
         updated += 1
     return updated
 
