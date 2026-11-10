@@ -54,7 +54,7 @@ You shouldn't need a Windows development environment for either of these. I'll k
 
 1. Install the QuakeC compiler
 
-The official repository explicitly recommends FTEQCC. It supports the advanced QuakeC features used by the rerelease source. id-Software/... +1 Good news: FTEQCC has a native 64-bit Linux command-line version. No Wine required.
+The official repository explicitly recommends FTEQCC. It supports the advanced QuakeC features used by the rerelease source. Good news: FTEQCC has a native 64-bit Linux command-line version. No Wine required.
 
 **Download it here:**
 
@@ -118,7 +118,7 @@ The repository contains six separate QuakeC codebases. For now, start with quake
 
 3. Compile the source
 
-One important detail: the repository's quakec/progs.src specifies the output as: ../progs.dat This means the compiler places the resulting progs.dat in the parent directory of quakec.
+One important detail: the repository's quakec/progs.src specifies the output as:../progs.dat This means the compiler places the resulting progs.dat in the parent directory of quakec.
 
 **Compile it with:**
 
@@ -225,7 +225,7 @@ Quake/
 
 **You can switch to it from the in-game console using:**
 
-game mymod This is documented in the community's rerelease modding guide . Steam Com... +1
+game mymod This is documented in the community's rerelease modding guide.
 
 7. Your initial toolchain
 
@@ -303,7 +303,7 @@ git add.
 git commit -m "Initial project based on Quake rerelease QC"
 ```
 
-Now you have a history of all your modifications and can revert changes if something breaks. The original repository is licensed under GPLv2, so keep its COPYING.txt and licensing information when copying its source. id-Software/... +1 What about the original source?
+Now you have a history of all your modifications and can revert changes if something breaks. The original repository is licensed under GPLv2, so keep its COPYING.txt and licensing information when copying its source. What about the original source?
 
 **Keep one untouched copy in:**
 
@@ -332,7 +332,7 @@ ok how to add a new enemy. just the basic workflow
 
 **The basic workflow is:**
 
-Create the enemy's QuakeC logic → register its source file → connect its model and animations → compile → place it in a map → test it. In the Quake rerelease source, enemies are implemented in QuakeC. The engine loads the compiled progs.dat, not the individual.qc files. id-Software/... +1
+Create the enemy's QuakeC logic → register its source file → connect its model and animations → compile → place it in a map → test it. In the Quake rerelease source, enemies are implemented in QuakeC. The engine loads the compiled progs.dat, not the individual.qc files.
 
 1. Create a new enemy source file
 
@@ -372,7 +372,7 @@ quakec/progs.src You'll find a list of all source files that the compiler should
 
 **Near the bottom, you'll see something like:**
 
-monsters/ogre.qc monsters/fiend.qc monsters/shambler.qc monsters/knight.qc ... monsters/enforcer.qc monsters/shub.qc
+monsters/ogre.qc monsters/fiend.qc monsters/shambler.qc monsters/knight.qc... monsters/enforcer.qc monsters/shub.qc
 
 **Add your file:**
 
@@ -453,7 +453,7 @@ The whole workflow at a glance 1 Create monsters/guard.qc Write the enemy's Quak
 
 One important distinction: monsters.qc contains shared monster infrastructure, while individual monster files contain the actual implementations. You generally want to follow the latter approach for your own enemies.
 
-For your first experiment, I'd actually recommend copying an existing monster's .qc file, renaming its functions and spawn function, and getting that working as a separate enemy. It's a much easier starting point than implementing everything from scratch.
+For your first experiment, I'd actually recommend copying an existing monster's.qc file, renaming its functions and spawn function, and getting that working as a separate enemy. It's a much easier starting point than implementing everything from scratch.
 
 ### You
 
@@ -531,8 +531,6 @@ This is where things get interesting. The source you downloaded already contains
 
 FindTarget()Find potential enemies. ai_run()Handle enemy pursuit and attack decisions. ai_run_slide()Strafe sideways while fighting. walkpathtogoal()Use the rerelease engine's navigation system.
 
-GitHub +2
-
 **There are also some useful additions in the rerelease:**
 
 self.oldenemy lets monsters remember a previous target. self.search_time tracks how long they retain knowledge of an enemy. self.attack_state supports different combat states. self.combat_style distinguishes ranged, melee and mixed combat. self.allowPathFind controls whether advanced pathfinding is used.
@@ -559,7 +557,7 @@ The rerelease has walkpathtogoal() for navigation using available engine navigat
 
 **However, there is an important compatibility issue for your project:**
 
-The rerelease implements walkpathtogoal(). Ironwail currently exposes the function but returns zero and does not move the entity. QuakeBook +1 So you shouldn't build your entire monster AI around that function if Ironwail compatibility is important.
+The rerelease implements walkpathtogoal(). Ironwail currently exposes the function but returns zero and does not move the entity. So you shouldn't build your entire monster AI around that function if Ironwail compatibility is important.
 
 You can implement your own waypoint-based navigation in QuakeC, though that involves additional work.
 
@@ -748,9 +746,7 @@ vision or projectiles.
 
 3. Custom visibility system: Represent special transparent areas using helper
 
-entities or map-defined information and account for them in your AI. There are also engine-specific extensions in some Quake engines that can retrieve surface texture information, but these aren't a portable way to sample individual pixels. The rerelease's standard QuakeC trace globals provide collision information, not texture pixel data.
-
-GitHub +1 For your monster AI: I'd distinguish between visual visibility and physical line of sight. Those don't always have to be the same thing. A monster might see you through a grate but still be unable to shoot you through it, for example.
+entities or map-defined information and account for them in your AI. There are also engine-specific extensions in some Quake engines that can retrieve surface texture information, but these aren't a portable way to sample individual pixels. The rerelease's standard QuakeC trace globals provide collision information, not texture pixel data. For your monster AI: I'd distinguish between visual visibility and physical line of sight. Those don't always have to be the same thing. A monster might see you through a grate but still be unable to shoot you through it, for example.
 
 ---
 
@@ -764,7 +760,7 @@ Ok! Lets use the the continued chat for some checks first.
 
 **Features that work right now:**
 
-importing the map color is applied to all relevant faces. light preview. ... probalbly a lot more Just give me a list of what is done, what is buggy and what has jet to be implemented. No long explanations. Just pure overview.
+importing the map color is applied to all relevant faces. light preview.... probalbly a lot more Just give me a list of what is done, what is buggy and what has jet to be implemented. No long explanations. Just pure overview.
 
 ### ChatGPT
 
@@ -4894,7 +4890,7 @@ I wouldn't try to build a completely independent application UI inside Blender. 
 
 Replacing those interactions would be a lot of work for little benefit. Blender's Python API does support add-on panels in the Properties editor, and workspaces are layouts made from existing editors. It doesn't support creating entirely new editor-space types. That points toward a native Quake Studio workspace, with the main QSS controls in a wider Properties-editor panel and a compact N-panel for quick viewport
 
-operations. Blender Pyt... +2
+operations.
 
 **I'd keep these in the N-panel:**
 
@@ -5032,7 +5028,7 @@ Enhanced BSPX (LMSHIFT): higher-density per-face lightmaps, requiring engine sup
 
 About those tiny file dialogs:D You're not imagining it. The standard import and export dialogs are Blender's native file browser, invoked through Blender's ImportHelper / ExportHelper mechanism.
 
-The important limitation: Blender's documented fileselect_add() API doesn't expose a width or height argument. So QSS cannot simply say “open this file browser at 1200 × 800.” Blender Pyt... +1
+The important limitation: Blender's documented fileselect_add() API doesn't expose a width or height argument. So QSS cannot simply say “open this file browser at 1200 × 800.”
 
 **There are two possible approaches:**
 
@@ -5150,7 +5146,7 @@ qbsp vis light bspinfo (if available)
 
 **QSS can then run:**
 
-bspinfo on discovered maps. Verbose light runs on disposable BSP copies. An optional full.map → qbsp → vis → light compile pipeline where sibling MAP files exist. The external commands use documented compiler options, including verbose output and game-directory selection. ericw-tools... +2 Important: ericw light overwrites its BSP input. QSS therefore never gives it
+bspinfo on discovered maps. Verbose light runs on disposable BSP copies. An optional full.map → qbsp → vis → light compile pipeline where sibling MAP files exist. The external commands use documented compiler options, including verbose output and game-directory selection. Important: ericw light overwrites its BSP input. QSS therefore never gives it
 
 your original game BSP.
 
@@ -5606,7 +5602,7 @@ produce zero movement.
 
 5. Resizing the viewport recalculates the centre.
 
-The implementation uses Blender's window-relative cursor coordinates, accounting for the viewport region's position inside the window. Blender 5.2 API documentation . Blender Pyt... +1 149 tests passed Download QSS v0.15.3 – Blender Install ZIP Both GitHub Actions runs passed: Push CI · PR CI .
+The implementation uses Blender's window-relative cursor coordinates, accounting for the viewport region's position inside the window. Blender 5.2 API documentation 149 tests passed Download QSS v0.15.3 – Blender Install ZIP Both GitHub Actions runs passed: Push CI · PR CI.
 
 The changes are committed to the existing feature branch, and the draft PR is updated. main remains untouched. One thing remains: actual cursor locking needs testing in Blender 5.2. The automated tests verify the coordinate calculations, but cannot simulate real OS cursor movement. Please test whether the pointer now stays centred even during fast, continuous mouse movement
 
@@ -5624,7 +5620,7 @@ You're right. v0.15.3 introduced a serious mouse-look regression, and I should n
 
 mouse_x - mouse_prev_x and mouse_y - mouse_prev_y, rather than the absolute pointer position relative to the viewport centre. Cursor-warp feedback at the centre is ignored. An individual event is limited to 120 pixels, preventing one anomalous event from snapping the pitch or causing a huge yaw rotation.
 
-Blender documents the previous mouse coordinates as window-relative event properties. CI passed Blender Pyt... +1 151 tests passed, Python compilation passed, and the Blender install package was assembled successfully.
+Blender documents the previous mouse coordinates as window-relative event properties. CI passed 151 tests passed, Python compilation passed, and the Blender install package was assembled successfully.
 
 Install v0.15.4: Download Blender install artifact CI results · Draft PR #1 The PR remains open and unmerged; main is untouched. One important caveat: automated tests cannot reproduce Blender's actual OS cursor-warp behaviour. Please test MMB-look in Blender 5.2 with this build. I won't claim the runtime issue is solved until that test confirms it.
 
@@ -5666,9 +5662,7 @@ Ok give it another try and if it still doesnt work we will go back to the curren
 
 I found the underlying problem, and it’s a Blender event-routing limitation rather than a movement-calculation bug. Blender’s native MMB orbit runs as a modal operator. Its event handling takes priority over QSS while orbiting, so QSS stops receiving the keyboard events it needs. The Blender source confirms that modal-handler priority is managed internally; Python add-ons don't have a
 
-supported way to promote their own handler above that native operator. Trying to work around it by grabbing mouse events again would risk bringing back the very mouse-look problems we just fixed.
-
-Blender Proj... +2 I don't want to ship another fragile workaround and call it an improvement. There is a promising alternative: let Blender's own built-in FPS Walk Navigation handle both mouse-look and WASD, while QSS stays responsible for Quake-specific movement settings and collision behaviour. That gives us conventional FPS controls without writing another
+supported way to promote their own handler above that native operator. Trying to work around it by grabbing mouse events again would risk bringing back the very mouse-look problems we just fixed. I don't want to ship another fragile workaround and call it an improvement. There is a promising alternative: let Blender's own built-in FPS Walk Navigation handle both mouse-look and WASD, while QSS stays responsible for Quake-specific movement settings and collision behaviour. That gives us conventional FPS controls without writing another
 
 mouse-look implementation. The trade-off is that mouse-look replaces MMB orbit while that mode is active. My recommendation: keep v0.15.5 intact as the safe fallback, and test this as a separate navigation mode. If Blender's native Walk controls feel good in your workflow, we can build on them; if not, we return to the current controls without losing anything.
 
@@ -5809,7 +5803,7 @@ The edited surface retains its lighting change. Neighbouring surfaces remain unc
 
 5. Test in an engine
 
-One important distinction: the BSPX format reference identifies DECOUPLED_LM support in FTE and QuakeSpasm-Spiked, but does not establish support in Ironwail. Nephatrine... +1
+One important distinction: the BSPX format reference identifies DECOUPLED_LM support in FTE and QuakeSpasm-Spiked, but does not establish support in Ironwail.
 
 **I'd use:**
 
@@ -5837,19 +5831,13 @@ Don't worry about testing everything at once. Start with one real decoupled BSP 
 
 ```text
 print({
-```
+```...name: len(data)...for name, data in p.bspx_lumps.items()
 
-...name: len(data) ...for name, data in p.bspx_lumps.items()
-
-```text
-...if name in {
-```
-
-..."DECOUPLED_LM", "LMSTYLE", ..."LMSTYLE16", "LMSHIFT", "LMOFFSET" ...
+```text...if name in {
+```..."DECOUPLED_LM", "LMSTYLE",..."LMSTYLE16", "LMSHIFT", "LMOFFSET"...
 
 ```text
-}
-... })
+}... })
 ```
 
 **Traceback (most recent call last):**
@@ -6429,7 +6417,7 @@ i use ericw-tools one question: cant we just change an existing non decoupled_lm
 
 ### ChatGPT
 
-Yes, absolutely. We can convert an existing BSP into one containing DECOUPLED_LM . In fact, we don't necessarily need to recompile your map from its.map source. However, there's an important technical detail: we must generate valid lightmap projection vectors and reorganize the lightmap samples. Simply adding a DECOUPLED_LM lump to the BSP would produce invalid data.
+Yes, absolutely. We can convert an existing BSP into one containing DECOUPLED_LM. In fact, we don't necessarily need to recompile your map from its.map source. However, there's an important technical detail: we must generate valid lightmap projection vectors and reorganize the lightmap samples. Simply adding a DECOUPLED_LM lump to the BSP would produce invalid data.
 
 The clever approach
 
@@ -6453,7 +6441,7 @@ And here's the good news: ericw-tools already has exactly this feature built in!
 
 **The light utility supports this command-line option:**
 
-light -world_units_per_luxel 16 testmap.bsp According to the ericw-tools lighting documentation generation of the DECOUPLED_LM BSPX lump. , -world_units_per_luxel enables ericw-tools... +1 What this means You don't need to write a conversion tool or recompile the geometry.
+light -world_units_per_luxel 16 testmap.bsp According to the ericw-tools lighting documentation generation of the DECOUPLED_LM BSPX lump., -world_units_per_luxel enables What this means You don't need to write a conversion tool or recompile the geometry.
 
 **The lighting utility will:**
 
@@ -6509,7 +6497,7 @@ CI passed · 148 tests 😎 Blender package built QSS v0.16.1
 
 6. Writes a detailed report into Blender's Text Editor.
 
-Your original BSP is never overwritten. Lighting is recalculated, so the appearance may change. The option is documented in the official ericw-tools documentation . Install v0.16.1 Download QSS v0.16.1 Blender Install .
+Your original BSP is never overwritten. Lighting is recalculated, so the appearance may change. The option is documented in the official ericw-tools documentation. Install v0.16.1 Download QSS v0.16.1 Blender Install.
 
 **CI confirmed:**
 
@@ -6531,7 +6519,7 @@ For a standard Quake map, I'd use 16 world units per luxel as the starting point
 
 **One important distinction:**
 
-Texture texel: A normal, unscaled Quake texture typically maps at 1 texel per world unit. Lightmap luxel: The conventional lightmap spacing is 16 world units per luxel. So for our QSS generator, 16 is the right starting value. Smaller values mean finer lighting detail; larger values mean coarser lightmaps. ericw-tools... +1 I'd leave QSS at 16 for the first test. We can experiment with 8 later to see
+Texture texel: A normal, unscaled Quake texture typically maps at 1 texel per world unit. Lightmap luxel: The conventional lightmap spacing is 16 world units per luxel. So for our QSS generator, 16 is the right starting value. Smaller values mean finer lighting detail; larger values mean coarser lightmaps. I'd leave QSS at 16 for the first test. We can experiment with 8 later to see
 
 how much extra lightmap detail it produces.
 
@@ -6563,15 +6551,13 @@ My vote: let's try 1 WU/luxel. That's a fascinating test for QSS. 😁
 
 **Sources:**
 
-ericw-tools... +2
-
 ### You
 
 ok guide me to the test! I am eager now!:D
 
 ### ChatGPT
 
-LET'S DO IT! 😁 We're going to generate your first genuine Quake DECOUPLED_LM map, directly from Blender. There is one important prerequisite I caught while checking the compiler: the world_units_per_luxel option requires ericw-tools 2.0.0-alpha. The older stable 0.18 version doesn't document this option. ericw-tools... +1 Step 1 — Install the updated QSS
+LET'S DO IT! 😁 We're going to generate your first genuine Quake DECOUPLED_LM map, directly from Blender. There is one important prerequisite I caught while checking the compiler: the world_units_per_luxel option requires ericw-tools 2.0.0-alpha. The older stable 0.18 version doesn't document this option. Step 1 — Install the updated QSS
 
 **Download the latest build:**
 
@@ -6625,13 +6611,13 @@ My ericwtools are already the version you asked for. But i am on linux so i have
 
 ### ChatGPT
 
-Perfect! Linux is absolutely fine — the feature is not Windows-specific. I should have included Linux instructions from the start. 😄 The QSS generator should work with the Linux build of ericw-tools 2.0.0-alpha11 . It looks for the executable named light rather than light.exe.
+Perfect! Linux is absolutely fine — the feature is not Windows-specific. I should have included Linux instructions from the start. 😄 The QSS generator should work with the Linux build of ericw-tools 2.0.0-alpha11. It looks for the executable named light rather than light.exe.
 
 **Linux setup**
 
 1. Download the Linux x86-64 build of ericw-tools 2.0.0-alpha11 from the
 
-official releases .
+official releases.
 
 2. Extract it into a separate directory. Keep your existing tools installation
 
@@ -6699,7 +6685,7 @@ Generation successful 🚀 That's exactly the result we wanted!
 
 **Your report confirms:**
 
-Check Result BSP verification DECOUPLED_LM size PASS 1,600 bytes Decoupled face records Record size 40 40 bytes each Other BSPX lumps .lit sidecar None Present The numbers add up perfectly: 40 records × 40 bytes = 1,600 bytes.
+Check Result BSP verification DECOUPLED_LM size PASS 1,600 bytes Decoupled face records Record size 40 40 bytes each Other BSPX lumps.lit sidecar None Present The numbers add up perfectly: 40 records × 40 bytes = 1,600 bytes.
 
 Your Linux ericw-tools build has successfully generated decoupled lightmap data for 40 faces. This is our first real compiler-generated result, beyond synthetic test fixtures. Next: import it into QSS
 
@@ -7623,7 +7609,7 @@ Still no qss buttons
 
 Okay, this time I changed the registration strategy rather than just rearranging the buttons. 😁 I checked Blender 5.2's actual toolbar implementation. Its 3D View toolbar combines a shared tool list with mode-specific lists. QSS now registers its tools in that shared list, making them available across Object, Edit and Paint modes. It also removes stale registrations left by the earlier versions.
 
-CI passed Blender Proj... +1 149 tests passed v0.17.2 — toolbar migration fix Download the updated Blender installer
+CI passed 149 tests passed v0.17.2 — toolbar migration fix Download the updated Blender installer
 
 **There is also a new diagnostic in the Quake Studio panel:**
 
@@ -8195,7 +8181,7 @@ The object deletion succeeded. The error occurs immediately afterward when Blend
 
 Removes strings and other values that are not valid ToolDefs. Recursively repairs nested tuple and list groups. Removes stale QSS tools and normalizes separators. Uses the same strict validation when counting registered tools.
 
-Validation: Python compilation passed and all 153 tests passed, including four new toolbar regression tests. Install v0.17.4: Download Blender install artifact SHA-256: a30f67b44e6e6e45d3ae96db0d0a4c0405e46c81622b85a6b8d05e744845958f The PR remains open and in draft . main is unchanged.
+Validation: Python compilation passed and all 153 tests passed, including four new toolbar regression tests. Install v0.17.4: Download Blender install artifact SHA-256: a30f67b44e6e6e45d3ae96db0d0a4c0405e46c81622b85a6b8d05e744845958f The PR remains open and in draft. main is unchanged.
 
 Please fully restart Blender after installing v0.17.4. The Quake Studio panel should report 8/8 viewport tools registered. I haven't yet verified the toolbar in the actual Blender GUI, so that remains the final check.
 
@@ -8219,7 +8205,7 @@ Validation CI passed 155 tests passed, including six toolbar-specific regression
 
 already damaged Blender's built-in toolbar definitions in the running process. Reloading the add-on alone cannot restore those definitions; a full restart reloads Blender's original tool lists.
 
-The PR is updated , still draft and unmerged. main remains untouched. I have not claimed graphical verification: the remaining check is your Blender 5.2 test. In particular, check that the standard Paint toolbar is back, then try the sidebar Quick Actions for Isolate, Reveal, Paint Texture and Paint Lightmap.
+The PR is updated, still draft and unmerged. main remains untouched. I have not claimed graphical verification: the remaining check is your Blender 5.2 test. In particular, check that the standard Paint toolbar is back, then try the sidebar Quick Actions for Isolate, Reveal, Paint Texture and Paint Lightmap.
 
 ### You
 
@@ -8243,7 +8229,7 @@ Toggle Face Isolation
 
 3. Click Restore Visibility to restore the previous hidden faces and selection.
 
-The previous state is saved on the BSP object, so it survives saving and reopening the .blend file. It uses BMesh's hide_set() method to update the associated geometry visibility correctly.
+The previous state is saved on the BSP object, so it survives saving and reopening the.blend file. It uses BMesh's hide_set() method to update the associated geometry visibility correctly.
 
 Blender Python... I removed the separate QSS Reveal button. Blender's native Alt+H remains available for revealing geometry hidden by other operations. Toolbar interaction
 
@@ -8253,7 +8239,7 @@ FPS Navigation in Object Mode. Paint Texture and Paint Lightmap in Edit Mode. Pl
 
 Installation QSS v0.17.6 — Blender install Download the Blender-ready add-on SHA-256 a7a6f539ee7dedaee1b614c8aa0448c94d696811e7ed643d447d3559abe1c477 CI passed Python compilation and all 164 tests. The new focus and BMesh visibility behavior still need confirmation in the actual Blender 5.2 interface.
 
-The PR is updated , still draft and unmerged. main is unchanged. Please test Focus on a single face, then isolate and restore a selection that includes some previously hidden faces. That second test is particularly useful for checking that the toggle restores the original state rather than simply revealing everything.
+The PR is updated, still draft and unmerged. main is unchanged. Please test Focus on a single face, then isolate and restore a selection that includes some previously hidden faces. That second test is particularly useful for checking that the toggle restores the original state rather than simply revealing everything.
 
 ### You
 
@@ -8261,15 +8247,13 @@ focus and isolate work. And the fps mode is still very clumsy. And i cant deacti
 
 ### ChatGPT
 
-Blender 5.2 already has a native mode that matches the core of what you describe: Walk Navigation. It gives you continuous mouse-look, W/A/S/D movement, Q/E vertical movement, and temporary speed boost with Shift. Crucially, LMB confirms and exits; Esc or RMB cancels and restores the starting view. That is much closer to Quake noclip than QSS’s current split system, where the mouse only orbits and the keyboard moves.
-
-Blender 5.2... +1 I’m going to base the replacement on Blender’s own navigation operator rather than maintain a second, competing modal camera controller.Implemented QSS v0.17.7 on the existing feature branch.
+Blender 5.2 already has a native mode that matches the core of what you describe: Walk Navigation. It gives you continuous mouse-look, W/A/S/D movement, Q/E vertical movement, and temporary speed boost with Shift. Crucially, LMB confirms and exits; Esc or RMB cancels and restores the starting view. That is much closer to Quake noclip than QSS’s current split system, where the mouse only orbits and the keyboard moves. I’m going to base the replacement on Blender’s own navigation operator rather than maintain a second, competing modal camera controller.Implemented QSS v0.17.7 on the existing feature branch.
 
 New Quake Walk / Noclip controls The sidebar’s Start Quake Walk (Noclip) button now invokes Blender 5.2’s native Walk Navigation instead of QSS's custom movement controller. InputAction Mouse movementLook around W/SForward / backward A/DStrafe Q/EDown / up ShiftMove faster LMBConfirm and exit Esc or RMBCancel and restore the starting view It runs without gravity or BSP collision, so it behaves like free-flight noclip.
 
-QSS converts its Quake-units-per-second speed setting into Blender's native Walk speed using the imported map's unit scale. Blender 5.2... +1 The important deactivation fix: FPS navigation is no longer a persistent left-toolbar tool. It starts from the sidebar and exits through Blender's normal Walk controls. Once exited, the previously selected viewport tool works normally again. No MMB capture or custom
+QSS converts its Quake-units-per-second speed setting into Blender's native Walk speed using the imported map's unit scale. The important deactivation fix: FPS navigation is no longer a persistent left-toolbar tool. It starts from the sidebar and exits through Blender's normal Walk controls. Once exited, the previously selected viewport tool works normally again. No MMB capture or custom
 
-timerdriven navigation loop remains. TrenchBroom's default 3D controls are split between RMB mouse-look, MMB camera translation, scroll-wheel movement and keyboard movement. The new QSS mode instead follows Blender's native first-person Walk model, which is closer to the Quake noclip behaviour you mentioned. trenchbroo... +1 Build and status CI passed 161 tests passed, including compilation and package assembly. The new Blender
+timerdriven navigation loop remains. TrenchBroom's default 3D controls are split between RMB mouse-look, MMB camera translation, scroll-wheel movement and keyboard movement. The new QSS mode instead follows Blender's native first-person Walk model, which is closer to the Quake noclip behaviour you mentioned. Build and status CI passed 161 tests passed, including compilation and package assembly. The new Blender
 
 interaction still needs your graphical test; CI does not run Blender's GUI. Download QSS v0.17.7 SHA-256: 5f465658ac01426ca359548841a9c8a7f5d41383930dadfc0f98411d32dde68d Draft PR #1 is updated. It remains unmerged, and main is unchanged.
 
@@ -8644,17 +8628,13 @@ Uses the EEVEE rendering engine. Allows fast lighting adjustments and interactiv
 
 Disables the original BSP lightmap contribution. Provides a more accurate lighting preview. Baked Displays the generated QSS lightmap instead of the original BSP lightmap. Uses the same lightmap-oriented display behaviour as Original.
 
-Remains unavailable until the active map has a valid baked lightmap. One important technical adjustment: Blender's Solid viewport mode uses the Workbench engine and does not evaluate material shader nodes. Therefore, it cannot reliably display QSS's image-based lightmaps or actual Eevee scene lighting. We should use a shader-aware viewport mode for these presets, rather than force everything into Solid.
-
-Blender 5.2... +2 The visual result and intended behaviour matter more than the name of Blender's viewport shading mode. B. Paint Texture and Paint Lightmap I would preserve the behaviour you described.
+Remains unavailable until the active map has a valid baked lightmap. One important technical adjustment: Blender's Solid viewport mode uses the Workbench engine and does not evaluate material shader nodes. Therefore, it cannot reliably display QSS's image-based lightmaps or actual Eevee scene lighting. We should use a shader-aware viewport mode for these presets, rather than force everything into Solid. The visual result and intended behaviour matter more than the name of Blender's viewport shading mode. B. Paint Texture and Paint Lightmap I would preserve the behaviour you described.
 
 SituationBehaviour No selected facesBoth buttons disabled Faces selected in Edit ModeBoth buttons enabled Click Paint TextureEnter Texture Paint Click Paint LightmapEnter Lightmap Paint Click the currently active paint buttonLeave paint mode Click the other paint buttonSwitch paint target/mode Most importantly, switching between texture and lightmap painting must not lose
 
 the selected-face mask or unexpectedly change the active map. We should also ensure that Paint Lightmap targets the intended lightmap image, never whichever image texture node happens to be active in the material.
 
-C. Bake Lightmap Here I found one important Blender limitation that we need to account for. Blender's documented Render Bake workflow for baking shader lighting into image textures is the Cycles workflow. EEVEE supports light-probe baking, but that is not the same thing as baking a UV lightmap for our BSP surfaces.
-
-Blender 5.2... +1 I don't want to make the Eevee button appear functional while secretly producing a Cycles bake. That would make the two modes misleading.
+C. Bake Lightmap Here I found one important Blender limitation that we need to account for. Blender's documented Render Bake workflow for baking shader lighting into image textures is the Cycles workflow. EEVEE supports light-probe baking, but that is not the same thing as baking a UV lightmap for our BSP surfaces. I don't want to make the Eevee button appear functional while secretly producing a Cycles bake. That would make the two modes misleading.
 
 **My proposal:**
 
@@ -8694,7 +8674,7 @@ prefer the same options ays you but making them changable in the config would be
 
 **Haha, yes! That distinction changes the design quite a bit. You're right:**
 
-Material Preview is essentially Blender's EEVEE-based viewport renderer, using an HDRI environment by default. It also has separate controls for using the scene's lights and world. Blender 5.2... +1 That actually gives us a much cleaner solution. Let's consider the LIGHTING section finalised.
+Material Preview is essentially Blender's EEVEE-based viewport renderer, using an HDRI environment by default. It also has separate controls for using the scene's lights and world. That actually gives us a much cleaner solution. Let's consider the LIGHTING section finalised.
 
 **Final LIGHTING specification**
 
@@ -8723,7 +8703,7 @@ The selected faces and active map must be preserved. Paint Lightmap always targe
 
 The bake creates a separate generated lightmap layer for the active map. Cycles: The supported, dependable baking path. Eevee: We will try a straightforward experimental implementation. It is a nice capability to investigate, but it must not hold up the rest of the lighting system. Blender's documented UV image-texture baking workflow is based on Cycles, whereas EEVEE's light-probe
 
-baking is a different workflow. Blender 5.2... +1
+baking is a different workflow.
 
 **Other rules:**
 
@@ -8915,7 +8895,7 @@ looks good! Good job! The outline is complete! Now impress me by following our p
 
 ### ChatGPT
 
-Well, we have a new version. And this time, the sidebar has a proper architecture behind it. :D QSS v0.18.0 CI passed The new map-centric sidebar is implemented on our existing feature branch.
+Well, we have a new version. And this time, the sidebar has a proper architecture behind it.:D QSS v0.18.0 CI passed The new map-centric sidebar is implemented on our existing feature branch.
 
 Blender-ready installation 0.18.0 Version GitHub Actions #372 Build Blender Install ZIP Package Get QSS v0.18.0 SHA-256: 490eac5acef0be83e5cad3c52890dce800f1ca54eacbb170eac0e4bf72a013ac What's implemented NAVIGATION: Native noclip WASD navigation and Move to Player Start.
 
@@ -9949,20 +9929,17 @@ python3 -m venv.venv
 
 3. Install the dependencies inside it
 
-```text
-.venv/bin/python -m pip install pillow numpy scipy
+```text.venv/bin/python -m pip install pillow numpy scipy
 ```
 
 4. Run the script
 
-```text
-.venv/bin/python quake_quantize.py input.png output.png
+```text.venv/bin/python quake_quantize.py input.png output.png
 ```
 
 **For Floyd–Steinberg dithering:**
 
-```text
-.venv/bin/python quake_quantize.py input.png output.png --dither floyd
+```text.venv/bin/python quake_quantize.py input.png output.png --dither floyd
 ```
 
 Optional: activate the environment
@@ -10002,8 +9979,7 @@ main() defined at line 192. The converted PNG saved at line 278. The Python entr
 
 **the virtual environment:**
 
-```text
-.venv/bin/python conv.py input.png output.png
+```text.venv/bin/python conv.py input.png output.png
 ```
 
 If your virtual environment is in a different directory, adjust.venv/bin/python accordingly. One thing to check: your script is named conv.py, whereas my earlier example used quake_quantize.py. That's perfectly fine; just use conv.py.
@@ -10014,8 +9990,7 @@ If you get an error, paste the complete traceback and I'll help pinpoint it.
 
 chnucki@pop-os:/mnt/sde1/FPS/IdTech2/sof/base/textures/iraq/tga/tests$
 
-```text
-.venv/bin/python conv.py
+```text.venv/bin/python conv.py
 ```
 
 f_floortile2.tga test.png
@@ -10109,8 +10084,7 @@ found." ) return np.array(colors, dtype=np.uint8)
 
 **Then try again**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga test.png
+```text.venv/bin/python conv.py f_floortile2.tga test.png
 ```
 
 Important: This version skips non-RGB lines, but still checks that exactly the declared number of colors were found. That prevents silently producing an incorrect Quake palette. If it reports a different number of colors, show me the first 15 lines of your
@@ -10200,8 +10174,7 @@ f"but {len(colors)} valid RGB entries were found."
 
 **Then run:**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga test.png
+```text.venv/bin/python conv.py f_floortile2.tga test.png
 ```
 
 **If indentation problems persist, you can inspect the function with:**
@@ -10228,16 +10201,14 @@ Step 2 — Try dithering
 
 **Run:**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga test_dither.png --dither floyd
+```text.venv/bin/python conv.py f_floortile2.tga test_dither.png --dither floyd
 ```
 
 Compare test.png and test_dither.png. Dithering can improve apparent tonal detail, but may introduce grain or noise into textures. Step 3 — Check the output palette
 
 **Run:**
 
-```text
-.venv/bin/python -c "from PIL import Image; im=Image.open('test.png');
+```text.venv/bin/python -c "from PIL import Image; im=Image.open('test.png');
 ```
 
 print('Mode:', im.mode); print('Size:',
@@ -10540,20 +10511,17 @@ Keep quake.pal in the same directory as conv.py, unless you specify its location
 
 **Conservative adaptation**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga adaptive.png --strength 0.8
+```text.venv/bin/python conv.py f_floortile2.tga adaptive.png --strength 0.8
 ```
 
 **Moderate adaptation**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga adaptive_medium.png --strength 0.65
+```text.venv/bin/python conv.py f_floortile2.tga adaptive_medium.png --strength 0.65
 ```
 
 **Aggressive adaptation**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga adaptive_strong.png --strength 0.4
+```text.venv/bin/python conv.py f_floortile2.tga adaptive_strong.png --strength 0.4
 ```
 
 --max-shift 35
@@ -10970,20 +10938,17 @@ Use the same input texture for all three tests.
 
 **A — Light smoothing**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga test_light.png --smooth 0.025
+```text.venv/bin/python conv.py f_floortile2.tga test_light.png --smooth 0.025
 ```
 
 **B — Medium smoothing (default)**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga test_medium.png --smooth 0.045
+```text.venv/bin/python conv.py f_floortile2.tga test_medium.png --smooth 0.045
 ```
 
 **C — Strong smoothing**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga test_strong.png --smooth 0.075
+```text.venv/bin/python conv.py f_floortile2.tga test_strong.png --smooth 0.075
 ```
 
 --radius 3 How to interpret the results ResultWhat it tells us Light is still speckledIncrease smoothing slightly Medium looks cleanGood starting point Strong loses surface detailReduce smoothing
@@ -11513,22 +11478,19 @@ main()
 
 **Start with the defaults:**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga ramps_default.png
+```text.venv/bin/python conv.py f_floortile2.tga ramps_default.png
 ```
 
 **Then try stronger hue-family selection:**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga ramps_strong.png --hue-weight 1.0
+```text.venv/bin/python conv.py f_floortile2.tga ramps_strong.png --hue-weight 1.0
 ```
 
 --chroma-weight 0.8
 
 **And try more lightness-oriented shading:**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga ramps_shading.png --hue-weight 0.25
+```text.venv/bin/python conv.py f_floortile2.tga ramps_shading.png --hue-weight 0.25
 ```
 
 --chroma-weight 0.25
@@ -11705,8 +11667,7 @@ main()
 
 **Run:**
 
-```text
-.venv/bin/python inspect_palette.py
+```text.venv/bin/python inspect_palette.py
 ```
 
 Open palette_inspector.png. You'll see all 224 normal palette colors, sorted by hue and brightness, with their original palette indices. You can also inspect the fullbright range separately later if needed, but it won't enter our normal conversion.
@@ -11745,8 +11706,7 @@ One quick additional diagnostic
 
 **Run this from your tests directory:**
 
-```text
-.venv/bin/python -c '
+```text.venv/bin/python -c '
 from conv import load_palette
 import colorsys
 p = load_palette("quake.pal")
@@ -11784,14 +11744,12 @@ then preserve its light-to-dark relationships. Please paste the contents of pale
 
 ### You
 
-```text
-.venv/bin/python gentext.py
+```text.venv/bin/python gentext.py
 ```
 
 File "/mnt/sde1/FPS/IdTech2/sof/base/textures/iraq/tga/tests/gentext.py", line 1
 
-```text
-.venv/bin/python -c '
+```text.venv/bin/python -c '
 ```
 
 ^ SyntaxError: unterminated string literal (detected at line 1)
@@ -11802,8 +11760,7 @@ The command was accidentally saved inside gentext.py, so Python is trying to int
 
 **terminal from the tests directory:**
 
-```text
-.venv/bin/python -c '
+```text.venv/bin/python -c '
 from conv import load_palette
 import colorsys
 p = load_palette("quake.pal")
@@ -11830,9 +11787,7 @@ Paste the contents of palette_data.txt here. It will give me the original palett
 
 If you want to keep gentext.py, delete its contents; it isn't needed for this step.
 
-### You
-
-:/mnt/sde1/FPS/IdTech2/sof/base/textures/iraq/tga/tests$.venv/bin/python -c '
+### You:/mnt/sde1/FPS/IdTech2/sof/base/textures/iraq/tga/tests$.venv/bin/python -c '
 
 ```text
 from conv import load_palette
@@ -12442,22 +12397,19 @@ main() First test
 
 **Run the same texture as before:**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga output.png
+```text.venv/bin/python conv.py f_floortile2.tga output.png
 ```
 
 **You can also test a more olive-focused mapping:**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga output_olive.png --ramps
+```text.venv/bin/python conv.py f_floortile2.tga output_olive.png --ramps
 ```
 
 neutral,dark_earth,olive_dark,ochre,warm_earth,tan,stone,green_grey
 
 **And a mapping with more blue-grey:**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga output_bluegrey.png --ramps
+```text.venv/bin/python conv.py f_floortile2.tga output_bluegrey.png --ramps
 ```
 
 neutral,dark_earth,blue_grey,olive_dark,ochre,warm_earth,tan,stone,green_grey One technical note: this is a first ramp-aware baseline, not yet a spatially coherent ramp mapper. It restricts the candidate palette to selected ramps, but individual pixels can still choose different ramps. The next improvement should address that if speckling remains. Also, the --strength option currently scales all distances equally, so changing it
@@ -12576,8 +12528,7 @@ The important design decision: segmentation guides the color mapping, but it doe
 
 **From your tests directory:**
 
-```text
-.venv/bin/pip install scikit-image
+```text.venv/bin/pip install scikit-image
 ```
 
 2. Replace conv.py
@@ -13162,8 +13113,7 @@ main()
 
 3. Run the first conversion
 
-```text
-.venv/bin/python conv.py f_floortile2.tga output_shape.png
+```text.venv/bin/python conv.py f_floortile2.tga output_shape.png
 ```
 
 Notice that smoothing is no longer applied. Instead, the default --detail 0.35 attempts to restore subtle local luminance variations.
@@ -13174,22 +13124,19 @@ Notice that smoothing is no longer applied. Instead, the default --detail 0.35 a
 
 **A — Balanced (default)**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga a.png --segments 180 --detail 0.35
+```text.venv/bin/python conv.py f_floortile2.tga a.png --segments 180 --detail 0.35
 ```
 
 **B — More coherent regions**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga b.png --segments 90 --detail 0.35
+```text.venv/bin/python conv.py f_floortile2.tga b.png --segments 90 --detail 0.35
 ```
 
 --coherence 0.04
 
 **C — More detailed regions**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga c.png --segments 350 --detail 0.5
+```text.venv/bin/python conv.py f_floortile2.tga c.png --segments 350 --detail 0.5
 ```
 
 --coherence 0.015
@@ -13230,8 +13177,7 @@ across weak boundaries, but preserve distinct choices across strong boundaries. 
 
 **detail. Try:**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga test.png \
+```text.venv/bin/python conv.py f_floortile2.tga test.png \
 ```
 
 --segments 350 \ --detail 0.5 \ --coherence 0.01 Lowering coherence should reduce unwanted color spill. It won't fix inconsistent ramps between distant shapes, though; that needs the first change to the algorithm. I'd address all three together rather than keep tuning segment counts.
@@ -13266,15 +13212,12 @@ Krita can open, plus optionally separate PNGs. I'd also make the layers align pi
 
 **The command could be:**
 
-```text
-.venv/bin/python conv.py f_floortile2.tga output.png --layers
+```text.venv/bin/python conv.py f_floortile2.tga output.png --layers
 ```
 
 This would be optional and would not change the appearance of the regular output.
 
-### You
-
-.ora sounds great. Go for it
+### You.ora sounds great. Go for it
 
 ### ChatGPT
 
@@ -13310,8 +13253,7 @@ Implemented the OpenRaster export in your current script, preserving the existin
 
 **run:**
 
-```text
-.venv/bin/python conv_layers.py f_floortile2.tga output.png --layers
+```text.venv/bin/python conv_layers.py f_floortile2.tga output.png --layers
 ```
 
 **This creates two files:**
@@ -13320,8 +13262,7 @@ output.png — the normal indexed 256-color PNG. output.ora — the layered proj
 
 **You can also specify a custom ORA filename:**
 
-```text
-.venv/bin/python conv_layers.py f_floortile2.tga output.png --layers
+```text.venv/bin/python conv_layers.py f_floortile2.tga output.png --layers
 ```
 
 manual_fix.ora Layers included in the ORA LayerPurpose Final textureFinished conversion Ramp - neutral, etc.Individual transparent ramp contributions Diagnostic - regionsDistinct colors for each segmented region Diagnostic - ramp assignmentsShows the selected ramp per region Diagnostic - edgesDetected boundaries Diagnostic - fine detailShows retained fine detail
@@ -13344,8 +13285,7 @@ conv_layers.py Updated converter Ready Download converter conv_settings.ini Easy
 
 **For example, if your source textures are in tga:**
 
-```text
-.venv/bin/python conv_layers.py tga --layers
+```text.venv/bin/python conv_layers.py tga --layers
 ```
 
 **It will automatically create:**
@@ -13369,8 +13309,7 @@ It processes the images directly inside the folder, not nested folders.
 
 **You can also specify a different output directory:**
 
-```text
-.venv/bin/python conv_layers.py tga converted --layers
+```text.venv/bin/python conv_layers.py tga converted --layers
 ```
 
 Without --layers, it creates only PNGs.
@@ -13391,8 +13330,7 @@ segments = 180 compactness = 10.0 detail = 0.35 detail_radius = 1.2 coherence = 
 
 You can still override individual settings from the command line. For example:
 
-```text
-.venv/bin/python conv_layers.py tga --layers --segments 220
+```text.venv/bin/python conv_layers.py tga --layers --segments 220
 ```
 
 The command-line value takes precedence over the settings file. This gives you a repeatable workflow: edit the settings, run a whole folder, and get both indexed PNGs and editable layered ORA projects. conv_layers.py Code conv_settings.ini Code
@@ -13419,8 +13357,7 @@ Python environment setup and dependencies on Pop!_OS / Ubuntu Single-image conve
 
 **Your normal batch command remains:**
 
-```text
-.venv/bin/python conv_layers.py tga --layers
+```text.venv/bin/python conv_layers.py tga --layers
 ```
 
 conv_layers.py Code README.md Document conv_settings.ini Code
@@ -13433,13 +13370,9 @@ list every line of the settings file
 
 Here is the complete contents of conv_settings.ini, including every comment and
 
-**blank line:**
+**blank line:**; Quake texture converter settings; Edit these values, save the file, then run conv_layers.py.; Command-line options override values in this file.;
 
-; Quake texture converter settings ; Edit these values, save the file, then run conv_layers.py. ; Command-line options override values in this file. ;
-
-**; Quick guidance:**
-
-;segments:lower = larger color regions; higher = finer segmentation ;compactness:higher = more regular/compact regions ;detail:higher = stronger preservation of subtle surface detail ;detail_radius:larger = detail enhancement over broader scales ;coherence:higher = neighboring regions more likely to share a palette ramp ; ; These are the settings used by the current converter by default.
+**; Quick guidance:**;segments:lower = larger color regions; higher = finer segmentation;compactness:higher = more regular/compact regions;detail:higher = stronger preservation of subtle surface detail;detail_radius:larger = detail enhancement over broader scales;coherence:higher = neighboring regions more likely to share a palette ramp;; These are the settings used by the current converter by default.
 
 ```text
 [conversion]
@@ -13459,8 +13392,7 @@ Whenever you're ready to refine the conversion, troubleshoot something, or add f
 
 ### You
 
-```text
-.venv/bin/python conv_layers.py tga --layers
+```text.venv/bin/python conv_layers.py tga --layers
 ```
 
 it just uses the folder the.py is in and takes every tga?
@@ -13469,8 +13401,7 @@ it just uses the folder the.py is in and takes every tga?
 
 **Not quite. In this command:**
 
-```text
-.venv/bin/python conv_layers.py tga --layers
+```text.venv/bin/python conv_layers.py tga --layers
 ```
 
 tga is the input folder, not the folder containing the script. The script processes every supported image file directly inside tga/ (non-recursively). It does not automatically use the script's own directory.
@@ -13492,8 +13423,7 @@ texture_converter/
 
 **Run the command from texture_converter/:**
 
-```text
-.venv/bin/python conv_layers.py tga --layers
+```text.venv/bin/python conv_layers.py tga --layers
 ```
 
 **The results will be:**
@@ -13522,8 +13452,7 @@ Exactly! tga is a relative path, resolved from the directory you're running the 
 
 **You can also use an absolute path, for example:**
 
-```text
-.venv/bin/python conv_layers.py
+```text.venv/bin/python conv_layers.py
 ```
 
 "/mnt/sde1/FPS/IdTech2/sof/base/textures/iraq/tga" --layers That way, you can run the converter from anywhere without changing directories first.
@@ -13564,8 +13493,7 @@ If.venv and conv_layers.py are actually in that directory, your command is
 
 **otherwise correct:**
 
-```text
-.venv/bin/python conv_layers.py tokyo/tga --layers
+```text.venv/bin/python conv_layers.py tokyo/tga --layers
 ```
 
 Quick fix
@@ -13674,8 +13602,7 @@ One caveat: this is still image-analysis-based segmentation, not semantic materi
 
 **Your existing batch command stays the same:**
 
-```text
-.venv/bin/python conv_layers.py tokyo/tga --layers
+```text.venv/bin/python conv_layers.py tokyo/tga --layers
 ```
 
 Replace the old script and settings file with these versions before running it. Keep your existing palette file. I'm particularly interested in how the new Diagnostic - material zones layer looks on your actual Soldier of Fortune textures. That will tell us whether the merging threshold needs further refinement. conv_layers.py Code conv_settings.ini Code README.md
@@ -13716,7 +13643,7 @@ default.
 
 2. Improve ramp selection: evaluate the actual colour distribution inside a
 
-zone, rather than choosing a ramp from its average colour alone. Preserve distinct colour families within a material zone where necessary. For an immediate experiment, replace the ramps line in conv_settings.ini with: ramps = neutral,dark_earth,blue_grey,olive_dark,red,ochre,warm_earth,tan,purple_dark, purple_warm,stone,green_grey,yellow_ochre ,blue One thing would help me tune the next revision properly: could you upload one
+zone, rather than choosing a ramp from its average colour alone. Preserve distinct colour families within a material zone where necessary. For an immediate experiment, replace the ramps line in conv_settings.ini with: ramps = neutral,dark_earth,blue_grey,olive_dark,red,ochre,warm_earth,tan,purple_dark, purple_warm,stone,green_grey,yellow_ochre,blue One thing would help me tune the next revision properly: could you upload one
 
 original TGA and its converted PNG? I'd use that pair to check whether we're losing colour during material merging, ramp selection, or final pixel quantization. I want to restore the original texture's colour character without bringing back the noisy, speckled regions.
 
@@ -13752,7 +13679,7 @@ pixels. Download the new version Download Quake Texture Converter v2 – updated
 
 **Keep these settings initially:**
 
-ramps = neutral,dark_earth,blue_grey,olive_dark,red,ochre,warm_earth,tan,purple_dark, purple_warm,stone,green_grey,yellow_ochre ,blue ramp_candidates_per_zone = 3 material_merge_threshold = 0.055 material_luminance_weight = 0.20 material_chroma_limit = 0.075 I've syntax-checked the script and tested PNG and ORA generation. I haven't been able to validate the visual result against your actual
+ramps = neutral,dark_earth,blue_grey,olive_dark,red,ochre,warm_earth,tan,purple_dark, purple_warm,stone,green_grey,yellow_ochre,blue ramp_candidates_per_zone = 3 material_merge_threshold = 0.055 material_luminance_weight = 0.20 material_chroma_limit = 0.075 I've syntax-checked the script and tested PNG and ORA generation. I haven't been able to validate the visual result against your actual
 
 textures, so let's treat this as the next experimental baseline. What I'm aiming for: the consistency of the previous version, but with much more of the original texture's colour identity preserved.
 
@@ -13826,14 +13753,11 @@ Yes. We can extend the converter to read Soldier of Fortune.m32 files directly, 
 
 The important distinction is that.m32 is a game-specific texture format, not simply a TGA with a different extension. We need to decode its image data and metadata correctly before applying the existing conversion algorithm.
 
-There is already evidence that the format is decodable: the SoF community has released an.m32 -to-TGA converter with source code, and a newer open-source engine implementation reports working M32/WAL texture loading with alpha handling.
-
-ModDB +1 I'd build the support into our existing Python converter rather than require a separate conversion step.
+There is already evidence that the format is decodable: the SoF community has released an.m32 -to-TGA converter with source code, and a newer open-source engine implementation reports working M32/WAL texture loading with alpha handling. I'd build the support into our existing Python converter rather than require a separate conversion step.
 
 **The intended workflow would be:**
 
-```text
-.venv/bin/python conv_layers.py tokyo/m32 --layers
+```text.venv/bin/python conv_layers.py tokyo/m32 --layers
 ```
 
 **It should:**
@@ -13886,9 +13810,7 @@ Yes. Your clarification makes the objective much clearer: we want to extract all
 
 The good news is that we have evidence that SoF M32 files can contain transparency information. What we know about M32 InformationPresent in original M32?Evidence RGB colourYesStandard texture image data Alpha/transparencyYesM32Build documentation explicitly describes 32-bit TGA alpha being imported into M32 Fullbright/emissive maskNot yet establishedI haven't found reliable documentation confirming a
 
-separate mask or special texel indices MipmapsYesM32Tool supports importing mipmaps The transparency evidence is particularly good: an SoF texture tutorial explains that M32Build converts 32-bit TGA files with their alpha channel and that transparent areas remain transparent in-game.
-
-ModDB +2 What about fullbright? This is the part I don't want to guess about. A bright yellow or white pixel in an M32 texture does not necessarily mean it is emissive. It could simply be ordinary painted colour.
+separate mask or special texel indices MipmapsYesM32Tool supports importing mipmaps The transparency evidence is particularly good: an SoF texture tutorial explains that M32Build converts 32-bit TGA files with their alpha channel and that transparent areas remain transparent in-game. What about fullbright? This is the part I don't want to guess about. A bright yellow or white pixel in an M32 texture does not necessarily mean it is emissive. It could simply be ordinary painted colour.
 
 We need to inspect the actual M32 format and SoF renderer to determine whether
 
@@ -13992,14 +13914,12 @@ Converter script Settings Updated README New options Setting alpha_threshold col
 
 **For example, to make magenta transparent:**
 
-```text
-.venv/bin/python conv_layers.py input.bmp output.png --color-key FF00FF
+```text.venv/bin/python conv_layers.py input.bmp output.png --color-key FF00FF
 ```
 
 **To allow slight colour variation:**
 
-```text
-.venv/bin/python conv_layers.py input.bmp output.png --color-key FF00FF
+```text.venv/bin/python conv_layers.py input.bmp output.png --color-key FF00FF
 ```
 
 --color-key-tolerance 8 Alpha takes precedence if the source already has transparency. Tests completed RGBA input: passed. RGB input with colour key: passed. Indexed PNG with palette transparency: passed.
@@ -14034,8 +13954,7 @@ Download Quake Texture Converter – GUI ZIP · 21 KB · four files Ready Downlo
 
 Optional colour-key selection with colour picker. Editable conversion settings. Save settings button. Optional ORA diagnostic export. Conversion progress and output log. Running it on Pop!_OS Extract the ZIP into your converter directory, alongside quake.pal, then run:
 
-```text
-.venv/bin/python conv_gui.py
+```text.venv/bin/python conv_gui.py
 ```
 
 Tkinter 8.6 is available in the build environment, and both Python files pass syntax checks. The ZIP also passes its integrity test. One note: This is the functional first version, not yet a polished application package. It still requires your existing Python virtual environment and dependencies.
@@ -14167,9 +14086,7 @@ just stumbled upon the "zorn palette" looks a lot like the colors chosen for qua
 
 [Open original conversation](https://chatgpt.com/c/6af24930-95f0-83ed-8d4d-93555ef6d64e) · 22 source pages
 
-### You
-
-. It installs!
+### You. It installs!
 
 2. Settings work! Love the cogwheel and file solition.
 
@@ -14406,13 +14323,13 @@ External editing with Krita This is a good next feature. I'd implement a proper 
 
 **image externally:**
 
-Textures: export the active texture as PNG, open in Krita, then reload the saved pixels into the same Blender image datablock. That preserves materials and UV references. Lightmaps: use 32-bit OpenEXR to preserve floating-point lighting values rather than clipping them into an ordinary 8-bit PNG. Krita supports OpenEXR paint-over and float interchange. docs.krita.org +1
+Textures: export the active texture as PNG, open in Krita, then reload the saved pixels into the same Blender image datablock. That preserves materials and UV references. Lightmaps: use 32-bit OpenEXR to preserve floating-point lighting values rather than clipping them into an ordinary 8-bit PNG. Krita supports OpenEXR paint-over and float interchange.
 
 Keep the original image dimensions fixed during the round-trip initially. Resizing an atlas would invalidate UV placement. Add explicit Open Externally and Reload from Disk actions, with the external file path tracked per image.
 
 One important color-management detail: EXR doesn't embed its color space, so Blender and Krita need matching OCIO/profile settings to avoid visual shifts. docs.krita.org A shortcut for WASD navigation My candidate is Shift+W. It's easy to reach without moving your left hand away from WASD. I wouldn't claim it is universally unused, because custom keymaps and add-ons can
 
-add bindings. Blender's own default Walk/Fly shortcut is Shift + the accent-grave key. Blender 5.2... +1 Does export assemble the BSP ahead of time? No. QSS keeps the editable map, images and materials in memory, but _export_object assembles the BSP when you invoke export. It reads the source BSP, checks and encodes changed images, builds palette-indexed mip levels, rebuilds the relevant lumps
+add bindings. Blender's own default Walk/Fly shortcut is Shift + the accent-grave key. Does export assemble the BSP ahead of time? No. QSS keeps the editable map, images and materials in memory, but _export_object assembles the BSP when you invoke export. It reads the source BSP, checks and encodes changed images, builds palette-indexed mip levels, rebuilds the relevant lumps
 
 and writes the output. That is why the new Ironwail test action uses the normal exporter to make a temporary BSP. It avoids the need to maintain a separate preassembled copy, while still testing the actual export result.
 
@@ -14570,7 +14487,7 @@ Added Viewport FOV to QSS Settings. It defaults to 90° horizontal FOV, persists
 
 I found two problems: the palette creation path was missing its hashlib import, and the palette UI used an unsupported argument and omitted Blender's palette selector. The picker now uses Blender's native palette selector and swatch grid. The Standard / Quake switch is inside the existing LIGHTING panel, and there's a Quake Palette Colors... entry in the paint-mode right-click menus. The regular Blender color picker remains
 
-available. raw.githubu... +1
+available.
 
 3. Conversion now runs inside Blender
 
