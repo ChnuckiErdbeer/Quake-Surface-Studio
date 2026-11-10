@@ -32,6 +32,24 @@ class QuakePaletteUtilityTests(unittest.TestCase):
         self.assertTrue(all(len(set(level)) >= 1 for level in levels))
         self.assertTrue(all(0 <= index < 224 for level in levels for index in level))
 
+    def test_non_brace_mip_chain_ignores_source_alpha_at_every_level(self):
+        palette = bytes(channel for value in range(256) for channel in (value, value, value))
+        opaque = bytearray()
+        varied_alpha = bytearray()
+        for y in range(16):
+            for x in range(16):
+                pixel = (x * 13 + y * 7) % 256
+                opaque.extend((pixel, pixel, pixel, 255))
+                varied_alpha.extend((pixel, pixel, pixel, 0 if (x + y) % 2 else 255))
+        settings = {"segments": 4, "ramp_candidates_per_zone": 5}
+        expected, _ = palette_utils.convert_rgba8_mip_chain(
+            16, 16, opaque, palette, settings=settings, transparent=False
+        )
+        actual, _ = palette_utils.convert_rgba8_mip_chain(
+            16, 16, varied_alpha, palette, settings=settings, transparent=False
+        )
+        self.assertEqual(actual, expected)
+
     def test_material_zone_mip_chain_preserves_brace_transparency(self):
         palette = bytes(channel for value in range(256) for channel in (value, value, value))
         rgba = bytearray(bytes((120, 120, 120, 255)) * (16 * 16))
