@@ -20,6 +20,46 @@ class QuakePaletteUtilityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "768"):
             palette_utils.palette_to_jasc_text(b"short")
 
+    def test_material_zone_converter_builds_all_four_mip_levels(self):
+        palette = bytes(channel for value in range(256) for channel in (value, value, value))
+        rgba = bytes((120, 120, 120, 255)) * (16 * 16)
+        levels, stats = palette_utils.convert_rgba8_mip_chain(
+            16, 16, rgba, palette,
+            settings={"segments": 4, "ramp_candidates_per_zone": 5},
+        )
+        self.assertEqual([len(level) for level in levels], [256, 64, 16, 4])
+        self.assertEqual(len(stats), 4)
+        self.assertTrue(all(len(set(level)) >= 1 for level in levels))
+        self.assertTrue(all(0 <= index < 224 for level in levels for index in level))
+
+    def test_material_zone_mip_chain_preserves_brace_transparency(self):
+        palette = bytes(channel for value in range(256) for channel in (value, value, value))
+        rgba = bytearray(bytes((120, 120, 120, 255)) * (16 * 16))
+        for y in range(2):
+            for x in range(2):
+                rgba[(y * 16 + x) * 4 + 3] = 0
+        levels, stats = palette_utils.convert_rgba8_mip_chain(
+            16, 16, rgba, palette,
+            settings={"segments": 4, "ramp_candidates_per_zone": 5},
+            transparent=True,
+        )
+        self.assertEqual(levels[0][0], 255)
+        self.assertGreater(stats[0]["transparent_pixels"], 0)
+        self.assertEqual(len(levels), 4)
+
+    def test_material_zone_mip_chain_keeps_fullbright_mask(self):
+        palette = bytes(channel for value in range(256) for channel in (value, value, value))
+        rgba = bytes((120, 120, 120, 255)) * (16 * 16)
+        mask = bytearray(16 * 16)
+        mask[0] = 1
+        levels, stats = palette_utils.convert_rgba8_mip_chain(
+            16, 16, rgba, palette,
+            settings={"segments": 4, "ramp_candidates_per_zone": 5},
+            fullbright_mask=mask,
+        )
+        self.assertGreaterEqual(levels[0][0], 224)
+        self.assertEqual(stats[0]["fullbright_pixels"], 1)
+
     def test_face_memory_estimate_includes_peak_atlas_allocation(self):
         result = palette_utils.estimate_face_local_paint_bytes(
             [(16, 16), (65, 33)], bytes_per_face_pixel=4
