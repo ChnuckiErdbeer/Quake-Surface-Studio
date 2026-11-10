@@ -9237,34 +9237,10 @@ class QSS_OT_load_quake_palette(Operator):
             return {"CANCELLED"}
 
 
-class QSS_OT_check_quake_converter(Operator):
-    bl_idname = "qss.check_quake_converter"
-    bl_label = "Check Converter"
-    bl_description = "Verify that the configured Python interpreter has the Quake converter dependencies"
-
-    def execute(self, context):
-        python_path = _qss_converter_python_path()
-        if not python_path or not os.path.isfile(python_path):
-            self.report({"ERROR"}, "Converter Python was not found. Set it in QSS Settings.")
-            return {"CANCELLED"}
-        result = external_tools.run_command(
-            python_path,
-            ["-c", "import numpy, PIL, scipy, skimage; print('NumPy, Pillow, SciPy and scikit-image are available')"],
-            timeout=60.0,
-            cwd=os.path.dirname(python_path),
-        )
-        if result["status"] == "PASS":
-            self.report({"INFO"}, f"Converter environment ready: {python_path}")
-            return {"FINISHED"}
-        detail = (result.get("stdout") or result.get("stderr") or "Dependency check failed.").strip()
-        self.report({"ERROR"}, f"Converter environment is not ready: {detail[-240:]}")
-        return {"CANCELLED"}
-
-
 class QSS_OT_convert_quake_palette(Operator):
     bl_idname = "qss.convert_quake_palette"
     bl_label = "Convert Image to Quake Palette"
-    bl_description = "Run QSS's material-zone, five-ramp-candidate Quake palette converter on the active image or Render Result"
+    bl_description = "Run the material-zone Quake converter inside Blender's own Python process"
 
     output_filepath: StringProperty(
         name="Converted PNG",
@@ -9275,48 +9251,41 @@ class QSS_OT_convert_quake_palette(Operator):
         name="Source Image",
         description="Blender image datablock to convert",
     )
-    include_layers: BoolProperty(
-        name="Create editable ORA diagnostics",
-        description="Also write a layered OpenRaster project containing the conversion and diagnostic layers",
-        default=False,
-    )
 
     def invoke(self, context, event):
         image = _qss_converter_source_image(context)
         if image is None:
             self.report(
                 {"WARNING"},
-                "No source image found. Select an image in the Image Editor, enter Texture Paint, "
-                "or render the scene first.",
+                "Choose an image in the Image Editor, enter Texture Paint, or render the scene first.",
             )
             return {"CANCELLED"}
         self.source_image_name = image.name
-        source_stem = bpy.path.clean_name(
+        stem = bpy.path.clean_name(
             "render" if image.name == "Render Result" else image.name
         ) or "texture"
-        self.output_filepath = bpy.path.abspath(f"//{source_stem}_quake.png")
+        self.output_filepath = bpy.path.abspath(f"//{stem}_quake.png")
         context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
 
     def draw(self, context):
-        layout = self.layout
-        layout.label(text=f"Source: {self.source_image_name or '—'}", icon="IMAGE")
-        layout.prop(self, "include_layers")
+        self.layout.label(text=f"Source: {self.source_image_name or '—'}", icon="IMAGE")
+        self.layout.label(
+            text="Runs inside Blender. No external Python installation or third-party modules are needed.",
+            icon="INFO",
+        )
 
     def execute(self, context):
         image = bpy.data.images.get(self.source_image_name)
         if image is None:
-            image = _qss_converter_source_image(context)
-        if image is None:
             self.report({"ERROR"}, "The source image is no longer available.")
             return {"CANCELLED"}
-
         obj = context.object
         if not _qss_is_map_object(obj):
-            self.report({"ERROR"}, "An active QSS map is required to supply the Quake palette.")
+            self.report({"ERROR"}, "Select an imported QSS map so its Quake palette is available.")
             return {"CANCELLED"}
 
-        output_path = _qss_abspath(self.output_filepath)
+        output_path = _qss_abspath(self.output_filepath or "")
         if not output_path:
             self.report({"ERROR"}, "Choose an output PNG path.")
             return {"CANCELLED"}
@@ -9328,25 +9297,14 @@ class QSS_OT_convert_quake_palette(Operator):
         if source_path and os.path.isfile(source_path):
             try:
                 if os.path.samefile(source_path, output_path):
-                    self.report({"ERROR"}, "The converted output must not overwrite the source image.")
+                    self.report({"ERROR"}, "The converted PNG must not overwrite the source image.")
                     return {"CANCELLED"}
             except OSError:
                 pass
 
-        addon_directory = os.path.dirname(os.path.abspath(__file__))
-        converter_script = os.path.join(addon_directory, "quake_texture_converter.py")
-        converter_settings = os.path.join(addon_directory, "quake_texture_converter.ini")
-        if not os.path.isfile(converter_script) or not os.path.isfile(converter_settings):
-            self.report({"ERROR"}, "The bundled Quake palette converter or its settings file is missing.")
-            return {"CANCELLED"}
-        python_path = _qss_converter_python_path()
-        if not python_path or not os.path.isfile(python_path):
-            self.report({"ERROR"}, "Converter Python was not found. Set a Python environment with NumPy, Pillow, SciPy and scikit-image in QSS Settings.")
-            return {"CANCELLED"}
-
-        temp_directory = tempfile.mkdtemp(prefix="qss_quake_palette_")
-        input_path = os.path.join(temp_directory, "qss_source.png")
-        palette_path = os.path.join(temp_directory, "quake.pal")
+        render_copy = None
+        render_temp_dir = ""
+        mask_image = None
         try:
             palette_bytes, palette_origin = bsp.find_quake_palette(
                 str(obj.get("qss_game_dir", "") or ""),
@@ -9354,71 +9312,38 @@ class QSS_OT_convert_quake_palette(Operator):
             )
             if palette_bytes is None:
                 raise bsp.BSPError(
-                    "The active map's Quake palette could not be found. Check gfx/palette.lmp "
-                    "or re-import with an explicit palette."
-                )
-            with open(palette_path, "w", encoding="ascii", newline="\n") as handle:
-                handle.write(palette_utils.palette_to_jasc_text(palette_bytes))
-            _qss_save_image_copy_as_png(image, input_path, context)
-
-            # Carry an existing sibling fullbright mask into the temporary input
-            # directory so the converter can preserve it independently of alpha.
-            if source_path and os.path.isfile(source_path):
-                source_stem = os.path.splitext(source_path)[0]
-                source_mask = source_stem + "_fullbrights.png"
-                if os.path.isfile(source_mask):
-                    shutil.copy2(
-                        source_mask,
-                        os.path.join(temp_directory, "qss_source_fullbrights.png"),
-                    )
-
-            arguments = [
-                converter_script,
-                input_path,
-                output_path,
-                "--palette",
-                palette_path,
-                "--settings",
-                converter_settings,
-            ]
-            if self.include_layers:
-                arguments.append("--layers")
-
-            dependency_check = external_tools.run_command(
-                python_path,
-                ["-c", "import numpy, PIL, scipy, skimage"],
-                timeout=60.0,
-                cwd=addon_directory,
-            )
-            if dependency_check["status"] != "PASS":
-                detail = (
-                    dependency_check.get("stdout")
-                    or dependency_check.get("stderr")
-                    or "The required Python modules could not be imported."
-                ).strip()
-                raise bsp.BSPError(
-                    "Converter dependencies are missing from the configured Python. "
-                    "Set the interpreter to the converter's virtual environment in QSS Settings. "
-                    + detail[-300:]
+                    "Could not find the active map's Quake palette. Check gfx/palette.lmp "
+                    "or re-import with an explicit palette file."
                 )
 
-            result = external_tools.run_command(
-                python_path,
-                arguments,
-                timeout=1800.0,
-                cwd=addon_directory,
+            source_image = image
+            if image.name == "Render Result":
+                render_temp_dir = tempfile.mkdtemp(prefix="qss_render_palette_")
+                render_path = os.path.join(render_temp_dir, "render_source.png")
+                image.save_render(render_path, scene=context.scene)
+                render_copy = bpy.data.images.load(render_path, check_existing=False)
+                source_image = render_copy
+
+            width, height, rgba = _qss_image_pixels_to_rgba8(source_image)
+            fullbright_mask, mask_image = _qss_read_fullbright_mask(
+                source_path, width, height
             )
-            log_text = (
-                f"Status: {result.get('status')}\n"
-                f"Return code: {result.get('returncode')}\n"
-                f"Duration: {result.get('duration_seconds')} s\n"
-                f"Command: {' '.join(result.get('command', []))}\n\n"
-                f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+            settings_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "quake_texture_converter.ini",
             )
-            _qss_write_text_report("QSS_Quake_Palette_Converter_Log", log_text)
-            if result["status"] != "PASS" or not os.path.isfile(output_path):
-                detail = (result.get("stdout") or result.get("stderr") or "Converter did not create the PNG.").strip()
-                raise bsp.BSPError(f"Quake palette conversion failed: {detail[-500:]}")
+            conversion_settings = palette_utils.load_settings(settings_path)
+            indices, stats = palette_utils.convert_rgba8(
+                width, height, rgba, palette_bytes,
+                settings=conversion_settings,
+                fullbright_mask=fullbright_mask,
+            )
+            os.makedirs(os.path.dirname(output_path) or os.getcwd(), exist_ok=True)
+            palette_utils.save_indexed_png(
+                output_path, width, height, indices, palette_bytes
+            )
+            if not os.path.isfile(output_path):
+                raise bsp.BSPError("The indexed Quake PNG was not written.")
 
             converted = bpy.data.images.load(output_path, check_existing=False)
             converted.name = bpy.path.clean_name(
@@ -9434,25 +9359,39 @@ class QSS_OT_convert_quake_palette(Operator):
                 pass
             converted["qss_quake_palette_converted"] = True
             converted["qss_quake_palette_origin"] = str(palette_origin)
-            converted["qss_converter_ramp_candidates_per_zone"] = 5
-            if self.include_layers:
-                ora_path = os.path.splitext(output_path)[0] + ".ora"
-                if os.path.isfile(ora_path):
-                    converted["qss_converter_ora_path"] = ora_path
+            converted["qss_converter_ramp_candidates_per_zone"] = int(
+                conversion_settings["ramp_candidates_per_zone"]
+            )
+            converted["qss_converter_regions"] = int(stats["regions"])
+            converted["qss_converter_colors_used"] = int(stats["colors_used"])
+            converted["qss_converter_transparent_pixels"] = int(stats["transparent_pixels"])
+            converted["qss_converter_fullbright_pixels"] = int(stats["fullbright_pixels"])
             self.report(
                 {"INFO"},
-                f"Converted '{image.name}' to indexed Quake palette image '{converted.name}'. "
-                f"Saved to {output_path}.",
+                f"Converted {width}×{height} pixels into {stats['colors_used']} Quake colors "
+                f"across {stats['regions']} material zones. New image: {converted.name}.",
             )
             return {"FINISHED"}
         except Exception as exc:
-            self.report({"ERROR"}, f"Could not convert image to the Quake palette: {exc}")
+            self.report({"ERROR"}, f"Quake palette conversion failed: {exc}")
             return {"CANCELLED"}
         finally:
-            try:
-                shutil.rmtree(temp_directory, ignore_errors=True)
-            except Exception:
-                pass
+            if mask_image is not None:
+                try:
+                    bpy.data.images.remove(mask_image, do_unlink=True)
+                except Exception:
+                    pass
+            if render_copy is not None:
+                try:
+                    bpy.data.images.remove(render_copy, do_unlink=True)
+                except Exception:
+                    pass
+            if render_temp_dir:
+                try:
+                    import shutil
+                    shutil.rmtree(render_temp_dir, ignore_errors=True)
+                except Exception:
+                    pass
 
 
 class QSS_OT_viewport_material_preview(Operator):
@@ -9475,65 +9414,69 @@ class QSS_OT_viewport_material_preview(Operator):
             return {"CANCELLED"}
 
 
-class QSS_PT_main(Panel):
-    bl_label = "Quake Surface Studio"
-    bl_idname = "QSS_PT_main"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "Quake"
-    bl_order = 0
+class QSS_OT_open_quake_palette(Operator):
+    bl_idname = "qss.open_quake_palette"
+    bl_label = "Choose Quake Palette Color"
+    bl_description = "Open the active map's 256-color palette for the current paint brush"
+
+    def invoke(self, context, event):
+        try:
+            _qss_assign_quake_palette(context, context.object)
+            context.scene.qss_paint_color_picker = "QUAKE"
+            return context.window_manager.invoke_props_dialog(self, width=520)
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not open the Quake palette: {exc}")
+            return {"CANCELLED"}
 
     def draw(self, context):
+        image_paint = context.scene.tool_settings.image_paint
         layout = self.layout
-        row = layout.row(align=True)
-        row.label(text=f"v{'.'.join(str(part) for part in ADDON_VERSION)}", icon="INFO")
-        row.operator(QSS_OT_settings.bl_idname, text="", icon="PREFERENCES")
-        row.operator(QSS_OT_open_config_text.bl_idname, text="", icon="TEXT")
-        obj = context.object
-        if _qss_is_map_object(obj):
-            layout.label(text=f"Active map: {os.path.basename(obj.get('qss_source_path', obj.name))}", icon="FILE_3D")
-            try:
-                if context.area.spaces.active.shading.type == "SOLID":
-                    hint = layout.row(align=True)
-                    hint.label(text="Solid shading bypasses QSS material/lightmap preview.", icon="INFO")
-                    hint.operator(
-                        QSS_OT_viewport_material_preview.bl_idname,
-                        text="Material Preview",
-                        icon="SHADING_TEXTURE",
-                    )
-            except Exception:
-                pass
-        else:
-            layout.label(text="Select or import a Quake BSP to begin.", icon="INFO")
+        layout.template_ID(image_paint, "palette", new="palette.new")
+        if image_paint.palette is not None:
+            layout.template_palette(image_paint, "palette")
+            layout.label(
+                text="Select a swatch to set the brush color. "
+                     "224–254 are fullbright; 255 is transparent in Quake textures."
+            )
 
 
-class QSS_PT_navigation(Panel):
-    bl_label = "QUICK ACTIONS"
-    bl_idname = "QSS_PT_navigation"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "Quake"
-    bl_parent_id = "QSS_PT_main"
-    bl_order = 10
+_qss_context_menu_types = []
 
-    @classmethod
-    def poll(cls, context):
-        return _qss_is_map_object(context.object)
 
-    def draw(self, context):
-        obj = context.object
-        row = self.layout.row(align=True)
-        row.operator(QSS_OT_fps_walk.bl_idname, text="WASD", icon="VIEW_PAN")
-        player = row.row(align=True)
-        player.enabled = bool(obj.get("qss_has_player_start"))
-        player.operator(QSS_OT_player_start.bl_idname, text="Start", icon="EMPTY_AXIS")
-        isolate = row.row(align=True)
-        isolate.enabled = (context.mode == "EDIT_MESH" or _qss_is_texture_paint_context(context))
-        isolate.operator(QSS_OT_isolate_faces.bl_idname, text="Isolate", icon="HIDE_OFF",
-                         depress=bool(obj.get("qss_face_visibility_snapshot", "")))
-        focus = row.row(align=True)
-        focus.enabled = (context.mode == "EDIT_MESH" or _qss_is_texture_paint_context(context))
-        focus.operator(QSS_OT_frame_selection.bl_idname, text="Focus", icon="VIEWZOOM")
+def _qss_draw_quake_palette_context_menu(self, context):
+    if not _qss_is_map_object(getattr(context, "object", None)):
+        return
+    if not _qss_is_texture_paint_context(context):
+        return
+    self.layout.separator()
+    self.layout.operator(
+        QSS_OT_open_quake_palette.bl_idname,
+        text="Quake Palette Colors…",
+        icon="COLOR",
+    )
+
+
+def _qss_remove_context_menus():
+    global _qss_context_menu_types
+    for menu_type in tuple(_qss_context_menu_types):
+        try:
+            menu_type.remove(_qss_draw_quake_palette_context_menu)
+        except Exception:
+            pass
+    _qss_context_menu_types.clear()
+
+
+def _qss_register_context_menus():
+    _qss_remove_context_menus()
+    for name in ("WM_MT_button_context", "VIEW3D_MT_brush_context_menu"):
+        menu_type = getattr(bpy.types, name, None)
+        if menu_type is None:
+            continue
+        try:
+            menu_type.append(_qss_draw_quake_palette_context_menu)
+            _qss_context_menu_types.append(menu_type)
+        except Exception as exc:
+            print(f"QSS: could not add Quake palette to {name}: {exc}")
 
 
 class QSS_OT_close_active_map(Operator):
