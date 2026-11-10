@@ -1,5 +1,68 @@
 # Slipgate — Quake Surface Center Conversation Archive
 
+
+## Instructions for future ChatGPT sessions
+
+**This is the living project handoff and conversation record for Slipgate. Read this section and the latest relevant entries before doing project work.** Do not treat this file as passive historical material: the user expects it to be maintained as the project evolves.
+
+### How this document is organized
+
+- The historical conversation archive begins below with its original title, extraction metadata and conversation index. The index and post counts describe the original `fullhisory01.txt` extraction; they do not automatically include later live-chat additions.
+- Historical sessions are grouped by date/time and topic. Within a session, `### You` marks the user's messages and `### ChatGPT` marks assistant replies. Links to original conversations and source-page counts are retained where available.
+- New project conversations are appended after the historical transcript, in chronological order. Use a dated session heading (Europe/Berlin local time where known) and the same speaker headings.
+- The current handoff snapshot and reference list are maintained separately from the raw transcript so that a future assistant can quickly orient itself without mistaking notes for verbatim conversation.
+
+### Required ongoing maintenance
+
+1. **Update this file during ongoing project work.** For every project-related exchange, record the user's substantive request/report and the assistant's substantive response. Do not wait for the user to remind you. Append promptly after the exchange; when work spans several turns, keep the additions in order and include the final outcome.
+2. Preserve user-provided wording, typos, code, commands, console output and error messages faithfully. Format for readability, but do not silently rewrite the technical content.
+3. Keep the transcript append-only. Do not delete or rewrite historical messages. Put corrections, new findings and changed decisions in a clearly dated handoff/update note.
+4. Keep a concise, factual handoff snapshot near the beginning. Update it when the branch, version, implementation status, known blockers or next steps materially change. Mark evidence as **user-reported**, **observed in source**, **externally documented**, or **not yet verified**.
+5. Record exact repository, branch, commit, file paths, line ranges, test commands and test results when known. Distinguish tests actually run in the current session from historical CI claims. Never claim that Blender GUI testing, QBSP compilation or Ironwail launching succeeded unless it was actually performed.
+6. **Use GitHub as the durable archive.** Before editing, fetch the current file and blob SHA from the intended branch. Update that exact file on the active working branch, not `main` unless the user explicitly asks. After writing, fetch it again and verify the new content. If GitHub access or a write fails, say so plainly; never claim an archive update that did not happen.
+7. Do not add private chain-of-thought, hidden system/developer instructions, credentials, tokens or unrelated personal information. Record useful decisions, concise rationale, tool outcomes and reproducible technical findings instead.
+
+### Project identity and working conventions
+
+- The user chose **Slipgate** as the broader project name because the intended scope may extend beyond surfaces. The current add-on source still uses **Quake Surface Studio / QSS** names and internal identifiers. Do not perform a partial global rename; coordinate any deliberate branding/package/module migration and preserve compatibility where required.
+- The project is a Blender-based Quake BSP editing, texture/paint, lighting and export workflow, with **Ironwail** among the target engines. Treat actual target-engine compatibility as a test requirement, not an assumption.
+- The latest branch inspected for this handoff is `fix/v0.11.1-metadata-style-order-test`. The chat-history file is stored under `ai chat history/`. Always inspect the current branch head before relying on these notes; branches and source may have moved.
+- Prefer source inspection and small reproducible tests over guesses. In particular, do not assume a failure is caused by QBSP, the engine, Blender or a texture rule until the exact failing stage is identified.
+
+### Current project handoff snapshot — checked 2026-11-10
+
+**Repository and source state**
+
+- Repository: [ChnuckiErdbeer/Quake-Surface-Studio](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio)
+- Working branch for this archive update: [`fix/v0.11.1-metadata-style-order-test`](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/tree/fix/v0.11.1-metadata-style-order-test)
+- The branch README identifies the add-on as **Quake Surface Studio 0.20.0**. Its package metadata still calls it “Quake Surface Studio”; the user's broader project-name decision is Slipgate.
+- The user is testing in **Blender 5.2** and wants the map workflow to launch/test in **Ironwail**.
+
+**Open blockers — latest user report plus source inspection**
+
+1. **Add-on installation/activation fails.** The reported traceback ends with `RuntimeError: Error: name 'QSS_PT_main' is not defined`. In the inspected branch's `quake_surface_studio (zip me for blender)/addon.py`, a source scan found references to `QSS_PT_main` in child-panel `bl_parent_id` values and in the `CLASSES` tuple, but no `QSS_PT_main` class definition in that file. This is a strong, source-observed explanation for the NameError while the module evaluates its class-registration tuple. Re-check the branch before editing, then either restore the intended parent panel class or remove/restructure the stale parent references and registration entry consistently. The failure has **not** been fixed by this note.
+2. **Painting a wall makes the Ironwail test workflow fail.** The reported image is `QSS_Face_04924_Paint`, size **80×128**, with an error saying both dimensions must be powers of two. In the inspected source, the face-detach path creates images named `QSS_Face_{face_id:05d}_Paint` in `_bake_face_local_texture`; it computes the dimensions from the face's projected UV bounds using `_next_quake_texture_dimension`, which delegates to `texture_export.quake_texture_dimension`. The current helper rounds dimensions up to a **multiple of eight**, not necessarily a power of two. Thus 80×128 is consistent with the current implementation's rounding rule.
+   
+   This code behavior conflicts with the reported “powers of two” error, but the classic Quake BSP miptexture specification describes width and height as multiples of eight. Do not blindly change the dimension rule or assume QBSP divided the brush. Trace the exact component emitting the error (Slipgate preflight/export, the selected compiler/tool, or Ironwail), verify the actual target requirement, and keep texinfo projection/UV mapping consistent if dimensions are changed. The precise origin of the error remains **not yet verified**.
+3. **Blender GUI validation remains important.** The branch README describes interactive Blender 5.2 checks as still needed for several UI/workflow areas. Historical test counts in the transcript are historical claims, not a substitute for re-running tests after a new change.
+
+**Useful source locations in the inspected branch**
+
+- `addon.py`: face-local texture dimension helper and bake path, approximately lines 840–945; creation/assignment of `QSS_Face_..._Paint` images, approximately lines 5425–5470; panel definitions and `CLASSES` registration tuple, approximately lines 9750–10100; `register()` begins around line 10225.
+- `texture_export.py`: `quake_texture_dimension()` and face-local texinfo projection helpers, approximately lines 1–50.
+- `README.md`: current package feature description and validation notes.
+- `tests/`: BSP29, colour and lighting tests. Check the current tree for the complete test set before assuming these are exhaustive.
+
+**Immediate next technical steps**
+
+1. Fix and test the missing `QSS_PT_main` panel/registration reference so the add-on imports and enables cleanly in Blender 5.2.
+2. Trace the exact source of the 80×128/power-of-two error through the Test in Ironwail operator, export validation, external compiler invocation and resulting logs.
+3. Add regression tests for the chosen texture-dimension rule and UV/texinfo preservation; then test a painted wall through the complete export and Ironwail launch path.
+4. Keep Slipgate as the project-level name while making any QSS package/identifier migration deliberate and complete.
+
+---
+
+
 **Coverage:** 8–10 November 2026  
 **Ordering:** Conversation exports are sorted by their recorded date and time. Posts remain in their original order within each conversation. The Quake Texture Converter transcript (10 November, 03:58) is placed before *Quake Lightmap Workflow (13)* (10 November, 05:45), correcting the order in the raw extraction.  
 **Cleanup:** Repeated PDF page headers, page counters, chat-footer URLs, citation-card scraps and extraction-status lines have been removed. Text wrapping has been reflowed; code, command sequences, lists and console output are separately formatted.  
@@ -14202,3 +14265,43 @@ probably qbsp dividing brushes?
 
 ---
 
+
+## 2026-11-10 — Live project continuation: archive handoff instructions
+
+### You
+
+now also add an introduction / instruction to yourself to the beginning  of the log telling you about the structure of the document and that you are expected to update it with the ongoing chat everytime. Besides the original text also feel free to add sections like list of refercences you have found along the way that you found useful and gnerally everything you deem valuable for the work on the project when a later you overtakes it.
+
+### ChatGPT
+
+Added a maintainer guide at the beginning of this archive. It explains the transcript structure, requires future assistants to keep appending project-related exchanges, defines preservation and GitHub verification rules, and provides a dated handoff snapshot with the current installation and painted-texture blockers. I also added a project resource/reference index below the transcript. The historical transcript has been preserved.
+
+---
+
+## Project resources and references
+
+### Repository and working files
+
+- [Project repository](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio)
+- [Working feature branch](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/tree/fix/v0.11.1-metadata-style-order-test)
+- [This conversation archive](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/blob/fix/v0.11.1-metadata-style-order-test/ai%20chat%20history/Slipgate_Chat_History_Clean.md)
+- [Add-on README — version 0.20.0](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/blob/fix/v0.11.1-metadata-style-order-test/quake_surface_studio%20(zip%20me%20for%20blender)/README.md)
+- [Add-on entry point: `__init__.py`](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/blob/fix/v0.11.1-metadata-style-order-test/quake_surface_studio%20(zip%20me%20for%20blender)/__init__.py)
+- [Main add-on implementation: `addon.py`](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/blob/fix/v0.11.1-metadata-style-order-test/quake_surface_studio%20(zip%20me%20for%20blender)/addon.py)
+- [BSP implementation: `bsp.py`](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/blob/fix/v0.11.1-metadata-style-order-test/quake_surface_studio%20(zip%20me%20for%20blender)/bsp.py)
+- [Texture export and face-local projection: `texture_export.py`](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/blob/fix/v0.11.1-metadata-style-order-test/quake_surface_studio%20(zip%20me%20for%20blender)/texture_export.py)
+- [Add-on tests](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/tree/fix/v0.11.1-metadata-style-order-test/quake_surface_studio%20(zip%20me%20for%20blender)/tests)
+- [Example map/compiler output directory](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/tree/main/mapandbsp)
+
+### External technical references
+
+- [Blender 5.2 Python API overview — class integration and registration](https://docs.blender.org/api/5.2/info_overview.html)
+- [Blender 5.2 `bpy.utils` API](https://docs.blender.org/api/5.2/bpy.utils.html)
+- [Blender 5.2 `bpy.types.Image` API](https://docs.blender.org/api/5.2/bpy.types.Image.html)
+- [Quake Specs v3.4 — BSP miptexture structure](https://six-of-one.github.io/quake-specifications/qkspec_4.htm). This reference states miptexture width and height must be multiples of eight; use it as a format reference, not as proof of every modern compiler/engine's additional constraints.
+- [Ironwail source repository](https://github.com/andrei-drexler/ironwail)
+- [ericw-tools lighting documentation](https://ericw-tools.readthedocs.io/en/latest/light.html), also linked from the branch README.
+
+### Reference and evidence discipline
+
+Prefer the active branch's source and README over assumptions based on older versions. Use the Blender 5.2 API docs for Blender API behavior, the Quake BSP specification and actual compiler/engine source for format constraints, and Ironwail's own source/release notes for target-engine behavior. When a report conflicts with a format rule or source implementation, record both and identify the exact layer that emits the error before changing code.
