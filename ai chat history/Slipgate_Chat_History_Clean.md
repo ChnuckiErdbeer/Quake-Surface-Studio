@@ -35,9 +35,9 @@
 
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
 - Working branch: `fix/v0.11.1-metadata-style-order-test`
-- Add-on version: **Slipgate 0.20.6** (`__init__.py` and `addon.py`).
+- Add-on version: **Slipgate 0.20.7** (`__init__.py` and `addon.py`).
 - Main implementation: `quake_surface_studio (zip me for blender)/addon.py`; Quake lighting helpers: `lighting.py`; tests: `tests/`.
-- Latest overlay/mode implementation commit: `4b316e572df59de3f5e8573f8ae47487f3d014c8`. Version metadata commit: `f4f62fdcb61213966f5b7ebb04f5f0792fd52dd2`. Latest README commit: `2609eb3d636199486f6df29e21bc2393eb02df4f`.
+- Latest UI/import implementation commit: `7da60b98f1fc2596ae6db60b82131b0f617c97c5`. Displayed version constant commit: `ef50f5f37f07d3a2b1b152a7ad42e17426c09891`. Version metadata commit: `ef332c0e071de9d74875a6915e425057fa381be1`. README commit: `41c7837aa4f386c773e678256b6f533d7ef2d17f`.
 - Slipgate 0.20.6 install artifact: `Quake-Surface-Studio-v0.20.6-Blender-Install`, artifact ID `13761780232`, SHA-256 `a8aae3a77a5bd505a0a0297927809de585099dce64852c720a797395461a4bc7`; GitHub Actions run 621.
 - Blender install artifact: `Quake-Surface-Studio-v0.20.5-Blender-Install`, artifact ID `13757062978`, SHA-256 `1b8298070a36322f2c304b81d76d9bd122b74b0468adbb7f364e0d5bccc4f0b7`. GitHub Actions run 616. Artifact expires 2027-02-08.
 - Package folder and internal identifiers remain `quake_surface_studio` / QSS for compatibility; visible branding is Slipgate.
@@ -55,6 +55,8 @@
 
 - User's latest 0.20.5 test notes: the pale grey/white face tint reappears on the second map; Cycles viewport preview looks too bright; Cycles bake is dark, while original and bake are brighter and close in Ironwail; some light placements still look wrong; user proposes a controlled delay calibration map with 6 groups × 3 lights, one active wall per test group, and three values per delay. User confirms bake works without seams and Quick Actions work well.
 - User also requests removing the viewport floor/grid override while working with Slipgate, and allowing lighting modes in Edit Mode while keeping them unavailable in Texture Paint.
+
+- Slipgate 0.20.7 changes: removed the Browse Game Maps sidebar button while retaining its operator for F3 compatibility; Import BSP starts in `<active-game>/maps` (fallback `<active-game>`); Quake palette opens with `invoke_popup` from paint-mode context menu; retained native `template_palette` responsive square swatches. No arbitrary per-button colors added.
 
 **Implemented in Slipgate 0.20.5**
 
@@ -15281,4 +15283,33 @@ The 0.20.5 ZIP was downloaded from GitHub Actions and its contents and SHA-256 v
 ### Verification boundary
 - QSS Python CI run 621 passed; converter GUI run 73 passed on the implementation commit. Package artifact `Quake-Surface-Studio-v0.20.6-Blender-Install`, ID `13761780232`, SHA-256 `a8aae3a77a5bd505a0a0297927809de585099dce64852c720a797395461a4bc7` (GitHub Actions run 621; expires 2027-02-08). The ZIP was downloaded, archive contents inspected and `compileall` passed.
 - No interactive Blender 5.2 test was run. The second-map overlay, floor restoration, and Edit Mode controls must be checked in Blender. No lighting calibration or Cycles brightness changes have been made yet.
+
+## 2026-11-10 — Slipgate 0.20.7 import and palette UX refinements
+
+### User feedback
+- User confirmed 0.20.6 fixed second-map grey tint, removed viewport floor grid, enabled lighting-mode switching in Edit Mode while disabling it in Texture Paint, and preserved Quick Actions.
+- Live Blender preview remains too bright although Cycles bake is close; calibration map is being prepared by user.
+- Map browser is slow, particularly hover over filenames. User requested removing the Browse Game Maps button and making Import BSP open directly in current game's maps folder.
+- User asks whether Blender supports colorful buttons/segments.
+- Quake palette should remain square and scale with sidebar width without text wrapping; user wants it available in a popup at mouse cursor on right-click in Paint Mode.
+
+### Implemented in 0.20.7
+- Removed Browse Game Maps from sidebar. Existing operator remains registered and available through Blender search/F3 for compatibility; no underlying archive browser implementation was deleted.
+- Import BSP's file selector now initializes to <active-game>/maps, falling back to <active-game> if maps directory is missing.
+- Quake palette operator now uses invoke_popup rather than invoke_props_dialog, so the paint-mode context menu action opens a compact popup at the cursor.
+- Kept Blender's native layout.template_palette widget. It calculates swatch columns from available UI width and draws square swatches, so it is the robust option for responsive sidebar resizing. No custom swatch grid or arbitrary button background colors were introduced.
+- ADDON_VERSION and bl_info both bumped to 0.20.7.
+- Implementation commit 7da60b98f1fc2596ae6db60b82131b0f617c97c5; metadata commit ef332c0e071de9d74875a6915e425057fa381be1; display version commit ef50f5f37f07d3a2b1b152a7ad42e17426c09891.
+- QSS Python CI run 631 and converter GUI run 79 pending at time of note.
+
+### Blender UI color limitations
+- Blender's ordinary UILayout.operator controls do not expose arbitrary per-button background colors. UI colors come from the user's Blender theme. Buttons can still use icons, depressed/active state, enabled state, alert state, and layout grouping. Custom icons can be supplied via preview collections but do not recolor the button background.
+- Avoid theme hacks or global theme changes for Slipgate-specific coloring. Use semantic visual states and consistent icons; keep palette colors in actual palette swatches.
+
+### Remaining Blender 5.2 verification
+- Verify Import BSP opens in active game's maps directory and falls back gracefully if missing.
+- Verify Browse Game Maps button is gone but F3 operator remains usable if needed.
+- Verify paint-mode right-click opens palette popup at cursor and selecting a swatch updates brush color.
+- Resize sidebar and verify palette swatches stay square, adapt columns, and labels do not wrap.
+- No Blender GUI test performed during this implementation pass.
 
