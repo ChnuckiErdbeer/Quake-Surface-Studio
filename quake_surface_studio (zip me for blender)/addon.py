@@ -372,6 +372,11 @@ def _qss_activate_map_collection(scene, name, context=None):
 
     if map_object is not None and context is not None:
         try:
+            if str(getattr(scene, "qss_paint_color_picker", "STANDARD")) == "QUAKE":
+                _qss_assign_quake_palette(context, map_object)
+        except Exception as exc:
+            print(f"QSS: could not update the brush palette for {map_object.name}: {exc}")
+        try:
             settings = _qss_config_settings()
             if str(settings.get("lighting_mode_storage", "PER_MAP")).upper() == "GLOBAL":
                 preview_mode = str(settings.get("global_lighting_mode", "source"))
@@ -9331,6 +9336,26 @@ class QSS_OT_convert_quake_palette(Operator):
                 pass
 
 
+class QSS_OT_viewport_material_preview(Operator):
+    bl_idname = "qss.viewport_material_preview"
+    bl_label = "Use Material Preview"
+    bl_description = "Show QSS materials and lightmaps in the active 3D View"
+
+    @classmethod
+    def poll(cls, context):
+        return bool(context.area and context.area.type == "VIEW_3D")
+
+    def execute(self, context):
+        try:
+            context.area.spaces.active.shading.type = "MATERIAL"
+            context.area.tag_redraw()
+            self.report({"INFO"}, "Viewport Material Preview enabled.")
+            return {"FINISHED"}
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not enable Material Preview: {exc}")
+            return {"CANCELLED"}
+
+
 class QSS_PT_main(Panel):
     bl_label = "Quake Surface Studio"
     bl_idname = "QSS_PT_main"
@@ -9348,6 +9373,17 @@ class QSS_PT_main(Panel):
         obj = context.object
         if _qss_is_map_object(obj):
             layout.label(text=f"Active map: {os.path.basename(obj.get('qss_source_path', obj.name))}", icon="FILE_3D")
+            try:
+                if context.area.spaces.active.shading.type == "SOLID":
+                    hint = layout.row(align=True)
+                    hint.label(text="Solid shading bypasses QSS material/lightmap preview.", icon="INFO")
+                    hint.operator(
+                        QSS_OT_viewport_material_preview.bl_idname,
+                        text="Material Preview",
+                        icon="SHADING_TEXTURE",
+                    )
+            except Exception:
+                pass
         else:
             layout.label(text="Select or import a Quake BSP to begin.", icon="INFO")
 
@@ -9675,6 +9711,77 @@ class QSS_PT_lighting(Panel):
             layout.label(text=f"Last bake mean: {float(obj.get('qss_last_bake_luxel_mean', 0.0)):.4g}", icon="IMAGE")
 
 
+class QSS_PT_palette_converter(Panel):
+    bl_label = "QUAKE PALETTE"
+    bl_idname = "QSS_PT_palette_converter"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Quake"
+    bl_parent_id = "QSS_PT_main"
+    bl_order = 35
+    bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context):
+        return _qss_is_map_object(context.object)
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        image_paint = scene.tool_settings.image_paint
+        picker = str(getattr(scene, "qss_paint_color_picker", "STANDARD"))
+        row = layout.row(align=True)
+        row.prop(scene, "qss_paint_color_picker", expand=True)
+
+        if _qss_is_texture_paint_context(context):
+            brush = image_paint.brush
+            if picker == "QUAKE":
+                palette = image_paint.palette
+                if palette is None or not bool(palette.get("qss_quake_palette", False)):
+                    layout.operator(
+                        QSS_OT_load_quake_palette.bl_idname,
+                        text="Load Active Map Palette",
+                        icon="COLOR",
+                    )
+                else:
+                    layout.template_palette(image_paint, "palette", color=True)
+                    layout.label(text="256 Quake entries · 0–223 normal · 224–254 fullbright · 255 transparent")
+            elif brush is not None:
+                layout.template_color_picker(brush, "color", value_slider=True)
+                color_row = layout.row(align=True)
+                color_row.prop(brush, "color", text="Primary")
+                color_row.prop(brush, "secondary_color", text="Secondary")
+        else:
+            layout.label(
+                text="Enter Texture Paint to choose the brush color.",
+                icon="BRUSH_DATA",
+            )
+
+        layout.separator()
+        converter = layout.box()
+        converter.label(text="IMAGE / RENDER CONVERSION", icon="IMAGE")
+        source = _qss_converter_source_image(context)
+        if source is None:
+            converter.label(text="Select an image, enter Texture Paint, or render the scene.")
+        else:
+            converter.label(text=f"Source: {source.name}")
+            converter.operator(
+                QSS_OT_convert_quake_palette.bl_idname,
+                text="Convert to Quake Palette…",
+                icon="IMAGE_DATA",
+            )
+        converter.operator(
+            QSS_OT_check_quake_converter.bl_idname,
+            text="Check Converter Python",
+            icon="CHECKMARK",
+        )
+        python_path = _qss_converter_python_path()
+        converter.label(
+            text=f"Python: {os.path.basename(python_path) if python_path else 'not configured'}",
+            icon="CONSOLE",
+        )
+
+
 class QSS_PT_stats(Panel):
     bl_label = "STATS"
     bl_idname = "QSS_PT_stats"
@@ -9712,6 +9819,18 @@ class QSS_PT_stats(Panel):
         geometry.label(text=f"Source BSP faces: {obj.get('qss_total_bsp_faces', len(mesh.polygons))}")
         geometry.label(text=f"Imported mesh: {len(mesh.polygons)} polygons · {len(mesh.vertices)} vertices")
         geometry.label(text=f"Materials: {len(mesh.materials)}")
+        selected_paint_faces = _qss_selected_paint_face_count(context, obj)
+        if selected_paint_faces:
+            estimate = _qss_estimate_texture_paint_memory(context, obj)
+            geometry.label(
+                text=f"Paint prep: {selected_paint_faces} faces · "
+                     f"~{palette_utils.format_mib(estimate['peak_pixel_bytes'])} peak image buffers"
+            )
+            available_memory = _qss_available_memory_bytes()
+            if available_memory:
+                geometry.label(
+                    text=f"Available system/cgroup memory: {palette_utils.format_mib(available_memory)}"
+                )
         entities = layout.box()
         entities.label(text="ENTITIES", icon="EMPTY_AXIS")
         entities.label(text=f"Entities: {obj.get('qss_entity_count', len(entity_objects))}")
@@ -9750,6 +9869,8 @@ CLASSES = (
     QSS_OT_confirm_import, QSS_OT_import_bsp, QSS_OT_browse_game_maps, QSS_OT_validate_bsp_export,
     QSS_OT_scan_game_maps, QSS_OT_run_python_tests, QSS_OT_run_map_audit,
     QSS_OT_launch_ironwail, QSS_OT_open_last_export, QSS_OT_test_in_ironwail, QSS_OT_open_config_text,
+    QSS_OT_close_active_map, QSS_OT_load_quake_palette, QSS_OT_check_quake_converter,
+    QSS_OT_convert_quake_palette, QSS_OT_viewport_material_preview,
     QSS_OT_settings, QSS_OT_change_lightmap_resolution, QSS_OT_set_lighting_mode,
     QSS_OT_toggle_textures, QSS_OT_toggle_source_lightmaps,
     QSS_OT_toggle_painted_textures, QSS_OT_toggle_painted_lightmaps,
@@ -9763,7 +9884,7 @@ CLASSES = (
     QSS_OT_restore_original_lightmap, QSS_OT_refresh_lightmap_preview,
     QSS_OT_apply_light_energy_scale, QSS_OT_calibrate_lights_to_source,
     QSS_OT_write_diagnostics, QSS_OT_run_blender_selftest, QSS_OT_export_bsp,
-    QSS_PT_main, QSS_PT_navigation, QSS_PT_project, QSS_PT_lighting, QSS_PT_stats,
+    QSS_PT_main, QSS_PT_navigation, QSS_PT_project, QSS_PT_lighting, QSS_PT_palette_converter, QSS_PT_stats,
 )
 
 def _remove_qss_keymaps():
@@ -9809,7 +9930,7 @@ def _remove_scene_properties():
         'qss_nav_fast_factor', 'qss_light_energy_scale',
         'qss_import_lightmap_resolution', 'qss_decoupled_world_units_per_luxel',
         'qss_bake_output_scale', 'qss_bake_bounces', 'qss_bake_match_source', 'qss_mmb_fps_walk',
-        'qss_quake_bake_shadows', 'qss_quake_bake_gate',
+        'qss_quake_bake_shadows', 'qss_quake_bake_gate', 'qss_paint_color_picker',
     ):
         if hasattr(bpy.types.Scene, name):
             try:
@@ -9936,6 +10057,16 @@ def register():
             description="Choose the active imported BSP map; other scene objects are hidden",
             items=_qss_map_collection_items,
             update=_qss_on_active_map_changed,
+        )
+        bpy.types.Scene.qss_paint_color_picker = EnumProperty(
+            name="Brush color source",
+            description="Choose Blender's normal color picker or the active map's 256-entry Quake palette",
+            items=(
+                ("STANDARD", "Standard", "Use Blender's normal brush color picker"),
+                ("QUAKE", "Quake", "Pick directly from the active map's 256-color Quake palette"),
+            ),
+            default="STANDARD",
+            update=_qss_on_paint_color_picker_changed,
         )
         bpy.types.Scene.qss_ericw_tools_dir = StringProperty(
             name="ericw-tools folder", description="Folder containing qbsp, vis, light and bspinfo",
