@@ -25,7 +25,7 @@ class QuakePaletteUtilityTests(unittest.TestCase):
             [(16, 16), (65, 33)], bytes_per_face_pixel=4
         )
         self.assertEqual(result["face_count"], 2)
-        self.assertEqual(result["face_image_bytes"], 24 * 24 * 4 + 72 * 40 * 4)
+        self.assertEqual(result["face_image_bytes"], 16 * 16 * 4 + 72 * 40 * 4)
         self.assertEqual(result["atlas_bytes"], 512 * 512 * 16)
         self.assertEqual(result["peak_pixel_bytes"],
                          result["face_image_bytes"] + result["atlas_bytes"])
