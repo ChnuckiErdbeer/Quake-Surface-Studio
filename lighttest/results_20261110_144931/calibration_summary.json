@@ -1,0 +1,496 @@
+{
+  "source_map": "/mnt/DE7465887465646D/##PROJEKTE/SLOPGATE!/Quake-Surface-Studio/lighttest/lighttest01-compile.map",
+  "source_sha256": "2755b1a58fb95432c84ef3bdad3f272efd6c4e36d642849746f0efb1b1d3d030",
+  "tools_dir": "/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-alpha11-Linux",
+  "lights": [
+    {
+      "id": "d3_50",
+      "classname": "light",
+      "origin": [
+        640.0,
+        -640.0,
+        152.0
+      ],
+      "delay": 3,
+      "light": 50.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "d3_50",
+      "anglescale": "(default 0.5)",
+      "start": 880,
+      "end": 888
+    },
+    {
+      "id": "d3_300",
+      "classname": "light",
+      "origin": [
+        1920.0,
+        -640.0,
+        152.0
+      ],
+      "delay": 3,
+      "light": 300.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "d3_300",
+      "anglescale": "(default 0.5)",
+      "start": 890,
+      "end": 898
+    },
+    {
+      "id": "d3_900",
+      "classname": "light",
+      "origin": [
+        3200.0,
+        -640.0,
+        152.0
+      ],
+      "delay": 3,
+      "light": 900.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "d3_900",
+      "anglescale": "(default 0.5)",
+      "start": 900,
+      "end": 908
+    },
+    {
+      "id": "d4_50",
+      "classname": "light",
+      "origin": [
+        640.0,
+        -1920.0,
+        152.0
+      ],
+      "delay": 4,
+      "light": 50.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "d4_50",
+      "anglescale": "(default 0.5)",
+      "start": 910,
+      "end": 918
+    },
+    {
+      "id": "d4_300",
+      "classname": "light",
+      "origin": [
+        1920.0,
+        -1920.0,
+        152.0
+      ],
+      "delay": 4,
+      "light": 300.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "d4_300",
+      "anglescale": "(default 0.5)",
+      "start": 920,
+      "end": 928
+    },
+    {
+      "id": "d4_900",
+      "classname": "light",
+      "origin": [
+        3200.0,
+        -1920.0,
+        152.0
+      ],
+      "delay": 4,
+      "light": 900.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "d4_900",
+      "anglescale": "(default 0.5)",
+      "start": 930,
+      "end": 938
+    },
+    {
+      "id": "d2_50",
+      "classname": "light",
+      "origin": [
+        640.0,
+        640.0,
+        152.0
+      ],
+      "delay": 2,
+      "light": 50.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "d2_50",
+      "anglescale": "(default 0.5)",
+      "start": 940,
+      "end": 948
+    },
+    {
+      "id": "d2_300",
+      "classname": "light",
+      "origin": [
+        1920.0,
+        640.0,
+        152.0
+      ],
+      "delay": 2,
+      "light": 300.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "d2_300",
+      "anglescale": "(default 0.5)",
+      "start": 950,
+      "end": 958
+    },
+    {
+      "id": "d2_900",
+      "classname": "light",
+      "origin": [
+        3200.0,
+        640.0,
+        152.0
+      ],
+      "delay": 2,
+      "light": 900.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "d2_900",
+      "anglescale": "(default 0.5)",
+      "start": 960,
+      "end": 968
+    },
+    {
+      "id": "d1_50",
+      "classname": "light",
+      "origin": [
+        640.0,
+        1920.0,
+        152.0
+      ],
+      "delay": 1,
+      "light": 50.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "d1_50",
+      "anglescale": "(default 0.5)",
+      "start": 970,
+      "end": 978
+    },
+    {
+      "id": "d1_300",
+      "classname": "light",
+      "origin": [
+        1920.0,
+        1920.0,
+        152.0
+      ],
+      "delay": 1,
+      "light": 300.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "d1_300",
+      "anglescale": "(default 0.5)",
+      "start": 980,
+      "end": 988
+    },
+    {
+      "id": "d1_900",
+      "classname": "light",
+      "origin": [
+        3200.0,
+        1920.0,
+        152.0
+      ],
+      "delay": 1,
+      "light": 900.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "d1_900",
+      "anglescale": "(default 0.5)",
+      "start": 990,
+      "end": 998
+    },
+    {
+      "id": "d5_50",
+      "classname": "light",
+      "origin": [
+        640.0,
+        -3200.0,
+        152.0
+      ],
+      "delay": 5,
+      "light": 50.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "",
+      "anglescale": "(default 0.5)",
+      "start": 1000,
+      "end": 1007
+    },
+    {
+      "id": "d5_300",
+      "classname": "light",
+      "origin": [
+        1920.0,
+        -3200.0,
+        152.0
+      ],
+      "delay": 5,
+      "light": 300.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "",
+      "anglescale": "(default 0.5)",
+      "start": 1009,
+      "end": 1016
+    },
+    {
+      "id": "d5_900",
+      "classname": "light",
+      "origin": [
+        3200.0,
+        -3200.0,
+        152.0
+      ],
+      "delay": 5,
+      "light": 900.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "",
+      "anglescale": "(default 0.5)",
+      "start": 1018,
+      "end": 1025
+    },
+    {
+      "id": "d0_50",
+      "classname": "light",
+      "origin": [
+        640.0,
+        3200.0,
+        152.0
+      ],
+      "delay": 0,
+      "light": 50.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "d0_50",
+      "anglescale": "(default 0.5)",
+      "start": 1027,
+      "end": 1035
+    },
+    {
+      "id": "d0_300",
+      "classname": "light",
+      "origin": [
+        1920.0,
+        3200.0,
+        152.0
+      ],
+      "delay": 0,
+      "light": 300.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "d0_300",
+      "anglescale": "(default 0.5)",
+      "start": 1037,
+      "end": 1045
+    },
+    {
+      "id": "d0_900",
+      "classname": "light",
+      "origin": [
+        3200.0,
+        3200.0,
+        152.0
+      ],
+      "delay": 0,
+      "light": 900.0,
+      "wait": 1.0,
+      "color": [
+        255.0,
+        255.0,
+        255.0
+      ],
+      "targetname": "d0_900",
+      "anglescale": "(default 0.5)",
+      "start": 1047,
+      "end": 1055
+    }
+  ],
+  "warnings": [
+    "15 lights have targetname. ericw-tools interprets this as a switchable-light key, not a label. The compile copy will replace it with _qss_test_id."
+  ],
+  "variants": [
+    {
+      "variant": "attenuation_only",
+      "map": "/mnt/DE7465887465646D/##PROJEKTE/SLOPGATE!/Quake-Surface-Studio/lighttest/results_20261110_144931/attenuation_only/lighttest01_attenuation_only.map",
+      "bsp": "/mnt/DE7465887465646D/##PROJEKTE/SLOPGATE!/Quake-Surface-Studio/lighttest/results_20261110_144931/attenuation_only/lighttest01_attenuation_only.bsp",
+      "anglescale": 0.0,
+      "removed_switchable_targetnames": 15,
+      "switchable_light_styles": 0,
+      "compile_commands": {
+        "qbsp": [
+          "/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-alpha11-Linux/qbsp",
+          "-splitturb",
+          "lighttest01_attenuation_only.map"
+        ],
+        "vis": [
+          "/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-alpha11-Linux/vis",
+          "lighttest01_attenuation_only"
+        ],
+        "light": [
+          "/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-alpha11-Linux/light",
+          "-verbose",
+          "-nocolor",
+          "-bounce",
+          "0",
+          "-dirt",
+          "-1",
+          "lighttest01_attenuation_only"
+        ]
+      },
+      "sample_results": {
+        "samples_written": 594,
+        "missing_samples": 594,
+        "csv": "/mnt/DE7465887465646D/##PROJEKTE/SLOPGATE!/Quake-Surface-Studio/lighttest/results_20261110_144931/attenuation_only/luxel_samples.csv"
+      },
+      "notes": [
+        "Source MAP/BSP files were not modified.",
+        "targetname was replaced with inert _qss_test_id because targetname makes ericw-tools lights switchable.",
+        "Bounce and dirtmapping were disabled to isolate direct light attenuation.",
+        "extra4, soft, phong and surface-light options from the original production compile were omitted."
+      ],
+      "qbsp_log": "/mnt/DE7465887465646D/##PROJEKTE/SLOPGATE!/Quake-Surface-Studio/lighttest/results_20261110_144931/attenuation_only/qbsp.stdout.txt",
+      "vis_log": "/mnt/DE7465887465646D/##PROJEKTE/SLOPGATE!/Quake-Surface-Studio/lighttest/results_20261110_144931/attenuation_only/vis.stdout.txt",
+      "light_log": "/mnt/DE7465887465646D/##PROJEKTE/SLOPGATE!/Quake-Surface-Studio/lighttest/results_20261110_144931/attenuation_only/lighttest01_attenuation_only-light.log",
+      "qbsp_stdout_tail": [
+        "   9902 edges             39608",
+        "  19802 surfedges         79208",
+        "      3 textures          16456",
+        "        lightdata             0",
+        "        visdata               0",
+        "        entdata            2952",
+        "",
+        "0.111s seconds elapsed"
+      ]
+    },
+    {
+      "variant": "angle_default",
+      "map": "/mnt/DE7465887465646D/##PROJEKTE/SLOPGATE!/Quake-Surface-Studio/lighttest/results_20261110_144931/angle_default/lighttest01_angle_default.map",
+      "bsp": "/mnt/DE7465887465646D/##PROJEKTE/SLOPGATE!/Quake-Surface-Studio/lighttest/results_20261110_144931/angle_default/lighttest01_angle_default.bsp",
+      "anglescale": 0.5,
+      "removed_switchable_targetnames": 15,
+      "switchable_light_styles": 0,
+      "compile_commands": {
+        "qbsp": [
+          "/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-alpha11-Linux/qbsp",
+          "-splitturb",
+          "lighttest01_angle_default.map"
+        ],
+        "vis": [
+          "/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-alpha11-Linux/vis",
+          "lighttest01_angle_default"
+        ],
+        "light": [
+          "/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-alpha11-Linux/light",
+          "-verbose",
+          "-nocolor",
+          "-bounce",
+          "0",
+          "-dirt",
+          "-1",
+          "lighttest01_angle_default"
+        ]
+      },
+      "sample_results": {
+        "samples_written": 594,
+        "missing_samples": 594,
+        "csv": "/mnt/DE7465887465646D/##PROJEKTE/SLOPGATE!/Quake-Surface-Studio/lighttest/results_20261110_144931/angle_default/luxel_samples.csv"
+      },
+      "notes": [
+        "Source MAP/BSP files were not modified.",
+        "targetname was replaced with inert _qss_test_id because targetname makes ericw-tools lights switchable.",
+        "Bounce and dirtmapping were disabled to isolate direct light attenuation.",
+        "extra4, soft, phong and surface-light options from the original production compile were omitted."
+      ],
+      "qbsp_log": "/mnt/DE7465887465646D/##PROJEKTE/SLOPGATE!/Quake-Surface-Studio/lighttest/results_20261110_144931/angle_default/qbsp.stdout.txt",
+      "vis_log": "/mnt/DE7465887465646D/##PROJEKTE/SLOPGATE!/Quake-Surface-Studio/lighttest/results_20261110_144931/angle_default/vis.stdout.txt",
+      "light_log": "/mnt/DE7465887465646D/##PROJEKTE/SLOPGATE!/Quake-Surface-Studio/lighttest/results_20261110_144931/angle_default/lighttest01_angle_default-light.log",
+      "qbsp_stdout_tail": [
+        "   9902 edges             39608",
+        "  19802 surfedges         79208",
+        "      3 textures          16456",
+        "        lightdata             0",
+        "        visdata               0",
+        "        entdata            2988",
+        "",
+        "0.115s seconds elapsed"
+      ]
+    }
+  ]
+}

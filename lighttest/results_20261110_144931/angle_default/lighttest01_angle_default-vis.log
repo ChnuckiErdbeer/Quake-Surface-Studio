@@ -1,0 +1,22 @@
+---- vis / ericw-tools 2.0.0-alpha11 ----
+
+--- Options Summary ---
+
+LoadBSPFile: 'lighttest01_angle_default.bsp'
+BSP is version Quake BSP bsp29
+INFO: using built-in palette.
+Loading extended texinfo flags from lighttest01_angle_default.texinfo.json...
+    28 leafs
+    28 clusters
+    55 portals
+Calculating Base Vis:
+Calculating Full Vis:
+Expanding clusters...
+average leafs visible: 10
+c_noclip: 0
+c_chains: 694
+visdatasize:121  compressed from 112
+Writing lighttest01_angle_default.bsp as Quake BSP bsp29
+0.22s elapsed
+
+
