@@ -1,4 +1,13 @@
-# Quake Surface Studio 0.18.3
+# Quake Surface Studio 0.18.4
+
+## 0.18.4 — Safer painting, aligned layers and smoother camera travel
+
+- **Focus on Face** flips the selected face normal toward the side occupied by the current view, avoiding a focus move through a wall to the back side. Framing adds more breathing room around the projected face bounds.
+- **Player Start** uses the shared 0.5-second eased camera-transition operator. The same operator is available to future QSS camera-positioning actions.
+- The **Painted / Source** matrix uses fixed, matching column widths. Source-layer controls work in Object Mode and Edit Mode; Painted Textures safely commits to Object Mode for its face-material/UV update and then restores Edit Mode.
+- Entering Texture Paint or Lightmap Paint is stopped with a warning when more than **64 faces** are selected. Split large selections into smaller batches to avoid Blender memory spikes or crashes.
+- Adds **Test in Ironwail**, available without a previous export. It writes a temporary Classic/Enhanced BSP copy under `maps/qss_preview`, launches Ironwail, and removes the BSP and optional .lit sidecar when the launched process exits. **Last Export** remains available separately.
+- The temporary test uses the regular BSP assembly/export path at click time; geometry, material state and atlases remain in memory until that operation. Export is not a preassembled BSP snapshot.
 
 ## 0.18.3 — Face paint correction and smoother focus
 
