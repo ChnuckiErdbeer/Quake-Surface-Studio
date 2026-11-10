@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils
 
 
-ADDON_VERSION = (0, 18, 1)
+ADDON_VERSION = (0, 18, 2)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -33,6 +33,7 @@ DEFAULT_QUAKE_UNIT_SCALE = 0.0254
 
 # Track keymap items created by this add-on. This must exist before register().
 _addon_keymaps = []
+_qss_focus_clip_sessions = {}
 
 
 def _report(op, level, message):
@@ -153,6 +154,8 @@ def _qss_make_map_collection(context, obj, source_path):
     obj["qss_map_collection"] = collection.name
     obj["qss_painted_textures_enabled"] = True
     obj["qss_painted_lightmaps_enabled"] = True
+    obj["qss_base_textures_enabled"] = True
+    obj["qss_source_lightmaps_enabled"] = True
     obj["qss_preview_mode"] = "source"
     return collection
 
@@ -180,6 +183,10 @@ def _qss_migrate_legacy_map_collections(scene):
             obj["qss_painted_textures_enabled"] = True
         if "qss_painted_lightmaps_enabled" not in obj:
             obj["qss_painted_lightmaps_enabled"] = True
+        if "qss_base_textures_enabled" not in obj:
+            obj["qss_base_textures_enabled"] = True
+        if "qss_source_lightmaps_enabled" not in obj:
+            obj["qss_source_lightmaps_enabled"] = True
         entity_name = obj.get("qss_light_collection", "")
         entity_collection = bpy.data.collections.get(entity_name) if entity_name else None
         if entity_collection is not None and entity_collection != root:
@@ -757,6 +764,13 @@ def _next_pow2_clamped(value, minimum=16, maximum=512):
     return max(minimum, min(maximum, dimension))
 
 
+def _next_quake_texture_dimension(value, maximum=512):
+    """Round a face-local texture dimension up to a Quake-valid multiple of 8."""
+    value = max(8, int(math.ceil(float(value))))
+    dimension = int(math.ceil(value / 8.0)) * 8
+    return max(8, min(int(maximum), dimension))
+
+
 def _bake_face_local_texture(source_image, uv_layer, poly, image_name):
     """Bake the repeated Quake texture under one BSP face into a 0..1 image.
 
@@ -809,8 +823,12 @@ def _bake_face_local_texture(source_image, uv_layer, poly, image_name):
     span_s = max(max_s - min_s, 1.0)
     span_t = max(max_t - min_t, 1.0)
 
-    width_out = _next_pow2_clamped(span_s)
-    height_out = _next_pow2_clamped(span_t)
+    # Quake miptex width/height are required to be multiples of eight; they
+    # are not required to be powers of two. Rounding to the nearest valid
+    # footprint reduces needless resampling and keeps texel density closer
+    # to the original texinfo projection.
+    width_out = _next_quake_texture_dimension(span_s)
+    height_out = _next_quake_texture_dimension(span_t)
     source_pixels = array.array('f', [0.0]) * (width_src * height_src * 4)
     source_image.update()
     source_image.pixels.foreach_get(source_pixels)
@@ -1289,6 +1307,40 @@ def _qss_apply_base_texture_visibility(obj):
     return changed
 
 
+def _qss_apply_source_lightmap_visibility(obj):
+    """Show or suppress the active unpainted/painted lightmap contribution."""
+    enabled = bool(obj.get("qss_source_lightmaps_enabled", True))
+    mode = str(obj.get("qss_preview_mode", "source"))
+    if mode not in {"source", "baked"}:
+        return 0
+    changed = 0
+    for mat in getattr(getattr(obj, "data", None), "materials", ()):
+        if mat is None or not mat.use_nodes or mat.node_tree is None:
+            continue
+        nodes, links = mat.node_tree.nodes, mat.node_tree.links
+        multiply = next((node for node in nodes
+                         if node.type == "MIX_RGB" and node.get("qss_role") == "lightmap_multiply"), None)
+        lightmap = _find_image_node(mat, "lightmap")
+        if multiply is None:
+            continue
+        socket = multiply.inputs.get("Color2")
+        if socket is None:
+            continue
+        for link in list(links):
+            if link.to_socket == socket:
+                links.remove(link)
+        if enabled and lightmap is not None:
+            links.new(lightmap.outputs["Color"], socket)
+        else:
+            socket.default_value = (1.0, 1.0, 1.0, 1.0)
+        changed += 1
+        try:
+            mat.update_tag()
+        except Exception:
+            pass
+    return changed
+
+
 def _set_lighting_preview(context, obj, mode):
     """Set a map-local lighting preset while keeping source and painted images separate."""
     if mode not in {"source", "realtime", "cycles", "baked"}:
@@ -1330,6 +1382,7 @@ def _set_lighting_preview(context, obj, mode):
 
     obj["qss_preview_mode"] = mode
     _qss_apply_base_texture_visibility(obj)
+    _qss_apply_source_lightmap_visibility(obj)
     _set_viewport_lighting_mode(context, mode)
 
 
@@ -2821,6 +2874,29 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
     return light_count, spawn is not None
 
 
+def _qss_enter_face_edit_mode(context, obj):
+    """Finish BSP import in Edit Mode with face selection active."""
+    if not _qss_is_map_object(obj):
+        return False
+    try:
+        if getattr(obj, "mode", "OBJECT") != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+        for selected in list(context.selected_objects):
+            selected.select_set(False)
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+        context.scene.tool_settings.mesh_select_mode = (False, False, True)
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            bpy.ops.mesh.select_mode(type="FACE")
+        except Exception:
+            context.scene.tool_settings.mesh_select_mode = (False, False, True)
+        return True
+    except Exception as exc:
+        print(f"QSS: imported BSP but could not enter face-select Edit Mode: {exc}")
+        return False
+
+
 def _frame_player_start(context, obj):
     """Place a 3D View camera at info_player_start and face its Quake yaw."""
     if not obj or not obj.get('qss_has_player_start'):
@@ -3560,6 +3636,7 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
                 print(f"QSS: imported map but could not set Original preview: {preview_exc}")
             _apply_map_view_clipping(context, obj)
             _frame_player_start(context, obj)
+            _qss_enter_face_edit_mode(context, obj)
             if policy == "REPLACE" and old_active_name and old_active_name != obj.get("qss_map_collection", ""):
                 _qss_remove_map_collection(context.scene, old_active_name)
             lit_source = obj.get('qss_source_lighting_source', 'Monochrome BSP lighting')
@@ -6745,236 +6822,333 @@ class QSS_OT_apply_light_energy_scale(Operator):
         return {'FINISHED'}
 
 
+def _qss_restore_focus_clip_session(area=None):
+    """Restore and stop a temporary face-focus clipping session for one 3D View."""
+    global _qss_focus_clip_sessions
+    keys = []
+    if area is not None:
+        try:
+            keys = [area.as_pointer()]
+        except Exception:
+            keys = []
+    else:
+        keys = list(_qss_focus_clip_sessions)
+    for key in keys:
+        session = _qss_focus_clip_sessions.get(key)
+        if session is not None:
+            try:
+                session._finish_restore()
+            except Exception as exc:
+                print(f"QSS: could not restore temporary focus clipping: {exc}")
+            _qss_focus_clip_sessions.pop(key, None)
+
+
+def _qss_selected_face_for_focus(context, obj):
+    """Return a selected face's centre, normal, world vertices and stable label."""
+    import bmesh
+    from mathutils import Vector
+
+    if context.mode == "EDIT_MESH":
+        bm = bmesh.from_edit_mesh(obj.data)
+        bm.faces.ensure_lookup_table()
+        selected = [face for face in bm.faces if face.select and not face.hide]
+        if not selected:
+            raise bsp.BSPError("Select a visible face before using Focus.")
+        active = bm.faces.active
+        face = active if active is not None and active.select and not active.hide else selected[-1]
+        center_local = face.calc_center_median()
+        normal_local = face.normal.copy()
+        points_local = [vertex.co.copy() for vertex in face.verts]
+        label = f"face {face.index}"
+    elif _qss_is_texture_paint_context(context):
+        selected = [poly for poly in obj.data.polygons if poly.select]
+        if not selected:
+            raise bsp.BSPError("No faces are selected in the Texture Paint face mask.")
+        face = max(selected, key=lambda poly: (float(poly.area), -int(poly.index)))
+        center_local = face.center.copy()
+        normal_local = face.normal.copy()
+        points_local = [obj.data.vertices[index].co.copy() for index in face.vertices]
+        label = f"face {face.index}"
+    else:
+        raise bsp.BSPError("Focus requires a selected face in Edit Mode or Texture Paint face-mask mode.")
+
+    world_matrix = obj.matrix_world
+    normal_matrix = world_matrix.to_3x3().inverted_safe().transposed()
+    center_world = world_matrix @ Vector(center_local)
+    normal_world = (normal_matrix @ Vector(normal_local)).normalized()
+    if normal_world.length <= 1e-8:
+        raise bsp.BSPError("The selected face has an invalid surface normal.")
+    points_world = [world_matrix @ Vector(point) for point in points_local]
+    radius = max((point - center_world).length for point in points_world) if points_world else 0.0
+    return center_world, normal_world, points_world, max(radius, 1e-4), label
+
+
+class QSS_OT_focus_clip_watch(Operator):
+    bl_idname = "qss.focus_clip_watch"
+    bl_label = "Restore Face Focus Clipping"
+    bl_description = "Restore the normal viewport clipping range when painting ends or the view moves"
+    clip_start: FloatProperty(default=0.1, min=0.0001)
+    clip_end: FloatProperty(default=1000.0, min=0.01)
+
+    def invoke(self, context, event):
+        area = context.area if context.area and context.area.type == "VIEW_3D" else None
+        if area is None:
+            self.report({"WARNING"}, "Temporary face clipping needs a 3D View.")
+            return {"CANCELLED"}
+        space = area.spaces.active
+        if space is None or space.type != "VIEW_3D" or space.region_3d is None:
+            return {"CANCELLED"}
+        _qss_restore_focus_clip_session(area)
+        self._area = area
+        self._space = space
+        self._object = context.object
+        self._window_manager = context.window_manager
+        self._original_clip_start = float(self.clip_start)
+        self._original_clip_end = float(self.clip_end)
+        region = space.region_3d
+        self._view_location = region.view_location.copy()
+        self._view_rotation = region.view_rotation.copy()
+        self._view_distance = float(region.view_distance)
+        self._finished = False
+        try:
+            self._timer = self._window_manager.event_timer_add(0.12, window=context.window)
+            self._window_manager.modal_handler_add(self)
+        except Exception as exc:
+            self._finish_restore()
+            self.report({"WARNING"}, f"Could not monitor face-focus clipping: {exc}")
+            return {"CANCELLED"}
+        _qss_focus_clip_sessions[area.as_pointer()] = self
+        return {"RUNNING_MODAL"}
+
+    def _view_was_moved(self):
+        try:
+            region = self._space.region_3d
+            if (region.view_location - self._view_location).length > 1e-4:
+                return True
+            if region.view_rotation.rotation_difference(self._view_rotation).angle > 1e-4:
+                return True
+            return abs(float(region.view_distance) - self._view_distance) > max(1e-4, self._view_distance * 1e-5)
+        except Exception:
+            return True
+
+    def _finish_restore(self):
+        if getattr(self, "_finished", False):
+            return
+        self._finished = True
+        try:
+            self._space.clip_start = self._original_clip_start
+            self._space.clip_end = self._original_clip_end
+            self._area.tag_redraw()
+        except Exception:
+            pass
+        timer = getattr(self, "_timer", None)
+        if timer is not None:
+            try:
+                self._window_manager.event_timer_remove(timer)
+            except Exception:
+                pass
+            self._timer = None
+        try:
+            key = self._area.as_pointer()
+            if _qss_focus_clip_sessions.get(key) is self:
+                _qss_focus_clip_sessions.pop(key, None)
+        except Exception:
+            pass
+
+    def modal(self, context, event):
+        if self._finished:
+            return {"FINISHED"}
+        if event.type == "TIMER":
+            if not _qss_is_texture_paint_context(context) or context.object != self._object:
+                self._finish_restore()
+                return {"FINISHED"}
+            if self._view_was_moved():
+                self._finish_restore()
+                return {"FINISHED"}
+        return {"PASS_THROUGH"}
+
+    def cancel(self, context):
+        self._finish_restore()
+
+
 class QSS_OT_frame_selection(Operator):
     bl_idname = "qss.frame_selection"
-    bl_label = "Focus Selected Face(s)"
-    bl_description = "Frame the selected BSP faces precisely in the active 3D View"
+    bl_label = "Focus on Face"
+    bl_description = "Aim the viewport along the selected face normal and frame it closely"
 
     @classmethod
     def poll(cls, context):
         obj = context.object
         return bool(
-            obj and obj.type == 'MESH'
-            and obj.get('qss_object_role') == 'quake_bsp29'
-            and context.mode in {'OBJECT', 'EDIT_MESH'}
+            _qss_is_map_object(obj)
+            and (context.mode == "EDIT_MESH" or _qss_is_texture_paint_context(context))
         )
 
     def execute(self, context):
-        import bmesh
         from mathutils import Vector
 
         obj = context.object
-        area = context.area if context.area and context.area.type == 'VIEW_3D' else None
+        area = context.area if context.area and context.area.type == "VIEW_3D" else None
         if area is None:
             area = next(
                 (item for item in (context.screen.areas if context.screen else [])
-                 if item.type == 'VIEW_3D'),
+                 if item.type == "VIEW_3D"),
                 None,
             )
         if area is None:
-            _report(self, 'WARNING', "Focus needs an open 3D View.")
-            return {'CANCELLED'}
-
-        space = area.spaces.active if area.spaces.active and area.spaces.active.type == 'VIEW_3D' else next(
-            (item for item in area.spaces if item.type == 'VIEW_3D'), None
-        )
+            _report(self, "WARNING", "Focus needs an open 3D View.")
+            return {"CANCELLED"}
+        space = area.spaces.active if area.spaces.active and area.spaces.active.type == "VIEW_3D" else None
         if space is None or space.region_3d is None:
-            _report(self, 'WARNING', "The active 3D View has no usable 3D region.")
-            return {'CANCELLED'}
+            _report(self, "WARNING", "The active 3D View has no usable 3D region.")
+            return {"CANCELLED"}
 
         try:
-            if context.mode == 'EDIT_MESH':
-                bm = bmesh.from_edit_mesh(obj.data)
-                bm.faces.ensure_lookup_table()
-                selected_faces = [
-                    face for face in bm.faces
-                    if face.select and not face.hide
-                ]
-                if selected_faces:
-                    local_points = [
-                        vertex.co.copy()
-                        for face in selected_faces
-                        for vertex in face.verts
-                    ]
-                    selection_label = f"{len(selected_faces)} selected face(s)"
-                else:
-                    selected_verts = [
-                        vertex for vertex in bm.verts
-                        if vertex.select and not vertex.hide
-                    ]
-                    if not selected_verts:
-                        _report(
-                            self, 'WARNING',
-                            "Select one or more BSP faces in Edit Mode before focusing.",
-                        )
-                        return {'CANCELLED'}
-                    local_points = [vertex.co.copy() for vertex in selected_verts]
-                    selection_label = f"{len(selected_verts)} selected vertex/vertices"
-                world_points = [obj.matrix_world @ point for point in local_points]
-            else:
-                if not obj.select_get():
-                    _report(self, 'WARNING', "Select the BSP object before focusing it.")
-                    return {'CANCELLED'}
-                world_points = [
-                    obj.matrix_world @ Vector(corner)
-                    for corner in obj.bound_box
-                ]
-                selection_label = "BSP object"
+            _qss_restore_focus_clip_session(area)
+            center, normal, points, radius, label = _qss_selected_face_for_focus(context, obj)
+            unit_scale = max(1e-5, float(obj.get("qss_unit_scale", DEFAULT_QUAKE_UNIT_SCALE)))
+            distance = max(radius * 2.6, unit_scale * 4.0, 0.25)
+            region = space.region_3d
+            if region.view_perspective == "CAMERA":
+                region.view_perspective = "PERSP"
+            region.view_rotation = normal.to_track_quat("Z", "Y")
+            region.view_location = Vector(center)
+            region.view_distance = distance
 
-            bounds = viewport_utils.bounds_from_points(
-                tuple(point) for point in world_points
-            )
-            # A camera view is not navigable by orbit distance/location.
-            # Switch to perspective before assigning the new orbit centre.
-            if space.region_3d.view_perspective == 'CAMERA':
-                space.region_3d.view_perspective = 'PERSP'
-            space.region_3d.view_location = Vector(bounds["center"])
-            space.region_3d.view_distance = viewport_utils.view_distance_from_bounds(
-                bounds, scale=1.5, minimum=max(0.05, float(obj.get("qss_unit_scale", DEFAULT_QUAKE_UNIT_SCALE)) * 2.0)
-            )
+            if _qss_is_texture_paint_context(context):
+                old_clip_start = float(space.clip_start)
+                old_clip_end = float(space.clip_end)
+                near_gap = max(radius * 0.15, unit_scale * 0.25, 0.01)
+                far_gap = max(radius * 1.5, unit_scale * 2.0, 0.1)
+                # The camera sits on the face normal. A tight depth slab keeps
+                # nearer occluders and far-away geometry out while preserving
+                # the complete focused polygon.
+                space.clip_start = max(0.0001, distance - near_gap)
+                space.clip_end = max(space.clip_start * 1.05, distance + far_gap)
+                watch = bpy.ops.qss.focus_clip_watch(
+                    "INVOKE_DEFAULT",
+                    clip_start=old_clip_start,
+                    clip_end=old_clip_end,
+                )
+                if "CANCELLED" in watch:
+                    space.clip_start = old_clip_start
+                    space.clip_end = old_clip_end
             area.tag_redraw()
-            _report(self, 'INFO', f"Focused {selection_label}.")
-            return {'FINISHED'}
+            _report(self, "INFO", f"Focused {label} along its surface normal.")
+            return {"FINISHED"}
         except Exception as exc:
-            _report(self, 'ERROR', f"Could not focus the current BSP selection: {exc}")
-            return {'CANCELLED'}
+            _report(self, "ERROR", f"Could not focus the selected face: {exc}")
+            return {"CANCELLED"}
+
+
+def _qss_toggle_face_isolation_in_edit(obj):
+    """Toggle the saved Edit-Mode face visibility/selection snapshot."""
+    import bmesh
+    mesh = obj.data
+    bm = bmesh.from_edit_mesh(mesh)
+    bm.verts.ensure_lookup_table()
+    bm.edges.ensure_lookup_table()
+    bm.faces.ensure_lookup_table()
+    bm.verts.index_update()
+    bm.edges.index_update()
+    bm.faces.index_update()
+    vertex_count, edge_count, face_count = len(bm.verts), len(bm.edges), len(bm.faces)
+    snapshot_key = "qss_face_visibility_snapshot"
+    payload = obj.get(snapshot_key, "")
+
+    if visibility_utils.snapshot_is_active(payload):
+        hidden_faces, selected_faces = visibility_utils.decode_face_visibility_snapshot(
+            payload, vertex_count, edge_count, face_count
+        )
+        for face in bm.faces:
+            face.hide_set(False)
+        for face_index in sorted(hidden_faces):
+            bm.faces[face_index].hide_set(True)
+        for face in bm.faces:
+            if face.select:
+                face.select_set(False)
+        for face_index in sorted(selected_faces):
+            bm.faces[face_index].select_set(True)
+        bm.select_flush_mode()
+        bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
+        del obj[snapshot_key]
+        return True, "Face visibility and selection restored."
+
+    selected_indices = [face.index for face in bm.faces if face.select and not face.hide]
+    if not selected_indices:
+        return False, "Select one or more visible faces before isolating."
+    hidden_indices = [face.index for face in bm.faces if face.hide]
+    snapshot = visibility_utils.encode_face_visibility_snapshot(
+        vertex_count, edge_count, face_count, hidden_indices, selected_indices
+    )
+    try:
+        selected_set = set(selected_indices)
+        for face in bm.faces:
+            if face.index not in selected_set and not face.hide:
+                face.hide_set(True)
+        bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
+        obj[snapshot_key] = snapshot
+    except Exception:
+        # Best-effort rollback to the exact pre-isolation state.
+        for face in bm.faces:
+            face.hide_set(False)
+        for face_index in hidden_indices:
+            bm.faces[face_index].hide_set(True)
+        for face in bm.faces:
+            if face.select:
+                face.select_set(False)
+        for face_index in selected_indices:
+            bm.faces[face_index].select_set(True)
+        bm.select_flush_mode()
+        bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
+        raise
+    return True, (
+        f"Isolated {len(selected_indices)} selected face(s). "
+        "Click Isolate Selection again to restore the previous visibility."
+    )
 
 
 class QSS_OT_isolate_faces(Operator):
     bl_idname = "qss.isolate_faces"
     bl_label = "Toggle Face Isolation"
-    bl_description = "Hide everything except selected BSP faces; click again to restore the previous visibility and selection"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    _snapshot_key = "qss_face_visibility_snapshot"
+    bl_description = "Hide all other faces; click again to restore the previous visibility and selection"
+    bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
     def poll(cls, context):
-        obj = context.object
         return bool(
-            obj and obj.type == 'MESH'
-            and obj.get('qss_object_role') == 'quake_bsp29'
-            and context.mode == 'EDIT_MESH'
+            _qss_is_map_object(context.object)
+            and (context.mode == "EDIT_MESH" or _qss_is_texture_paint_context(context))
         )
 
     def execute(self, context):
-        import bmesh
-
         obj = context.object
-        mesh = obj.data
-        bm = bmesh.from_edit_mesh(mesh)
-        bm.verts.ensure_lookup_table()
-        bm.edges.ensure_lookup_table()
-        bm.faces.ensure_lookup_table()
-        bm.verts.index_update()
-        bm.edges.index_update()
-        bm.faces.index_update()
-
-        vertex_count = len(bm.verts)
-        edge_count = len(bm.edges)
-        face_count = len(bm.faces)
-        payload = obj.get(self._snapshot_key, "")
-
-        if visibility_utils.snapshot_is_active(payload):
-            try:
-                hidden_faces, selected_faces = visibility_utils.decode_face_visibility_snapshot(
-                    payload, vertex_count, edge_count, face_count
-                )
-            except ValueError as exc:
-                # The stored indices no longer map safely to this mesh. Drop
-                # the stale snapshot so the user can Alt+H and start fresh.
-                try:
-                    del obj[self._snapshot_key]
-                except Exception:
-                    pass
-                _report(
-                    self, 'ERROR',
-                    f"Cannot safely restore the previous isolation: {exc} "
-                    "The stale snapshot was cleared. Use Blender's Reveal Hidden (Alt+H), then isolate again.",
-                )
-                return {'CANCELLED'}
-
-            try:
-                # Reveal the temporary isolation first, then re-apply only the
-                # faces that were hidden before QSS isolation began.
-                for face in bm.faces:
-                    face.hide_set(False)
-                for face_index in sorted(hidden_faces):
-                    bm.faces[face_index].hide_set(True)
-
-                # Restore the exact face selection that was active on entry.
-                for face in bm.faces:
-                    if face.select:
-                        face.select_set(False)
-                for face_index in sorted(selected_faces):
-                    bm.faces[face_index].select_set(True)
-                bm.select_flush_mode()
-                bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
-                del obj[self._snapshot_key]
-            except Exception as exc:
-                _report(self, 'ERROR', f"Could not restore face visibility: {exc}")
-                return {'CANCELLED'}
-
-            _report(self, 'INFO', "Face visibility and selection restored.")
-            return {'FINISHED'}
-
-        selected_indices = [
-            face.index for face in bm.faces
-            if face.select and not face.hide
-        ]
-        if not selected_indices:
-            _report(self, 'WARNING', "Select one or more visible faces before isolating.")
-            return {'CANCELLED'}
-
-        hidden_indices = [
-            face.index for face in bm.faces
-            if face.hide
-        ]
+        was_paint = _qss_is_texture_paint_context(context)
+        paint_kind = str(obj.get("qss_active_paint_kind", "texture")) if was_paint else ""
         try:
-            snapshot = visibility_utils.encode_face_visibility_snapshot(
-                vertex_count,
-                edge_count,
-                face_count,
-                hidden_indices,
-                selected_indices,
-            )
-        except ValueError as exc:
-            _report(self, 'ERROR', str(exc))
-            return {'CANCELLED'}
-
-        try:
-            selected_set = set(selected_indices)
-            for face in bm.faces:
-                if face.index not in selected_set and not face.hide:
-                    face.hide_set(True)
-            bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
-            obj[self._snapshot_key] = snapshot
+            if was_paint:
+                bpy.ops.object.mode_set(mode="OBJECT")
+                bpy.ops.object.mode_set(mode="EDIT")
+            success, message = _qss_toggle_face_isolation_in_edit(obj)
         except Exception as exc:
-            # Best-effort rollback: restore only the visibility and selection
-            # recorded immediately before the isolation attempt.
-            try:
-                for face in bm.faces:
-                    face.hide_set(False)
-                for face_index in hidden_indices:
-                    bm.faces[face_index].hide_set(True)
-                for face in bm.faces:
-                    if face.select:
-                        face.select_set(False)
-                for face_index in selected_indices:
-                    bm.faces[face_index].select_set(True)
-                bm.select_flush_mode()
-                bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
-            except Exception:
-                pass
-            _report(self, 'ERROR', f"Could not isolate selected faces: {exc}")
-            return {'CANCELLED'}
-
-        _report(
-            self, 'INFO',
-            f"Isolated {len(selected_indices)} selected face(s). "
-            "Click Toggle Face Isolation again to restore the previous visibility.",
-        )
-        return {'FINISHED'}
+            success, message = False, f"Could not toggle face isolation: {exc}"
+        finally:
+            if was_paint:
+                try:
+                    if getattr(obj, "mode", "") == "EDIT":
+                        bpy.ops.object.mode_set(mode="OBJECT")
+                    bpy.ops.object.mode_set(mode="TEXTURE_PAINT")
+                    obj["qss_active_paint_kind"] = paint_kind
+                except Exception as restore_exc:
+                    success, message = False, (
+                        f"{message} Texture Paint could not be restored: {restore_exc}. "
+                        "Use Tab to return to Edit Mode and re-enter painting."
+                    )
+        if success:
+            _report(self, "INFO", message)
+            return {"FINISHED"}
+        _report(self, "WARNING" if "Select one or more" in message else "ERROR", message)
+        return {"CANCELLED"}
 
 
 class QSS_OT_reveal_faces(Operator):
@@ -7601,6 +7775,30 @@ class QSS_OT_toggle_textures(Operator):
         return {"FINISHED"}
 
 
+class QSS_OT_toggle_source_lightmaps(Operator):
+    bl_idname = "qss.toggle_source_lightmaps"
+    bl_label = "Toggle Source Lightmaps"
+    bl_description = "Show or hide the current unpainted Original/Baked lightmap contribution"
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        return bool(_qss_is_map_object(obj) and context.mode == "OBJECT"
+                    and obj.get("qss_preview_mode", "source") in {"source", "baked"})
+
+    def execute(self, context):
+        obj = context.object
+        enabled = not bool(obj.get("qss_source_lightmaps_enabled", True))
+        obj["qss_source_lightmaps_enabled"] = enabled
+        changed = _qss_apply_source_lightmap_visibility(obj)
+        if not changed:
+            obj["qss_source_lightmaps_enabled"] = not enabled
+            self.report({"WARNING"}, "No QSS lightmap material nodes were found.")
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Source lightmaps {'enabled' if enabled else 'hidden'}.")
+        return {"FINISHED"}
+
+
 def _qss_rebuild_original_quake_texture_uvs(obj, original_uv, active_uv, original_material, painted_marker):
     """Reconstruct source texinfo UVs from the BSP for detached faces."""
     source_path = bpy.path.abspath(str(obj.get("qss_source_path", "") or ""))
@@ -7947,7 +8145,7 @@ class QSS_PT_main(Panel):
 
 
 class QSS_PT_navigation(Panel):
-    bl_label = "NAVIGATION"
+    bl_label = "QUICK ACTIONS"
     bl_idname = "QSS_PT_navigation"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -7961,11 +8159,18 @@ class QSS_PT_navigation(Panel):
 
     def draw(self, context):
         obj = context.object
-        layout = self.layout
-        layout.operator(QSS_OT_fps_walk.bl_idname, text="WASD Mode", icon="VIEW_PAN")
-        row = layout.row()
-        row.enabled = bool(obj.get("qss_has_player_start"))
-        row.operator(QSS_OT_player_start.bl_idname, text="Move to Player Start", icon="EMPTY_AXIS")
+        row = self.layout.row(align=True)
+        row.operator(QSS_OT_fps_walk.bl_idname, text="", icon="VIEW_PAN")
+        player = row.row(align=True)
+        player.enabled = bool(obj.get("qss_has_player_start"))
+        player.operator(QSS_OT_player_start.bl_idname, text="", icon="EMPTY_AXIS")
+        isolate = row.row(align=True)
+        isolate.enabled = (context.mode == "EDIT_MESH" or _qss_is_texture_paint_context(context))
+        isolate.operator(QSS_OT_isolate_faces.bl_idname, text="", icon="HIDE_OFF",
+                         depress=bool(obj.get("qss_face_visibility_snapshot", "")))
+        focus = row.row(align=True)
+        focus.enabled = (context.mode == "EDIT_MESH" or _qss_is_texture_paint_context(context))
+        focus.operator(QSS_OT_frame_selection.bl_idname, text="", icon="VIEWZOOM")
 
 
 class QSS_PT_project(Panel):
@@ -8196,10 +8401,11 @@ CLASSES = (
     QSS_OT_scan_game_maps, QSS_OT_run_python_tests, QSS_OT_run_map_audit,
     QSS_OT_launch_ironwail, QSS_OT_open_last_export, QSS_OT_open_config_text,
     QSS_OT_settings, QSS_OT_change_lightmap_resolution, QSS_OT_set_lighting_mode,
-    QSS_OT_toggle_textures, QSS_OT_toggle_painted_textures, QSS_OT_toggle_painted_lightmaps,
+    QSS_OT_toggle_textures, QSS_OT_toggle_source_lightmaps,
+    QSS_OT_toggle_painted_textures, QSS_OT_toggle_painted_lightmaps,
     QSS_OT_generate_decoupled_lightmaps, QSS_OT_detach_faces,
     QSS_OT_activate_paint, QSS_OT_activate_lightmap_paint,
-    QSS_OT_frame_selection, QSS_OT_isolate_faces, QSS_OT_reveal_faces,
+    QSS_OT_frame_selection, QSS_OT_focus_clip_watch, QSS_OT_isolate_faces, QSS_OT_reveal_faces,
     QSS_OT_optimize_clipping, QSS_OT_player_start, QSS_OT_fps_walk,
     QSS_OT_preview_imported_lights, QSS_OT_preview_source_lightmaps,
     QSS_OT_preview_bsp_lightmaps, QSS_OT_quake_direct_bake,
@@ -8300,6 +8506,7 @@ def _unregister_qss_classes():
 
 
 def _cleanup_previous_registration():
+    _qss_restore_focus_clip_session()
     # Stop any legacy QSS modal navigation session left by v0.17.6 or earlier.
     # globals().get keeps fresh installs independent of that removed state.
     legacy_sessions = globals().get("_qss_fps_navigation_sessions", {})
