@@ -364,8 +364,10 @@ class ConverterGUI(tk.Tk):
                 im = source.convert('RGBA')
                 # Keep the preview widget a fixed size. Zooming in crops around
                 # the image centre; zooming out leaves a neutral margin.
-                scaled_size = (max(1, int(470 * zoom)), max(1, int(230 * zoom)))
-                im.thumbnail(scaled_size, Image.Resampling.LANCZOS)
+                fit_scale = min(470 / max(1, im.width), 230 / max(1, im.height))
+                scale = fit_scale * zoom
+                scaled_size = (max(1, round(im.width * scale)), max(1, round(im.height * scale)))
+                im = im.resize(scaled_size, Image.Resampling.LANCZOS)
                 canvas = Image.new('RGBA', (470, 230), (52, 52, 52, 255))
                 if zoom >= 1.0:
                     left = max(0, (im.width - 470) // 2)
