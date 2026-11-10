@@ -381,3 +381,116 @@ def evaluate_quake_luxel(sample_position, surface_normal, lights, active_styles,
         total, range_scale=float(world_range), gamma=float(world_gamma),
         maxlight=float(maxlight)
     )
+
+
+def lightmap_bake_margin_pixels(gutter: int = 2, resolution: int = 1) -> int:
+    """Return the safe Cycles edge-extension margin for a packed atlas island.
+
+    Atlas gutters are stored in source-luxel units and scaled with the working
+    lightmap resolution. Using the full one-sided gutter prevents unfilled bake
+    edge pixels while keeping extensions inside the reserved inter-island gap.
+    """
+    gutter = int(gutter)
+    resolution = int(resolution)
+    if gutter < 0:
+        raise ValueError("Lightmap gutter cannot be negative")
+    if resolution < 1:
+        raise ValueError("Lightmap resolution must be at least one")
+    return gutter * resolution
+
+
+def blender_live_light_preview_parameters(
+    effective_light_value: float,
+    raw_light_value: float,
+    delay: int,
+    wait: float = 1.0,
+    world_dist: float = 1.0,
+    falloff: float = 0.0,
+    unit_scale: float = 0.0254,
+):
+    """Return a delay-aware native Blender lamp approximation.
+
+    Blender's standard point/spot lights use inverse-square attenuation. Quake
+    delay 2 is therefore representable by the same curve after converting the
+    Quake 128-unit reference distance to Blender units. Other profiles are
+    calibrated at a documented reference point and/or softened/cut off; delays
+    3 and 4 remain explicit native-light fallbacks because a constant point
+    field and a local-minlight max-clamp are not expressible by a standard lamp.
+
+    Returned profile labels are intended for diagnostics, not as claims of
+    pixel-identical ericw-tools output. Quake's exact equations remain in the
+    Quake Direct CPU solver.
+    """
+    import math
+
+    def finite(value, default):
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return float(default)
+        return result if math.isfinite(result) else float(default)
+
+    intensity = abs(finite(effective_light_value, 0.0))
+    raw_intensity = abs(finite(raw_light_value, intensity))
+    wait_value = max(1e-6, finite(wait, 1.0))
+    dist_scale = max(1e-6, finite(world_dist, 1.0))
+    scale = max(1e-9, abs(finite(unit_scale, 0.0254)))
+    falloff_value = max(0.0, finite(falloff, 0.0))
+    mode = int(delay)
+    attenuation = wait_value * dist_scale
+    reference_qu = ERICW_LIGHT_SCALE / attenuation
+    reference_blender = reference_qu * scale
+    min_cutoff = 32.0 * scale
+
+    if mode == 0:
+        radius_qu = (falloff_value * dist_scale) if falloff_value > 0.0 else raw_intensity * attenuation
+        radius_blender = max(min_cutoff, radius_qu * scale)
+        # Match the linear Quake profile at half its radius: QSS receives half
+        # the source intensity there, as does an inverse-square lamp at this
+        # calibrated energy/radius pair.
+        energy = intensity * (radius_blender ** 2) / 8.0
+        cutoff = max(min_cutoff, radius_blender)
+        soft_size = max(2.0 * scale, radius_blender * 0.02)
+        profile = "delay0_linear_midpoint_approximation"
+    elif mode == 1:
+        energy = intensity * (reference_blender ** 2)
+        cutoff = max(min_cutoff, reference_blender * 16.0)
+        soft_size = max(scale, reference_blender * 0.01)
+        profile = "delay1_inverse_reference_calibration"
+    elif mode == 2:
+        # Exact radial curve match: E / d_blender^2 equals
+        # I * (128 / (wait * world_dist * d_quake))^2.
+        energy = intensity * (reference_blender ** 2)
+        cutoff = max(min_cutoff, reference_blender * 16.0)
+        soft_size = max(scale * 0.5, reference_blender * 0.002)
+        profile = "delay2_inverse_square_exact"
+    elif mode == 5:
+        # The ericw soft inverse-square reaches one quarter of source value at
+        # 128/(wait*world_dist) Quake units. Match there and use the same scale
+        # as a native spherical emitter to soften the near-source transition.
+        energy = intensity * (reference_blender ** 2) / 4.0
+        cutoff = max(min_cutoff, reference_blender * 16.0)
+        soft_size = max(scale, reference_blender)
+        profile = "delay5_soft_inverse_square_approximation"
+    else:
+        # Native point lights cannot express constant delay 3 or delay 4's
+        # per-channel local-minlight clamp. Preserve the familiar prior energy
+        # and conservative range rather than inventing false equivalence.
+        legacy_radius = max(min_cutoff, raw_intensity * attenuation * scale)
+        energy = intensity
+        cutoff = legacy_radius
+        soft_size = 0.0
+        profile = (
+            "delay3_native_inverse_square_fallback" if mode == 3 else
+            "delay4_native_local_minlight_fallback" if mode == 4 else
+            "unknown_delay_native_fallback"
+        )
+
+    return {
+        "energy": max(0.0, min(1e12, float(energy))),
+        "cutoff_distance": max(min_cutoff, min(1e9, float(cutoff))),
+        "shadow_soft_size": max(0.0, min(1e6, float(soft_size))),
+        "profile": profile,
+        "reference_distance": reference_blender,
+    }
+
