@@ -1286,6 +1286,32 @@ def _restore_preview_engine(scene, obj):
 
 
 
+def _qss_apply_viewport_fov(context, fov_degrees):
+    """Apply configured horizontal field of view to all currently open 3D Views."""
+    lens = viewport_utils.viewport_lens_from_fov(float(fov_degrees), sensor_width=32.0)
+    screens = set()
+    screen = getattr(context, "screen", None) if context else None
+    if screen is not None:
+        screens.add(screen)
+    wm = getattr(context, "window_manager", None) if context else None
+    if wm is not None:
+        for window in wm.windows:
+            if window.screen is not None:
+                screens.add(window.screen)
+    changed = 0
+    for target_screen in screens:
+        for area in target_screen.areas:
+            if area.type != "VIEW_3D":
+                continue
+            space = area.spaces.active
+            if space is None or space.type != "VIEW_3D":
+                continue
+            space.lens = lens
+            area.tag_redraw()
+            changed += 1
+    return changed
+
+
 def _set_viewport_lighting_mode(context, mode):
     """Apply Original/Eevee/Cycles/Baked viewport shading."""
     live = mode in {"realtime", "cycles"}
@@ -7764,9 +7790,13 @@ class QSS_OT_frame_selection(Operator):
         unit_scale = max(
             1e-5, float(self._object.get("qss_unit_scale", DEFAULT_QUAKE_UNIT_SCALE))
         )
+        horizontal_fov = float(_qss_config_settings().get("viewport_fov_degrees", 90.0))
+        vertical_fov = math.degrees(
+            2.0 * math.atan(math.tan(math.radians(horizontal_fov) * 0.5) / aspect)
+        )
         distance = viewport_utils.face_focus_distance(
             half_width, half_height, aspect, radius, unit_scale,
-            fov_degrees=45.0, margin=1.65,
+            fov_degrees=vertical_fov, margin=1.65,
         )
 
         self._start_location = region_3d.view_location.copy()
@@ -8557,10 +8587,10 @@ class QSS_OT_settings(Operator):
                ("GLOBAL", "Global", "Use one lighting mode for every imported map")),
         default="PER_MAP",
     )
-    palette_converter_python: StringProperty(
-        name="Quake converter Python",
-        description="Python executable from an environment with NumPy, Pillow, SciPy and scikit-image; blank uses Blender's Python",
-        subtype="FILE_PATH",
+    viewport_fov_degrees: FloatProperty(
+        name="Viewport FOV",
+        description="Horizontal field of view used by QSS 3D viewports and Focus on Face",
+        default=90.0, min=30.0, max=120.0, precision=1,
     )
     import_lightmap_resolution: EnumProperty(
         name="Default working lightmap resolution",
@@ -8581,7 +8611,7 @@ class QSS_OT_settings(Operator):
         self.rebake_behavior = str(settings.get("rebake_behavior", "ASK")).upper()
         self.lighting_mode_storage = str(settings.get("lighting_mode_storage", "PER_MAP")).upper()
         self.import_lightmap_resolution = str(settings.get("import_lightmap_resolution", "1"))
-        self.palette_converter_python = str(settings.get("palette_converter_python", "") or "")
+        self.viewport_fov_degrees = float(settings.get("viewport_fov_degrees", 90.0))
         if self.import_behavior not in {"ASK", "ADD", "REPLACE"}:
             self.import_behavior = "ASK"
         if self.export_mode not in {"AUTO", "CLASSIC", "ENHANCED", "BOTH"}:
@@ -8605,8 +8635,7 @@ class QSS_OT_settings(Operator):
         layout.prop(self, "export_mode")
         layout.prop(self, "prefer_enhanced_last_export")
         layout.prop(self, "import_lightmap_resolution")
-        layout.prop(self, "palette_converter_python")
-        layout.label(text="The Quake palette converter needs NumPy, Pillow, SciPy and scikit-image in this Python environment.", icon="INFO")
+        layout.prop(self, "viewport_fov_degrees")
         layout.separator()
         layout.label(text="Lighting workflow", icon="LIGHT")
         layout.prop(self, "lighting_mode_storage")
@@ -8626,7 +8655,7 @@ class QSS_OT_settings(Operator):
             "export_mode": self.export_mode,
             "prefer_enhanced_last_export": bool(self.prefer_enhanced_last_export),
             "import_lightmap_resolution": self.import_lightmap_resolution,
-            "palette_converter_python": _qss_abspath(self.palette_converter_python or ""),
+            "viewport_fov_degrees": float(self.viewport_fov_degrees),
             "rebake_behavior": self.rebake_behavior,
             "lighting_mode_storage": self.lighting_mode_storage,
         })
@@ -8641,6 +8670,7 @@ class QSS_OT_settings(Operator):
             settings["active_game_dir"] = _qss_abspath(context.scene.qss_game_dir or "")
             settings["active_game_id"] = str(context.scene.qss_game_folder or "")
             quake_paths.save_config(settings, _qss_config_path())
+            _qss_apply_viewport_fov(context, self.viewport_fov_degrees)
             context.scene.qss_import_lightmap_resolution = self.import_lightmap_resolution
             self.report({"INFO"}, "Quake Surface Studio settings saved.")
             return {"FINISHED"}
@@ -9702,6 +9732,40 @@ class QSS_PT_lighting(Panel):
             depress=(_qss_is_texture_paint_context(context) and is_lightmap_paint),
         )
 
+        if _qss_is_texture_paint_context(context):
+            image_paint = context.scene.tool_settings.image_paint
+            brush = image_paint.brush
+            color_row = layout.row(align=True)
+            color_row.label(text="Brush Color")
+            color_row.prop(context.scene, "qss_paint_color_picker", expand=True)
+            if str(context.scene.qss_paint_color_picker) == "QUAKE":
+                try:
+                    if image_paint.palette is None or not bool(image_paint.palette.get("qss_quake_palette", False)):
+                        _qss_assign_quake_palette(context, obj)
+                    layout.template_ID(image_paint, "palette", new="palette.new")
+                    layout.template_palette(image_paint, "palette")
+                    layout.label(text="224–254 fullbright · 255 transparent", icon="INFO")
+                except Exception as exc:
+                    layout.label(text=f"Quake palette unavailable: {exc}", icon="ERROR")
+            elif brush is not None:
+                color_controls = layout.row(align=True)
+                color_controls.prop(brush, "color", text="Primary")
+                color_controls.prop(brush, "secondary_color", text="Secondary")
+                layout.template_color_picker(brush, "color", value_slider=True)
+            active_image = _qss_current_paint_image(context)
+        else:
+            picker_row = layout.row(align=True)
+            picker_row.prop(context.scene, "qss_paint_color_picker", expand=True)
+            active_image = _qss_converter_source_image(context)
+
+        conversion_row = layout.row(align=True)
+        conversion_row.enabled = active_image is not None
+        conversion_row.operator(
+            QSS_OT_convert_quake_palette.bl_idname,
+            text="Convert Image to Quake Palette…",
+            icon="IMAGE_DATA",
+        )
+
         # Three explicit fixed-width columns keep labels and checkboxes aligned.
         table = layout.box()
         header = table.row(align=True)
@@ -9777,77 +9841,6 @@ class QSS_PT_lighting(Panel):
             row.label(text=str(obj.get("qss_last_quake_bake_error"))[:100], icon="ERROR")
         if obj.get("qss_last_bake_luxel_mean") is not None:
             layout.label(text=f"Last bake mean: {float(obj.get('qss_last_bake_luxel_mean', 0.0)):.4g}", icon="IMAGE")
-
-
-class QSS_PT_palette_converter(Panel):
-    bl_label = "QUAKE PALETTE"
-    bl_idname = "QSS_PT_palette_converter"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "Quake"
-    bl_parent_id = "QSS_PT_main"
-    bl_order = 35
-    bl_options = {"DEFAULT_CLOSED"}
-
-    @classmethod
-    def poll(cls, context):
-        return _qss_is_map_object(context.object)
-
-    def draw(self, context):
-        layout = self.layout
-        scene = context.scene
-        image_paint = scene.tool_settings.image_paint
-        picker = str(getattr(scene, "qss_paint_color_picker", "STANDARD"))
-        row = layout.row(align=True)
-        row.prop(scene, "qss_paint_color_picker", expand=True)
-
-        if _qss_is_texture_paint_context(context):
-            brush = image_paint.brush
-            if picker == "QUAKE":
-                palette = image_paint.palette
-                if palette is None or not bool(palette.get("qss_quake_palette", False)):
-                    layout.operator(
-                        QSS_OT_load_quake_palette.bl_idname,
-                        text="Load Active Map Palette",
-                        icon="COLOR",
-                    )
-                else:
-                    layout.template_palette(image_paint, "palette", color=True)
-                    layout.label(text="256 Quake entries · 0–223 normal · 224–254 fullbright · 255 transparent")
-            elif brush is not None:
-                layout.template_color_picker(brush, "color", value_slider=True)
-                color_row = layout.row(align=True)
-                color_row.prop(brush, "color", text="Primary")
-                color_row.prop(brush, "secondary_color", text="Secondary")
-        else:
-            layout.label(
-                text="Enter Texture Paint to choose the brush color.",
-                icon="BRUSH_DATA",
-            )
-
-        layout.separator()
-        converter = layout.box()
-        converter.label(text="IMAGE / RENDER CONVERSION", icon="IMAGE")
-        source = _qss_converter_source_image(context)
-        if source is None:
-            converter.label(text="Select an image, enter Texture Paint, or render the scene.")
-        else:
-            converter.label(text=f"Source: {source.name}")
-            converter.operator(
-                QSS_OT_convert_quake_palette.bl_idname,
-                text="Convert to Quake Palette…",
-                icon="IMAGE_DATA",
-            )
-        converter.operator(
-            QSS_OT_check_quake_converter.bl_idname,
-            text="Check Converter Python",
-            icon="CHECKMARK",
-        )
-        python_path = _qss_converter_python_path()
-        converter.label(
-            text=f"Python: {os.path.basename(python_path) if python_path else 'not configured'}",
-            icon="CONSOLE",
-        )
 
 
 class QSS_PT_stats(Panel):
@@ -9937,7 +9930,7 @@ CLASSES = (
     QSS_OT_confirm_import, QSS_OT_import_bsp, QSS_OT_browse_game_maps, QSS_OT_validate_bsp_export,
     QSS_OT_scan_game_maps, QSS_OT_run_python_tests, QSS_OT_run_map_audit,
     QSS_OT_launch_ironwail, QSS_OT_open_last_export, QSS_OT_test_in_ironwail, QSS_OT_open_config_text,
-    QSS_OT_close_active_map, QSS_OT_load_quake_palette, QSS_OT_check_quake_converter,
+    QSS_OT_close_active_map, QSS_OT_load_quake_palette, QSS_OT_open_quake_palette,
     QSS_OT_convert_quake_palette, QSS_OT_viewport_material_preview,
     QSS_OT_settings, QSS_OT_change_lightmap_resolution, QSS_OT_set_lighting_mode,
     QSS_OT_toggle_textures, QSS_OT_toggle_source_lightmaps,
@@ -9952,7 +9945,7 @@ CLASSES = (
     QSS_OT_restore_original_lightmap, QSS_OT_refresh_lightmap_preview,
     QSS_OT_apply_light_energy_scale, QSS_OT_calibrate_lights_to_source,
     QSS_OT_write_diagnostics, QSS_OT_run_blender_selftest, QSS_OT_export_bsp,
-    QSS_PT_main, QSS_PT_navigation, QSS_PT_project, QSS_PT_lighting, QSS_PT_palette_converter, QSS_PT_stats,
+    QSS_PT_main, QSS_PT_navigation, QSS_PT_project, QSS_PT_lighting, QSS_PT_stats,
 )
 
 def _remove_qss_keymaps():
@@ -10046,6 +10039,7 @@ def _unregister_qss_classes():
 
 def _cleanup_previous_registration():
     _qss_restore_focus_clip_session()
+    _qss_remove_context_menus()
     for session in tuple(_qss_camera_transition_sessions.values()):
         try:
             session._finish()
@@ -10257,6 +10251,10 @@ def register():
                 scene.qss_active_map_collection = active_collection_name
                 if active_collection_name != "__QSS_NO_MAP__":
                     _qss_activate_map_collection(scene, active_collection_name, bpy.context)
+                _qss_register_context_menus()
+                _qss_apply_viewport_fov(
+                    bpy.context, _qss_config_settings().get("viewport_fov_degrees", 90.0)
+                )
             finally:
                 _qss_config_update_depth = False
     except Exception:
