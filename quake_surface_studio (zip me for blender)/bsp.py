@@ -66,6 +66,43 @@ def _checked_slice(data: bytes, offset: int, length: int, what: str) -> bytes:
     return data[offset:offset + length]
 
 
+def face_winding_needs_reversal(vertices, plane_normal, side=0, flip_z=False):
+    """Return whether a face's vertex order opposes its oriented BSP plane normal.
+
+    BSP face normals are defined by both the referenced plane and dface.side.
+    A reflected Z-up to Z-down import also reverses mesh winding. Compare the
+    actual polygon area vector after the coordinate reflection to the intended
+    transformed normal, so Cycles/Eevee see the correct front side.
+    """
+    points = [tuple(float(value) for value in point[:3]) for point in vertices]
+    if len(points) < 3:
+        return False
+    area_normal = [0.0, 0.0, 0.0]
+    for index, current in enumerate(points):
+        following = points[(index + 1) % len(points)]
+        x0, y0, z0 = current
+        x1, y1, z1 = following
+        if flip_z:
+            z0, z1 = -z0, -z1
+        area_normal[0] += (y0 - y1) * (z0 + z1)
+        area_normal[1] += (z0 - z1) * (x0 + x1)
+        area_normal[2] += (x0 - x1) * (y0 + y1)
+
+    normal = [float(value) for value in plane_normal[:3]]
+    if len(normal) != 3:
+        raise BSPError("A BSP face plane normal must contain three components.")
+    if int(side):
+        normal = [-value for value in normal]
+    if flip_z:
+        normal[2] = -normal[2]
+    dot = sum(area_normal[index] * normal[index] for index in range(3))
+    area_sq = sum(value * value for value in area_normal)
+    normal_sq = sum(value * value for value in normal)
+    if area_sq <= 1e-20 or normal_sq <= 1e-20:
+        return False
+    return dot < -1e-10 * math.sqrt(area_sq * normal_sq)
+
+
 class BSP29:
     """Parsed BSP29 file with safe byte-preserving lump access."""
 
