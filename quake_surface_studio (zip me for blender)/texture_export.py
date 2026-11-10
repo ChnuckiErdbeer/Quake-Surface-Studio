@@ -12,6 +12,39 @@ def quake_texture_dimension(value: float, maximum: int = 512) -> int:
     return max(8, min(limit, int(math.ceil(parsed / 8.0)) * 8))
 
 
+def face_local_projection_scale(span: float, output_dimension: int) -> float:
+    """Preserve one source texel per map texel unless the Quake 512 limit forces downscaling."""
+    source_span = max(1.0, float(span))
+    output_size = int(output_dimension)
+    if output_size <= 0:
+        raise ValueError("Face-local output dimensions must be positive.")
+    return min(1.0, output_size / source_span)
+
+
+def face_local_texinfo_projection(projection, bounds, output_size) -> tuple[float, ...]:
+    """Project source Quake texinfo coordinates into a padded face-local texture.
+
+    Dimensions padded up to an 8-pixel multiple leave unused pixels at the
+    edges; they must not stretch the visible face's texture mapping. Only
+    spans larger than the supported miptexture size are resampled.
+    """
+    if len(projection) != 8 or len(bounds) != 4 or len(output_size) != 2:
+        raise ValueError("A face-local projection requires 8 axis values, 4 bounds and 2 output dimensions.")
+    min_s, min_t, span_s, span_t = (float(value) for value in bounds)
+    width, height = int(output_size[0]), int(output_size[1])
+    if width <= 0 or height <= 0 or span_s <= 0.0 or span_t <= 0.0:
+        raise ValueError("Face-local bounds and output dimensions must be positive.")
+    scale_s = face_local_projection_scale(span_s, width)
+    scale_t = face_local_projection_scale(span_t, height)
+    s, t = projection[:4], projection[4:]
+    return (
+        float(s[0]) * scale_s, float(s[1]) * scale_s, float(s[2]) * scale_s,
+        (float(s[3]) - min_s) * scale_s,
+        float(t[0]) * scale_t, float(t[1]) * scale_t, float(t[2]) * scale_t,
+        (float(t[3]) - min_t) * scale_t,
+    )
+
+
 def pack_face_rectangles(
     sizes: Sequence[tuple[int, int]],
     atlas_size: int = 512,
