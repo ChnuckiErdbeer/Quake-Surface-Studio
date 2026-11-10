@@ -38,13 +38,15 @@
 - The add-on patch version is **Slipgate 0.20.1**. The installable Python package folder and internal QSS identifiers remain `quake_surface_studio` / `QSS` for compatibility; Blender's visible add-on name and sidebar category are Slipgate.
 - The user is testing in **Blender 5.2** and wants the map workflow to launch/test in **Ironwail**.
 
-**Current implementation status — 2026-11-10 repository pass**
+**Current implementation status — user-tested 2026-11-10; source inspected at HEAD fbb8a66**
 
-1. **Blender registration failure — fixed in source.** The reported QSS_PT_main NameError was caused by child panels and CLASSES referencing a parent class that was not defined. addon.py now defines and registers QSS_PT_main. The stale QSS_PT_navigation name was also removed from CLASSES because no such class exists in the current implementation. A static AST regression test checks that every registered class is defined and each panel parent resolves to a registered panel. Blender 5.2 GUI enable/disable has not yet been run in this environment.
-2. **80×128 face-paint export failure — fixed in source.** The exact “width and height must be powers of two” error is raised by Slipgate's _encode_image_to_miptex() preflight in addon.py, before QBSP or Ironwail is launched. The face-local dimension helper previously rounded to multiples of eight, allowing an 80×128 paint image through to the exporter. texture_export.quake_texture_dimension() now rounds upward to the next power of two, with a minimum of 16 and maximum of 512. The face-local texinfo/UV projection retains the original texel pitch; the padded pixels sit outside the visible face footprint, while spans over 512 are downsampled. Automated tests cover this rule and projection preservation. End-to-end painting/export/Ironwail acceptance remains unverified.
-3. **Chat history — repaired in this pass.** The first chapter of fullhisory01.txt has been replaced with a plain-text rendering of the corrected Quake Lightmap Workflow (1) chapter from Slipgate_Chat_History_Clean.md. PDF-rip page headers/counters, repeated conversation URLs and extraction-status debris from the incorrect chapter are no longer carried over. The next chapter, Quake Lightmap Workflow (2), remains the original raw transcript content and its boundary was checked.
-4. **Version.** The add-on patch version is advanced from 0.20.0 to **0.20.1**. The add-on README now documents the registration and face-local texture export fixes. Package metadata remains internally named Quake Surface Studio/QSS; Slipgate remains the broader project name.
-5. **Validation.** GitHub Actions run `42769969091` for commit `3ed3abb79b699aa3f0a58c18a75127187717f6ef` completed successfully: Python module compilation, all standalone tests, version extraction, Blender package assembly and artifact upload passed. The build artifact is `Quake-Surface-Studio-v0.20.1-Blender-Install`. Blender 5.2 GUI activation, painted-wall export, QBSP and Ironwail acceptance remain unverified and require an interactive end-to-end check.
+1. **Blender 5.2 activation and Edit Mode appearance — user-reported PASS.** The user confirms the 0.20.1 add-on loads and the greyish Edit Mode hue is gone.
+2. **Face texture painting and export — user-reported PASS.** The user painted and exported the same wall that previously triggered the 80×128 image-dimension failure. This is the strongest end-to-end confirmation so far for the 0.20.1 face-local texture dimension fix.
+3. **Lightmap paint warning — observed in source; interactive result not yet established.** The user attempted lightmap painting and saw the confirmation dialog. Its current text is `You selected {count} faces for Lightmap Paint.`, which has a pluralisation bug for one face. The dialog is a memory-safety confirmation, not inherently a paint failure: `QSS_OT_activate_lightmap_paint.invoke()` estimates memory using the full shared atlas (and a copy for a first painted override), then `_qss_paint_confirmation_needed()` triggers at 32 MiB or 5% of available RAM. Thus it can legitimately appear with one selected face. The message should make the shared-atlas memory reason clearer and use singular/plural correctly.
+4. **Layer toggles — user-reported limitation; source behaviour inspected, GUI reproduction outstanding.** The texture/lightmap layer-toggle table sets `can_toggle_layers` only for `OBJECT` and `EDIT_MESH`; toggle operator polls use the same modes. They are therefore disabled while Texture Paint is active. The painted-texture toggle temporarily enters Object Mode and restores Edit Mode; the painted-lightmap toggle updates the material preview directly. The current source intends to permit Edit Mode, so the user's report that toggles work only in Object Mode needs a Blender 5.2 reproduction to distinguish Edit Mode failure from the explicit Texture Paint restriction.
+5. **Quake palette converter — source inspected.** `QSS_OT_convert_quake_palette` invokes `palette_utils.convert_rgba8()` inside Blender and writes an indexed PNG; it is not implemented as a shader. The earlier user suggestion to implement conversion as a shader is present in the archived conversation but was not followed. Standard BSP texture export separately quantizes image pixels against the Quake palette in `_encode_image_to_miptex()`, so the separate converter button is not required for ordinary paint-and-export. It remains an optional material-aware image-conversion workflow.
+6. **Version metadata discrepancy — source inspected.** `__init__.py` declares version `(0, 20, 1)`, but `addon.py` still declares `ADDON_VERSION = (0, 20, 0)` and uses it in exported diagnostics metadata (`qss_version`). Correct this internal metadata constant in the next source update.
+7. **CI and remaining engine validation.** Historical CI run `42770104620` passed compilation, standalone tests, version extraction, package assembly and artifact upload. The user's successful texture export is now additional user-reported interactive evidence. QBSP compilation and Ironwail acceptance have not yet been reported. Do not claim them as passed.
 
 **Useful source locations in the inspected branch**
 
@@ -55,11 +57,12 @@
 
 **Immediate next technical steps**
 
-1. On the next repository pass, clean the first chapter of `ai chat history/fullhisory01.txt`. The user reports that the first chapter in the clean Markdown archive has been corrected; use that corrected chapter as the source of truth, replace the wrong first chapter in the TXT, and remove PDF-rip artefacts (page counters/headers, repeated chat URLs, split words, extraction debris and broken layout) while preserving the actual conversation. Verify the first chapter against the corrected Markdown after editing.
-2. Fix and test the missing `QSS_PT_main` panel/registration reference so the add-on imports and enables cleanly in Blender 5.2.
-3. Trace the exact source of the 80×128/power-of-two error through the Test in Ironwail operator, export validation, external compiler invocation and resulting logs.
-4. Add regression tests for the chosen texture-dimension rule and UV/texinfo preservation; then test a painted wall through the complete export and Ironwail launch path.
-5. Keep Slipgate as the project-level name while making any QSS package/identifier migration deliberate and complete.
+1. Reproduce the layer-toggle limitation in Blender 5.2. Confirm whether the user's limitation occurs in Edit Mode or specifically in Texture Paint. Consider making the toggles available during Texture Paint by safely exiting to the stored pre-paint mode, applying the selected visibility change, and leaving the object in a predictable mode without silently changing the active paint image.
+2. Improve the lightmap-paint confirmation dialog: use correct singular/plural wording and explain that memory is estimated for the shared atlas and its working copy, not a separate image per selected face. Keep the warning if the memory estimate justifies it.
+3. Correct `ADDON_VERSION` in `addon.py` to match the package's 0.20.1 version before the next release, and add a consistency regression test so diagnostic metadata cannot lag behind `__init__.py`.
+4. Decide whether a shader-based palette-quantization preview is worth prototyping. A LUT-based shader can provide a live nearest-palette preview, but it cannot reproduce the existing SLIC/material-zone analysis and ramp assignment by itself. Preserve the in-process Python converter unless a shader path demonstrates equivalent output quality; do not make ordinary BSP export depend on the optional converter button.
+5. Obtain the user's QBSP and Ironwail result when available. The 0.20.1 texture export was user-tested successfully, but compiler and engine validation remain outstanding.
+6. Continue maintaining this archive and verify every GitHub write on the active feature branch. The first chapter of `fullhisory01.txt` was already repaired and verified during the 0.20.1 maintenance pass; it is no longer pending.
 
 ---
 
@@ -67,7 +70,7 @@
 **Coverage:** 8–10 November 2026  
 **Ordering:** Conversation exports are sorted by their recorded date and time. Posts remain in their original order within each conversation. The Quake Texture Converter transcript (10 November, 03:58) is placed before *Quake Lightmap Workflow (13)* (10 November, 05:45), correcting the order in the raw extraction.  
 **Cleanup:** Repeated PDF page headers, page counters, chat-footer URLs, citation-card scraps and extraction-status lines have been removed. Text wrapping has been reflowed; code, command sequences, lists and console output are separately formatted.  
-**Preservation:** The raw `fullhisory01.txt` is an extraction artifact and is not guaranteed to match the corrected clean Markdown transcript. Its first chapter is currently known to be wrong; see the 2026-11-10 handoff note at the end of this file for the requested repair. The original extraction counts (217 user posts and 212 assistant posts) describe the earlier source and must not be treated as a verified count after chapter replacement.  
+**Preservation:** The raw `fullhisory01.txt` is an extraction artifact. Its first chapter was replaced with the corrected `Quake Lightmap Workflow (1)` chapter from this clean Markdown archive during the 0.20.1 maintenance pass, and the chapter boundary to `Quake Lightmap Workflow (2)` was checked. The original extraction counts (217 user posts and 212 assistant posts) describe the earlier source and must not be treated as a verified count after chapter replacement.  
 **Scope note:** `Quake Lightmap Workflow (0).pdf` is present separately in the repository but was not included in the TXT extraction, so it is not reconstructed or silently added here.
 
 ## Conversation index
@@ -14925,3 +14928,34 @@ Updated the visible Blender add-on name, sidebar category and install instructio
 ### ChatGPT
 
 The final branding commit `f67a527d73336f09a059acc3feef65a9bc7a8812` passed GitHub Actions push workflow run `42770104620` (`QSS Python tests`). Module compilation, the complete standalone unittest suite, version extraction, Blender package assembly and artifact upload all completed successfully. The artifact `Quake-Surface-Studio-v0.20.1-Blender-Install` was generated from this exact commit. The corrected raw TXT first chapter was re-fetched and checked: it begins with `Quake Lightmap Workflow (1)`, no longer contains the wrong `Setup Quake Mod Environment` chapter, contains no PDF page-header/counter pattern or repeated chat URLs in that first chapter, and preserves the original `Quake Lightmap Workflow (2)` chapter boundary. Blender GUI and Ironwail tests remain unperformed.
+
+
+## 2026-11-10 — Slipgate 0.20.1 user verification and follow-up findings
+
+### You
+
+good news!  Add on loads. The greyish hue in edit mode is away. Texture 
+Painting and exporting works (on the same wall as last time).
+Afterwards also tried lightmap painting. I get the error lol :D : "you selected 
+1 (sic !!! :D ) face for lighmap paint... etc"
+
+painted textures and lightmaps are only disablable in object mode. We had a 
+similar situation before.
+
+i see there is still the [convert Image to quake palette button]. I hope we 
+wont need it in the end. Did you attemp to replicate the beahaviour of the 
+conversion tool via shaders as i suggested?
+
+### ChatGPT
+
+The user reports that Slipgate 0.20.1 loads in Blender 5.2, the greyish Edit Mode hue is gone, and texture painting plus export now succeeds on the same wall that previously failed with the 80×128 texture error. These are user-reported interactive PASS results; do not overstate them as compiler or engine validation.
+
+Source inspection on branch `fix/v0.11.1-metadata-style-order-test`, HEAD `fbb8a66cdc44d70d06cc9e3a196ff9ec8208738d`, found:
+
+- The lightmap dialog string in `addon.py` is `You selected {count} faces for Lightmap Paint.`, so one selected face currently produces a grammar error. It is a confirmation dialog rather than an export/paint exception. Its trigger uses an estimate based on the entire shared atlas and a working copy, so it may appear for a single selected face when the atlas-size/RAM threshold is reached.
+- The layer-toggle table enables its controls only for `OBJECT` and `EDIT_MESH`; the toggle operator polls have the same mode restriction. Therefore the controls are deliberately disabled while Texture Paint is active. The source does intend to support Edit Mode: the painted-texture toggle temporarily switches to Object Mode and restores Edit Mode; the painted-lightmap toggle calls the preview update without an explicit mode switch. Blender GUI reproduction is still needed to determine whether the reported issue is actually Edit Mode, Texture Paint mode, or a context-related failure.
+- The Quake image converter was not reimplemented as a shader. It now runs inside Blender's Python process via `palette_utils.convert_rgba8()`, preserving the material-zone conversion algorithm. The user's shader suggestion is preserved in the preceding transcript. A shader/LUT could support live nearest-palette preview, but would not independently reproduce the converter's whole-image SLIC segmentation, connected material-zone merging and per-zone ramp fitting.
+- The separate converter button is optional for ordinary texture painting and BSP export: `_encode_image_to_miptex()` performs Quake palette quantization on the standard export path. The button remains for the more sophisticated material-aware indexed-PNG conversion workflow.
+- Found a version metadata mismatch: package `__init__.py` declares `(0, 20, 1)`, while `addon.py` has `ADDON_VERSION = (0, 20, 0)`; the latter is used to write `qss_version` in diagnostics metadata. Correct this in the next source update.
+
+No source code was changed during this feedback pass. Next implementation priorities are to reproduce/fix layer toggling from paint mode, clarify the lightmap memory warning and singular/plural copy, align internal version metadata with 0.20.1, and decide whether to prototype a shader-based live preview without replacing the material-aware Python converter. QBSP and Ironwail results remain unreported.
