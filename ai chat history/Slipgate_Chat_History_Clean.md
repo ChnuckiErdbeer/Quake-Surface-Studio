@@ -91,667 +91,1247 @@
 
 ---
 
-## 2026-11-08 18:20 — Setup Quake Mod Environment
-
-[Open original conversation](https://chatgpt.com/c/6aee7e46-abe4-83ed-b5de-7808da861f85) · 26 source pages
-
-### You
-
-I am planning to make a mod for quake. It should at least run on the rerelease and on ironwail. It will have new enemies and weapons. I know how to craft assets.
-
-**I downloaded the source from here:**
-
-https://github.com/id-Software/quake-rerelease-qc All i want for now is how to setup en enviroment where i can compile and run this. For now i dont want to know anything more. I am on pop!os by the way so if there are native linux versionms of tools i would prefer them, but using wine is also ok.
-
-### ChatGPT
-
-For your setup, I would aim for a native Linux development environment on Pop!_OS, with Wine only if a particular tool turns out to require Windows.
-
-**There are two things to keep separate:**
-
-1. Compiling the QuakeC source into game code.
-
-2. Running and testing the resulting mod in the Quake rerelease and Ironwail. You shouldn't need a Windows development environment for either of these. I'll keep this strictly to environment setup, installation, compilation and launching. No weapon/enemy implementation or mod-design discussion.
-
-1. Install the QuakeC compiler The official repository explicitly recommends FTEQCC. It supports the advanced QuakeC features used by the rerelease source. Good news: FTEQCC has a native 64-bit Linux command-line version. No Wine required.
-
-**Download it here:**
-
-FTEQCC official website Choose Linux x86_64. Extract the archive somewhere convenient, for example ~/tools/fteqcc/.
-
-**Make the compiler executable:**
-
-```text
-chmod +x ~/tools/fteqcc/fteqcc64
-```
-
-**You can test it with:**
-
-```text
-~/tools/fteqcc/fteqcc64
-```
-
-You should see its command-line help.
-
-**You can also install the packaged version through APT:**
-
-```text
-sudo apt update
-sudo apt install fteqcc
-```
-
-However, I recommend the official binary to avoid potential differences between compiler versions.
-
-2. Prepare your project directory I recommend keeping your development files separate from your original game installation.
-
-**For example:**
-
-```text
-~/quake-dev/
-├── source/
-│
-└── quake-rerelease-qc/
-│├── quakec/
-│├── quakec_ctf/
-│├── quakec_hipnotic/
-│├── quakec_mg1/
-│├── quakec_mg3/
-│└── quakec_rogue/
-│
-└── builds/
-└── mymod/
-└── progs.dat
-```
-
-**Clone the repository:**
-
-```text
-mkdir -p ~/quake-dev/source
-cd ~/quake-dev/source
-git clone https://github.com/id-Software/quake-rerelease-qc.git
-```
-
-The repository contains six separate QuakeC codebases. For now, start with quakec, which is the base Quake campaign.
-
-3. Compile the source One important detail: the repository's quakec/progs.src specifies the output as: ../progs.dat This means the compiler places the resulting progs.dat in the parent directory of quakec.
-
-**Compile it with:**
-
-```text
-cd ~/quake-dev/source/quake-rerelease-qc/quakec
-~/tools/fteqcc/fteqcc64
-```
-
-FTEQCC automatically looks for progs.src in its current working directory.
-
-**After compilation, you should have:**
-
-quake-rerelease-qc/
-
-```text
-├── progs.dat
-└── quakec/
-├── progs.src
-├── defs.qc
-├── weapons.qc
-├── monsters.qc
-└──...
-```
-
-If compilation succeeds, you've got your first compiled QuakeC binary. You can also use the compiler's -src argument when invoking it from another directory.
-
-4. Set up a test mod directory Find your Quake installation. For a typical Steam installation on Pop!_OS, it will be
-
-**somewhere under:**
-
-```text
-~/.steam/steam/steamapps/common/Quake/
-```
-
-**Create a mod directory alongside the game's id1 directory:**
-
-```text
-mkdir -p "/path/to/Quake/mymod"
-```
-
-**For your first test, copy the compiled binary:**
-
-```text
-cp ~/quake-dev/source/quake-rerelease-qc/progs.dat \
-"/path/to/Quake/mymod/progs.dat"
-```
-
-**Your game directory should look something like this:**
-
-**Quake/**
-
-```text
-├── id1/
-├── rerelease/
-└── mymod/
-└── progs.dat
-```
-
-Keep your source code in ~/quake-dev; you don't need to put the entire source repository inside the game installation.
-
-5. Install and run Ironwail Ironwail has native Linux builds.
-
-**Download it from:**
-
-Ironwail GitHub releases Download the Linux x86_64 release and extract it somewhere convenient, for
-
-**example:**
-
-```text
-~/tools/ironwail/
-```
-
-The current release notes specify glibc 2.31 or newer, so Pop!_OS should meet that requirement on a reasonably recent installation.
-
-**Run your mod from the Quake installation directory:**
-
-```text
-cd "/path/to/Quake"
-~/tools/ironwail/ironwail -game mymod
-```
-
-This is also convenient for development: compile, copy the new progs.dat, restart or reload the game, and test.
-
-6. Running the mod in the official rerelease You can keep the same mod directory and test it in the official rerelease as well. The important distinction is that the rerelease and Ironwail are separate engines. Although Ironwail supports rerelease content, you should not assume that every KEX-specific QuakeC feature in the official source is supported identically by Ironwail. I'd establish a working baseline in the official rerelease first, then test the same compiled binary in Ironwail. One correction to the directory layout above: for the official rerelease, the mod should live inside Quake/rerelease/, whereas Ironwail can use a mod directory alongside its id1 game data. The safest approach is to keep separate copies of the mod folder for the two engines.
-
-**For the rerelease, the typical layout is:**
-
-**Quake/**
-
-```text
-└── rerelease/
-├── id1/
-└── mymod/
-└── progs.dat
-```
-
-**You can switch to it from the in-game console using:**
-
-game mymod This is documented in the community's rerelease modding guide .
-
-7. Your initial toolchain
-
-**Here's what I'd install and use initially:**
-
-ToolPurposePlatform FTEQCCQuakeC compilerNative Linux GitSource controlNative Linux VS Code or VSCodiumSource editingNative Linux IronwailTestingNative Linux Quake rereleaseTestingNative Linux Steam version No Wine necessary.
-
-One compatibility caveat: the official source targets the rerelease. Ironwail's compatibility with rerelease content does not automatically guarantee compatibility with every rereleasespecific QuakeC extension. That will need to be verified with an actual compiled build.
-
-That's all you need to get started. I'd first get the unmodified base quakec
-
-```text
-source compiling
-```
-
-successfully before changing anything.
-
-**Useful references:**
-
-Official Quake rerelease source FTEQCC downloads Ironwail downloads Rerelease modding guide
-
-### You
-
-Ok good paradgm. Will follow this thru and ask questions.
-
-**first one:**
-
-when i set up a source folder. I put the original files there. Then i modify them hence making a mod. What if i work on several mods tho? I guess i will have to make a new copy of the original source everytime. But wouldnt that mean that putting a separate source folder into each wip mod folder along the other assets wuild be way more practical?
-
-### ChatGPT
-
-Yes. In fact, I think your proposed approach is the better one. Each mod should be a self-contained project, including its own copy of the
-
-**QuakeC**
-
-```text
-source, compiled files and custom assets.
-```
-
-That way, you can work on multiple mods independently without worrying about one project's changes affecting another.
-
-**I'd organize things like this:**
-
-```text
-~/quake-dev/
-│
-├── tools/
-│├── fteqcc/
-│└── ironwail/
-│
-├── base-source/
-│
-└── quake-rerelease-qc/
-│
-└── projects/
-│
-├── my-first-mod/
-│├── source/
-││├── quakec/
-││├── quakec_hipnotic/
-││└──...
-│││├── assets/
-│├── build/
-│└── README.md
-│
-├── my-second-mod/
-│├── source/
-│├── assets/
-│├── build/
-│└── README.md
-│
-└── my-third-mod/
-├── source/
-├── assets/
-├── build/
-└── README.md
-```
-
-The advantage is that you can simply copy the original repository into each project when you start a new mod. A slightly better approach: use Git I would recommend making every mod its own Git repository.
-
-**For example:**
-
-```text
-cd ~/quake-dev/projects/my-first-mod
-git init
-git add.
-git commit -m "Initial project based on Quake rerelease QC"
-```
-
-Now you have a history of all your modifications and can revert changes if something breaks. The original repository is licensed under GPLv2, so keep its COPYING.txt and licensing information when copying its source.
-
-What about the original source?
-
-**Keep one untouched copy in:**
-
-```text
-~/quake-dev/base-source/quake-rerelease-qc/
-```
-
-**Whenever you start a new project, copy it:**
-
-```text
-cp -a ~/quake-dev/base-source/quake-rerelease-qc \
-~/quake-dev/projects/my-new-mod/source
-```
-
-**This gives you:**
-
-An untouched reference copy. Completely independent source code for every mod. Independent Git histories. No risk of accidentally sharing modifications between projects. My recommendation: Do exactly what you suggested. A separate source folder inside each mod project is a sensible and straightforward workflow.
-
-Later, if you develop several mods that share code, you can look into Git submodules or shared libraries. But don't introduce that complexity yet.
-
-### You
-
-ok how to add a new enemy. just the basic workflow
-
-### ChatGPT
-
-**The basic workflow is:**
-
-Create the enemy's QuakeC logic → register its source file → connect its model and animations → compile → place it in a map → test it. In the Quake rerelease source, enemies are implemented in QuakeC. The engine loads the compiled progs.dat, not the individual.qc files.
-
-1. Create a new enemy source file For example, suppose your enemy is called monster_guard.
-
-**Inside your project's source directory, create:**
-
-quakec/
-
-```text
-└── monsters/
-├──...
-└── guard.qc
-```
-
-I'd keep custom enemies in their own files rather than putting all their code into monsters.qc.
-
-2. Implement the enemy
-
-**Your new.qc file will contain several things:**
-
-Model and sound precaching. Animation frame definitions. Idle and standing behaviour. Walking and chasing behaviour. Attack behaviour. Pain reaction. Death behaviour. Main spawn function. The spawn function is particularly important. It initializes the enemy's
-
-**properties, such as:**
-
-Health Collision box Movement type Model AI behaviour functions Starting animation For reference, look at the existing monster_tarbaby implementation in the original source. It is a useful example of a complete enemy spawn function.
-
-3. Register the new source file This is an important step.
-
-**Open:**
-
-quakec/progs.src You'll find a list of all source files that the compiler should include.
-
-**Near the bottom, you'll see something like:**
-
-monsters/ogre.qc monsters/fiend.qc monsters/shambler.qc monsters/knight.qc ... monsters/enforcer.qc monsters/shub.qc
-
-**Add your file:**
-
-monsters/guard.qc Without this entry, FTEQCC won't compile your new enemy's code.
-
-4. Add the enemy's assets Your mod's game directory needs the enemy's model and sounds.
-
-**For example:**
-
-mymod/
-
-```text
-├── progs.dat
-├── progs/
-│
-```
-
-**Setup Quake Mod Environment**
-
-```text
-└── guard.mdl
-└── sound/
-└── guard/
-├── attack.wav
-├── pain.wav
-└── death.wav
-```
-
-Your QuakeC code references these paths when precaching the assets.
-
-**For example:**
-
-precache_model2("progs/guard.mdl"); precache_sound2("guard/attack.wav"); The paths must match the actual locations of the files.
-
-5. Compile Run FTEQCC again. It will compile all the source files listed in progs.src into a new progs.dat. Copy the resulting file into your mod's game directory.
-
-6. Place the enemy in a map This is how you actually get your enemy into the game world. In Quake, map entities have a classname property.
-
-**Your enemy's spawn function is:**
-
-void() monster_guard =
-
-```text
+11/8/26, 6:26 PM
+Quake Lightmap Workflow
+You said:
+Quake modding idea
+I generate a bsp from a map.
+i import the map into blender.
+use texture paint to to paint lightmap onto the imported
+geometry
+somehow switch the lightmap in the bsep with the painted one
+from blender.
+ChatGPT said:
+You said:
+I work with the rerelease and the ironwail port.
+ChatGPT said:
+You said:
+bonus thought. Since both ports are modern, would it also be
+possible to modify / repaint the textures in blender? Can a bsp
+format handle a different texture for every face?
+ChatGPT said:
+You said:
+Very well! Impress me then. :D
+ChatGPT said:
+You said:
+cant upload now. Just do it and i'll make the tests remote.
+Worked for 10m 45s
+ChatGPT said:
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+1/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+README.md
+Document
+You said:
+i imported a tiny map. (38 faces)
+how can i select a face? I can in edit mode, but there the detach
+option is greyed out.
+Worked for 1m 10s
+ChatGPT said:
+You said:
+its very hard to navigate inside the level in blender.. :D
+i detouched a face and went to texture paint and it seems as if i
+can paint every face except the originally selected one.
+Worked for 4m 52s
+ChatGPT said:
+README.md
+Document
+You said:
+when i switch of orthogonal view there is some kind of heavy z-
+fighting. what would be ideal cip start and end for an imported
+bsp. also the lightmaps are rendered with the base color shader
+of a princuipled BSDF. They should use its export so other lights in
+blender wont interfere. And the other texture in the materials
+starts black wich multiplies to all black in the next step. it should
+start white so all textures are shown corrcltly. Also there is only
+the lightmap imported by now.
+Worked for 4m 35s
+ChatGPT said:
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+2/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+README.md
+Document
+You said:
+I was wrong! The textures are there. They are just way darker than
+normally so i thought they were black. The lightmaps seem fine.
+But the textures are pretty dark. Somthing when fetching them
+from the bsp must be wrong. also on the long run we should
+think about inclding a own workspace. Especially fps navigation
+with clipping would be very useful.
+Worked for 3m 15s
+ChatGPT said:
+README.md
+Document
+You said:
+fps nav is great but a bit slow. Concider that there are known
+factors for the size of one quake unit. Also starting the player at
+info_player_start will make stuff much easier in the workspace.
+And we should also be able to import the lightsources from the
+original map file and just emulate them via cycles or eevee and
+replace the ones from ericw and use those as a base for painting
+instead. textures are bright now. But i just realized the map is
+upwards down. Coloredlight does not work as intended. It just
+colorizes the whole face instead of following the gradient from
+the light source.
+Worked for 10m 19s
+ChatGPT said:
+quake_surface_studio_0.6.0_README.md
+Document
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+3/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+You said:
+the movement is very good!
+textures are filtered. I prefer nearest neighbour.
+Sidebar reports:
+RGB source: QLIT v1 .lit sidecar
+RGB gradient faces 38/38
+color has now gradients but seems like only in the face it first
+encounters. the other stac uncolored.
+Light replacement seems to work
+light energy scale does not seem to do anything. Its always too
+dark.
+Worked for 5m 21s
+ChatGPT said:
+quake_surface_studio_0.7.0_README.md
+Document
+You said:
+lightmapped and uv favces both 38
+colored lightmap still only on one face.
+bake still dark
+scale does nothing even on extreme values
+cant undo bake returning to the source lightmaps
+activate wasd when mouseweel pressed would be nice
+Worked for 5m 44s
+ChatGPT said:
+quake_surface_studio_0.8.0_README.md
+Document
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+4/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+You said:
+Pasted text(9).txt
+Document
+you got the walk navigation thing wrong. I want to toggle into
+wasd navigation as long a i hold down mmb and when released
+back to normal blender nav. Right now when the "mmb starts fps
+/ wasd" box checked it runs forward and collides with the next
+wall. Wall collision is appreciated but not the forward move.
+version number
+UV-valid faces 38/38
+Material atlas links 5/5
+RGB brightness-gradient faces 38/38
+RGB chromatic faces Depends 19/38
+colored light still only on faces closest to the light
+light bake scale has absolutely no effect. Its always very dark. It
+seems as if i just dont get to see the bake. I imagined it like like
+switching from normal source lightmap emissive texture to a
+diffuse map lit by the lights blender imported. Kind of real time
+lighting via eevee or close to realtime via cycles with the option to
+bake the blender lighting as an ersatz lightmap.
+if it helps here is the compile log for the map to bsp compile:
+Worked for 7m 16s
+ChatGPT said:
+quake_surface_studio_0.9.0_README.md
+Document
+You said:
+Report: Error
+Python: Traceback (most recent call last):
+File
+"/app/blender/5.2/scripts/addons_core/bl_pkg/bl_extension_ops.p
+y", line 1504, in execute
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+5/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+cmd_batch = self.exec_command_iter(ls_modal)
+File
+"/app/blender/5.2/scripts/addons_core/bl_pkg/bl_extension_ops.p
+y", line 2598, in exec_command_iter
+self.exec_legacy(source_filepath)
+File
+"/app/blender/5.2/scripts/addons_core/bl_pkg/bl_extension_ops.p
+y", line 2731, in exec_legacy
+bpy.types.PREFERENCES_OT_addon_install.execute(self,
+bpy.context)
+File "/app/blender/5.2/scripts/startup/bl_operators/userpref.py",
+line 830, in execute
+bpy.ops.preferences.addon_enable(module=mod.__name__)
+RuntimeError: Error: register_class(...): already registered as a
+subclass 'QSS_OT_import_bsp'
+Worked for 4m 59s
+ChatGPT said:
+quake_surface_studio_0.9.1_README.md
+Document
+You said:
+Live lights work but a energy scale of 0 leads to normal emission
+without lightmap. Higher values adds the blender lights on top. 0
+should lead to all black while 1 should ideally look identical to the
+source with lightmap.
+Clicking bake returnes to BSP / baked but results in the same old
+way to dark look
+I also run test scripts and send you the results if that helps
+the mmb fps thing is ok for now. not exactly what i wanted but
+we'll adress this later.
+I like your idea of the three lighting states.
+maybe you can profit from having the map file: The 02 value is
+just the style parameter of a light
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+6/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+also dont forget that the compiler i used for the map is ericw tools
+2.0 wich is well documented and open source. So you can
+research how the original lighting works.
+The light colors still have the only one face problem. And the light
+preview has no color at all.
+Here is the map if it helps:
+// entity 0
 {
-```
-
-// Initialization
-
-```text
-};
-```
-
-**The corresponding map entity must have:**
-
-"classname" "monster_guard" You can place it using a Quake map editor, such as TrenchBroom.
-
-7. Test
-
-1. Launch your mod.
-
-2. Load the test map containing your enemy.
-
-3. Check that the model appears.
-
-4. Check animations and movement.
-
-5. Test attacks, damage and death.
-
-6. Check the console for missing assets or runtime errors. The whole workflow at a glance 1 Create monsters/guard.qc Write the enemy's QuakeC logic. 2 Register it in progs.src Tell the compiler about the new file. 3 Add assets Put models and sounds in the mod directory. 4 Compile Generate a new progs.dat. 5 Place it in a map Add an entity with classname monster_guard. 6 Test Run the map and verify its behaviour. One important distinction: monsters.qc contains shared monster infrastructure, while individual monster files contain the actual implementations. You generally want to follow the latter approach for your own enemies. For your first experiment, I'd actually recommend copying an existing monster's .qc file, renaming its functions and spawn function, and getting that working as a separate enemy. It's a much easier starting point than implementing everything from scratch.
-
-### You
-
-this is the hellnight.qc give me a detailly commented version of it.
-
-### ChatGPT
-
-Absolutely. I can annotate it line by line, explaining both what the code does and why it is written that way. However, I don't see the hellnight.qc file attached to your message. Please upload hellnight.qc here.
-
-**I'll return a fully commented version that:**
-
-Explains every function and important variable. Explains the QuakeC syntax and engine-specific functions. Describes the enemy's AI, movement, attacks and animation logic. Explains how the different functions call each other.
-
-Preserves the original code and behaviour exactly. I'll write the comments with someone learning QuakeC modding in mind, rather than assuming you already know the engine internals.
-
-### You
-
-Pasted text(8).txt Document
-
-### ChatGPT
-
-Completed Annotated Hell Knight source Download hellknight_commented.qc
-
-**I've added detailed comments covering:**
-
-Model and animation frame declarations. QuakeC function syntax and frame sequencing. Projectile creation and aiming. Enemy AI, chasing and charging. Melee and ranged attacks. Pain reactions, death and gibbing.
-
-Enemy initialization and spawn configuration. Important: I preserved the original executable code. I verified that removing comments from the annotated version leaves the original code and model directives unchanged.
-
-I haven't run it through FTEQCC, but no functional code changes were made. Keep your original file as a clean reference.
-
-### You
-
-how intelligent can a quake monster get?
-
-### ChatGPT
-
-Surprisingly intelligent. You can make a Quake monster considerably more sophisticated than the original monsters. You're not limited to the classic behaviour of walking towards the player, getting close and attacking.
-
-QuakeC is a programming language, not a fixed monster-behaviour scripting system. You can implement your own decision-making, memory, perception, tactical behaviour and coordination. The important distinction is between what QuakeC can implement and what the engine makes convenient to implement.
-
-1. What levels of intelligence are possible?
-
-**Here is a rough progression:**
-
-**LevelBehaviour**
-
-1. BasicSees player, chases and attacks.
-
-2. ReactiveDodges, retreats, strafes and chooses between attacks.
-
-3. TacticalUses cover, maintains distance, flanks and repositions.
-
-4. PerceptiveHears sounds, investigates noises, remembers last known player position.
-
-5. StrategicUses different tactics depending on health, ammunition, distance and surroundings.
-
-6. CoordinatedCommunicates with other monsters, surrounds players, calls for reinforcements.
-
-7. AdaptiveRemembers previous encounters and changes its tactics based on player behaviour. These are not engine-defined tiers. They're examples of increasingly sophisticated systems you could implement.
-
-2. What does the Quake rerelease source already give you? This is where things get interesting. The source you downloaded already contains much of the infrastructure you need. For example, look at quakec/ai.qc. Existing functionalityWhat it allows visible()Check whether another entity can be seen. infront()Determine whether a target is in front of the monster. range()Categorize target distance. FindTarget()Find potential enemies. ai_run()Handle enemy pursuit and attack decisions. ai_run_slide()Strafe sideways while fighting. walkpathtogoal()Use the rerelease engine's navigation system.
-
-**There are also some useful additions in the rerelease:**
-
-self.oldenemy lets monsters remember a previous target. self.search_time tracks how long they retain knowledge of an enemy. self.attack_state supports different combat states. self.combat_style distinguishes ranged, melee and mixed combat. self.allowPathFind controls whether advanced pathfinding is used.
-
-Interestingly, the rerelease source already contains an advanced movement implementation called ai_pathtogoal(). It supports using the engine's bot navigation system to move monsters towards their enemies. It's conditional and disabled by default in the original id1 configuration.
-
-3. The biggest limitation: navigation This is probably the biggest technical challenge when making genuinely intelligent monsters. Consider a monster that wants to flank the player.
-
-**It needs to:**
-
-1. Understand where the player is.
-
-2. Find a suitable position to approach from.
-
-3. Find a route to that position.
-
-4. Navigate around walls and obstacles.
-
-5. Reconsider its plan if the player moves. The rerelease has walkpathtogoal() for navigation using available engine navigation nodes.
-
-**However, there is an important compatibility issue for your project:**
-
-The rerelease implements walkpathtogoal(). Ironwail currently exposes the function but returns zero and does not move the entity. So you shouldn't build your entire monster AI around that function if Ironwail compatibility is important.
-
-You can implement your own waypoint-based navigation in QuakeC, though that involves additional work.
-
-4. What about hearing and memory? There is an important distinction here. Quake already has mechanisms for monsters to become aware of hostile activity. For example, the original targeting code uses hostile events and fake entities representing projectile impacts to alert monsters. But sound() itself is a sound-playing function, not a general-purpose hearing system.
-
-**You could implement your own sensory system:**
-
-**Hearing:**
-
-Detect a player firing a weapon. Detect nearby explosions. Investigate the location of a stimulus. Remember where the sound originated.
-
-**Memory:**
-
-Store the last known player position. Remember where the player was last seen. Search nearby rooms after losing sight. Eventually abandon the search. The relevant building blocks are already available in QuakeC, including entity fields, vectors, distance calculations and collision traces.
-
-5. What I'd consider achievable Imagine creating a particularly intelligent Knight-type enemy. 9
-
-**Its behaviour could look something like this:**
-
-When idle It patrols a designated area. Occasionally it looks around and reacts to suspicious activity. When it detects the player It doesn't immediately charge. It evaluates the distance and selects an appropriate tactic.
-
-During combat At long range, it uses magic. At medium range, it approaches while dodging incoming projectiles. At close range, it switches to melee. When surrounded, it attempts to retreat. When low on health, it becomes more aggressive or defensive, depending on its personality.
-
-When it loses sight of the player It goes to the last known position and investigates. It might search nearby areas rather than immediately returning to its idle state. When fighting alongside other monsters It communicates its target to nearby allies. One monster engages the player while another attempts to flank.
-
-All of this is achievable with conventional QuakeC programming, although navigation and coordination require custom systems.
-
-6. My recommendation: don't think of monsters as animation sequences Looking at your hellnight.qc, you can see that its behaviour is primarily organized around animation frames and a handful of decisions. For more sophisticated enemies, I'd gradually move towards a structure like
-
-**this:**
-
-Monster AI architecture Perception system Sight · Hearing · Damage · Memory Decision-making system Evaluate threats · Select tactics · Choose goals Behaviour system Attack · Chase · Dodge · Retreat · Investigate Animation system Play the appropriate model animations The key is separating the monster's decision-making from its animation. Its AI decides what it wants to do; its animation system handles how it visually performs that
-
-action. My take: QuakeC is capable of much more sophisticated enemy AI than Quake's original monsters demonstrate. Your main limitations will be navigation, engine compatibility and the amount of code you're willing to write—not the basic intelligence you can implement.
-
-I'd aim for tactical, reactive monsters rather than trying to simulate human intelligence. That's where you can get some very impressive results without fighting the engine unnecessarily.
-
-### You
-
-can a monster cast rays?
-
-### ChatGPT
-
-Absolutely. QuakeC has a built-in function called traceline(), which performs a raycast. And the good news: it's a standard Quake engine builtin, so it's suitable for your rerelease and Ironwail compatibility target.
-
-1. Basic raycast
-
-**The function signature is:**
-
-traceline(start, end, nomonsters, ignore_entity);
-
-**For example:**
-
-local vector start; local vector destination;
-
-```text
-start = self.origin + '0 0 24';
-destination = self.enemy.origin;
-```
-
-traceline(start, destination, FALSE, self); This casts an invisible ray from the monster towards its enemy.
-
-**The parameters:**
-
-ParameterMeaning startRay origin endRay destination nomonstersWhether other monsters should be ignored ignore_entityEntity to exclude from collision testing, usually self
-
-2. How do you know what the ray hit?
-
-**QuakeC provides several global variables that are populated by traceline():**
-
-VariableMeaning trace_fractionHow far the ray travelled (1.0 = unobstructed) trace_endposWhere the ray stopped trace_entEntity hit by the ray trace_plane_normalSurface normal at the impact point trace_startsolidWhether the ray started inside solid geometry These are declared in the rerelease's defs.qc.
-
-**For example:**
-
-if (trace_fraction < 1)
-
-```text
+"mapversion" "220"
+"wad" "/mnt/sde1/FPS/IdTech2/QuakeDev/##textures/quake.wad"
+"classname" "worldspawn"
+// brush 0
 {
-```
-
-// Something obstructed the ray.
-
-```text
+( 544 0 288 ) ( 544 -512 288 ) ( 544 0 -32 ) wwood1_5 [
+2.220446049250313e-16 1 0 0 ] [ 0 0 -1 0 ] 0 1 1
+( 576 -512 -32 ) ( 544 -512 -32 ) ( 576 -512 288 ) wwood1_5 [ 1 0 0 0
+] [ 0 0 -1 0 ] 0 1 1
+( 576 0 -32 ) ( 544 0 -32 ) ( 576 -512 -32 ) wwood1_5 [ 1 0 0 0 ] [ 0 -1
+00]011
+( 576 -512 128 ) ( 544 -512 128 ) ( 576 0 128 ) wwood1_5 [ 1 0 0 0 ] [
+0 -1 0 0 ] 0 1 1
+( 576 0 288 ) ( 544 0 288 ) ( 576 0 -32 ) wwood1_5 [ 1 0 0 0 ] [ 0 0 -1
+0]011
+( 576 -512 288 ) ( 576 0 288 ) ( 576 -512 -32 ) wwood1_5 [ 0 1 0 0 ] [
+0 0 -1 0 ] 0 1 1
 }
-```
-
-**Or:**
-
-if (trace_ent == self.enemy)
-
-```text
+// brush 1
 {
-```
-
-// The ray hit our enemy.
-
-```text
+( 0 -512 -32 ) ( 0 0 -32 ) ( 0 -512 288 ) wwood1_5 [ 0 1 0 0 ] [ 0 0 -1 0 ]
+011
+( 0 -512 288 ) ( 32 -512 288 ) ( 0 -512 -32 ) wwood1_5 [ 1 0 0 0 ] [ 0 0
+-1 0 ] 0 1 1
+( 0 -512 -32 ) ( 32 -512 -32 ) ( 0 0 -32 ) wwood1_5 [ 1 0 0 0 ] [ 0 -1 0 0
+]011
+( 0 0 128 ) ( 32 0 128 ) ( 0 -512 128 ) wwood1_5 [ 1 0 0 0 ] [ 0 -1 0 0 ]
+011
+( 0 0 -32 ) ( 32 0 -32 ) ( 0 0 288 ) wwood1_5 [ 1 0 0 0 ] [ 0 0 -1 0 ] 0 1
+1
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+7/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+( 32 -512 -32 ) ( 32 -512 288 ) ( 32 0 -32 ) wwood1_5 [
+2.220446049250313e-16 -1 0 0 ] [ 0 0 -1 0 ] 0 1 1
 }
-```
-
-3. Practical example: monster vision Imagine a monster that can only see the player when there is no wall between them. float() MonsterCanSeeEnemy =
-
-```text
+// brush 2
 {
-```
-
-local vector start; local vector destination; // Start the ray around the monster's upper body.
-
-```text
-start = self.origin + '0 0 24';
-```
-
-// Aim towards the enemy.
-
-```text
-destination = self.enemy.origin;
-```
-
-// Cast the ray. // FALSE means other monsters can block the ray. // self is ignored during collision testing. traceline(start, destination, FALSE, self); // Did we hit the intended target? if (trace_ent == self.enemy) return TRUE; // No obstruction along the ray. if (trace_fraction == 1) return TRUE; // Something is blocking the monster's view. return FALSE;
-
-```text
-};
-```
-
-This is a simplified visibility test, but illustrates the principle.
-
-4. You can cast multiple rays! This is where things get interesting.
-
-**Instead of casting one ray, you can cast several:**
-
-**For example, a monster could cast:**
-
-One ray towards the player's head. One ray towards the player's torso. One ray towards the player's feet. This allows you to distinguish between situations where the player is completely hidden and situations where only part of the player is visible.
-
-You could also use multiple rays for obstacle detection, checking whether a monster can move forward, and choosing an unobstructed direction for a projectile. One important technical detail: traceline() performs a collision test, not a visible laser effect. Also, its results are stored in global trace variables, so save any results you need before performing another trace.
-
-My recommendation: Get comfortable with traceline() early. It's one of the most useful tools for implementing sophisticated monster behaviour in QuakeC.
-
-### You
-
-but it only casts for other entities or is also the pixel of a wall texture possible?
-
-### ChatGPT
-
-No. traceline() cannot test individual pixels of a wall texture. It tests the map's collision geometry, not the rendered image.
-
-**There are three different things to distinguish:**
-
-What you want to detecttraceline() A wall or solid piece of world geometryYes A solid entity, such as a door or monsterYes An individual pixel of a wall textureNo For example, imagine a wall with a window painted onto its texture. Visually, the player can see through the window, but the underlying map geometry is still a solid wall.
-
-A ray will hit that wall regardless of which part of the texture it appears to hit. What about transparent textures? This is particularly relevant in Quake. Ironwail supports alpha-tested fence textures (usually texture names beginning
-
-```text
-with { ).
-```
-
-They can visually contain holes, but those holes are a rendering feature, not automatically holes in the collision geometry. So a monster might see the player through a fence visually, while traceline() still reports that a wall blocks its view.
-
-What can you do instead?
-
-**You have a few options:**
-
-1. Actual geometric openings: Build the wall with real gaps. Rays will pass through them naturally.
-
-2. Non-solid geometry: Use non-solid entities for objects that should not block vision or projectiles.
-
-3. Custom visibility system: Represent special transparent areas using helper entities or map-defined information and account for them in your AI. There are also engine-specific extensions in some Quake engines that can retrieve surface texture information, but these aren't a portable way to sample individual pixels. The rerelease's standard QuakeC trace globals provide collision information, not texture pixel data. For your monster AI: I'd distinguish between visual visibility and physical line of sight. Those don't always have to be the same thing. A monster might see you through a grate but still be unable to shoot you through it, for example.
-
----
+( 32 0 288 ) ( 32 -32 288 ) ( 32 0 -32 ) wwood1_5 [ 0 1 0 0 ] [ 0 0 -1 0 ]
+011
+( 544 -32 288 ) ( 544 -32 -32 ) ( 32 -32 288 ) wwood1_5 [ 1 0 0 0 ] [ 0
+0 -1 0 ] 0 1 1
+( 32 0 -32 ) ( 32 -32 -32 ) ( 544 0 -32 ) wwood1_5 [ 1 0 0 0 ] [ 0 -1 0 0 ]
+011
+( 544 0 128 ) ( 544 -32 128 ) ( 32 0 128 ) wwood1_5 [ 1 0 0 0 ] [ 0 -1 0
+0]011
+( 544 0 288 ) ( 32 0 288 ) ( 544 0 -32 ) wwood1_5 [ 1 0 0 0 ] [ 0 0 -1 0
+]011
+( 544 0 -32 ) ( 544 -32 -32 ) ( 544 0 288 ) wwood1_5 [ 0 1 0 0 ] [ 0 0 -1
+0]011
+}
+// brush 3
+{
+( 32 -512 -32 ) ( 32 -480 -32 ) ( 32 -512 288 ) wwood1_5 [ 0 1 0 0 ] [ 0
+0 -1 0 ] 0 1 1
+( 544 -512 -32 ) ( 32 -512 -32 ) ( 544 -512 288 ) wwood1_5 [ 1 0 0 0 ]
+[ 0 0 -1 0 ] 0 1 1
+( 544 -512 -32 ) ( 544 -480 -32 ) ( 32 -512 -32 ) wwood1_5 [ 1 0 0 0 ] [
+0 -1 0 0 ] 0 1 1
+( 32 -512 128 ) ( 32 -480 128 ) ( 544 -512 128 ) wwood1_5 [ 1 0 0 0 ] [
+0 -1 0 0 ] 0 1 1
+( 32 -480 -32 ) ( 544 -480 -32 ) ( 32 -480 288 ) wwood1_5 [ 1 0 0 0 ] [
+0 0 -1 0 ] 0 1 1
+( 544 -512 288 ) ( 544 -480 288 ) ( 544 -512 -32 ) wwood1_5 [ 0 1 0 0
+] [ 0 0 -1 0 ] 0 1 1
+}
+// brush 4
+{
+( 32 -480 160 ) ( 32 -480 128 ) ( 32 -32 160 ) __TB_empty [ 0 -1 0 0 ] [
+0 0 -1 0 ] 270 1 1
+( 544 -480 160 ) ( 544 -480 128 ) ( 32 -480 160 ) __TB_empty [ 1 0 0 0
+] [ 0 0 -1 0 ] 270 1 1
+( 544 -32 128 ) ( 32 -32 128 ) ( 544 -480 128 ) wwall1_1 [ 1 0 0 0 ] [ 0
+-1 0 0 ] 270 1 1
+( 544 -32 160 ) ( 544 -480 160 ) ( 32 -32 160 ) __TB_empty [ 1 0 0 0 ] [
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+8/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+0 -1 0 0 ] 0 1 1
+( 32 -32 160 ) ( 32 -32 128 ) ( 544 -32 160 ) __TB_empty [ -1 0 0 0 ] [ 0
+0 -1 0 ] 270 1 1
+( 544 -32 160 ) ( 544 -32 128 ) ( 544 -480 160 ) __TB_empty [ 0 1 0 0 ]
+[ 0 0 -1 0 ] 270 1 1
+}
+// brush 5
+{
+( 32 -32 -32 ) ( 32 -32 0 ) ( 32 -480 -32 ) afloor3_1 [ 0 -1 0 0 ] [ 0 0 -1 0
+] 270 1 1
+( 32 -480 -32 ) ( 32 -480 0 ) ( 544 -480 -32 ) afloor3_1 [ 1 0 0 0 ] [ 0 0
+-1 0 ] 270 1 1
+( 32 -32 -32 ) ( 32 -480 -32 ) ( 544 -32 -32 ) afloor3_1 [ -1 0 0 0 ] [ 0 -1
+00]011
+( 32 -480 0 ) ( 32 -32 0 ) ( 544 -480 0 ) afloor3_1 [ -1 0 0 0 ] [ 0 -1 0 0 ]
+270 1 1
+( 544 -32 -32 ) ( 544 -32 0 ) ( 32 -32 -32 ) afloor3_1 [ -1 0 0 0 ] [ 0 0 -1
+0 ] 270 1 1
+( 544 -480 -32 ) ( 544 -480 0 ) ( 544 -32 -32 ) afloor3_1 [ 0 1 0 0 ] [ 0 0
+-1 0 ] 270 1 1
+}
+// brush 6
+{
+( 192 -224 0 ) ( 192 -223 0 ) ( 192 -224 1 ) wceiling5 [ 0 -1 0 0 ] [ 0 0
+-1 0 ] 0 1 1
+( 192 -224 0 ) ( 192 -224 1 ) ( 193 -224 0 ) wceiling5 [ 1 0 0 0 ] [ 0 0 -1
+0]011
+( 192 -224 0 ) ( 193 -224 0 ) ( 192 -223 0 ) wceiling5 [ -1 0 0 0 ] [ 0 -1
+00]011
+( 256 -160 128 ) ( 256 -159 128 ) ( 257 -160 128 ) wceiling5 [ 1 0 0 0 ]
+[ 0 -1 0 0 ] 0 1 1
+( 256 -160 32 ) ( 257 -160 32 ) ( 256 -160 33 ) wceiling5 [ -1 0 0 0 ] [ 0
+0 -1 0 ] 0 1 1
+( 256 -160 32 ) ( 256 -160 33 ) ( 256 -159 32 ) wceiling5 [ 0 1 0 0 ] [ 0
+0 -1 0 ] 0 1 1
+}
+}
+// entity 1
+{
+"classname" "light"
+"origin" "120 -88 56"
+"_color" "0 0 1"
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+9/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+}
+// entity 2
+{
+"classname" "light"
+"origin" "504 -344 56"
+"_color" "0.6666667 0 0"
+"" "2"
+}
+// entity 3
+{
+"classname" "info_player_start"
+"origin" "336 -272 40"
+}
+// entity 4
+{
+"classname" "light"
+"origin" "344 -88 8"
+}
+// entity 5
+{
+"classname" "light"
+"origin" "376 -392 8"
+"style" "2"
+}
+Worked for 27m 5s
+ChatGPT said:
+quake_surface_studio_0.10.0_README.md
+Document
+You said:
+---------------------
+test01_compile.bsp
+LoadBSPFile: 'test01_compile.bsp'
+BSP is version Quake BSP bsp29
+INFO: using built-in palette.
+count lump name
+1 models
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+byte size
+64
+10/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+29 planes580
+44 vertexes528
+10 nodes240
+9 texinfos360
+38 faces760
+30 clipnodes
+5 leafs
+240
+140
+40 marksurfaces
+83 edges
+80
+332
+164 surfedges
+656
+6 textures21948
+lightdata6820
+visdata4
+entdata470
+wrote test01_compile.bsp.lm_0.png
+wrote test01_compile.bsp.lm_2.png
+wrote test01_compile.bsp.geometry.obj
+wrote test01_compile.bsp.json
+wwood1_5,245760
+afloor3_1,225280
+wwall1_1,225280
+qss inspector is inside the zip. Should i run it from blenders
+python console somehow?
+cant find the lighting diagnostics text file
+clicking bake gives error:
+Cycles bake failed; atlas and light calibration restored: The Cycles
+bake contains no measurable illumination. Set Live light scale
+above zero and check that imported lamps illuminate the map.
+Worked for 4m 21s
+ChatGPT said:
+quake_surface_studio_0.10.1_README.md
+Document
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+11/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+You said:
+QSS_test01_comp…
+Document
+bpy.ops.object.delete(use_global=False, confirm=False)
+Deleted 1 object(s)
+bpy.context.space_data.recent_folders_active = 0
+Modules Installed () from
+'/home/chnucki/Downloads/quake_surface_studio_0.10.1.zip' into
+'/home/chnucki/.var/app/org.blender.Blender/config/blender/5.2/
+scripts/addons'
+bpy.context.region.active_panel_category = 'Quake'
+bpy.context.space_data.recent_folders_active = 3
+bpy.context.space_data.recent_folders_active = 2
+bpy.context.space_data.recent_folders_active = 3
+bpy.context.space_data.system_bookmarks_active = 3
+bpy.context.space_data.recent_folders_active = 3
+bpy.context.space_data.recent_folders_active = 3
+Imported 38 faces, 4 light entities. Palette:
+/mnt/sde1/FPS/IdTech2/QuakeDev/id1/gfx/palette.lmp. Textures:
+4 embedded, 0 WAD, 0 external, 0 white fallback. RGB lightmaps:
+QLIT v1 .lit sidecar. Spawn view set to info_player_start.
+bpy.context.space_data.shading.type = 'RENDERED'
+bpy.context.space_data.context = 'WORLD'
+bpy.context.space_data.context = 'VIEW_LAYER'
+bpy.context.space_data.context = 'OUTPUT'
+bpy.context.space_data.context = 'OUTPUT'
+bpy.context.space_data.context = 'RENDER'
+bpy.context.scene.render.engine = 'CYCLES'
+Live imported-light preview enabled in Eevee Rendered mode.
+Zero energy is black; energy scale changes imported lamps.
+Original imported BSP lightmaps are displayed; the
+editable/baked atlas remains untouched.
+Live imported-light preview enabled in Eevee Rendered mode.
+Zero energy is black; energy scale changes imported lamps.
+Original imported BSP lightmaps are displayed; the
+editable/baked atlas remains untouched.
+Live imported-light preview enabled in Eevee Rendered mode.
+Zero energy is black; energy scale changes imported lamps.
+bpy.context.scene.qss_light_energy_scale = 0.46
+Python: Traceback (most recent call last):
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+12/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+File
+"/home/chnucki/.var/app/org.blender.Blender/config/blender/5.2/
+scripts/addons/quake_surface_studio/addon.py", line 3068, in
+execute
+result = bpy.ops.qss.bake_scene_lights()
+RuntimeError: Error: Cycles bake failed; atlas and light calibration
+restored: Cycles finished but sampled BSP lightmap luxels are all
+zero. Energy scale=0.46; imported lamps=4; max lamp
+energy=138 W; sampled luxels=3782; whole atlas nonzero
+pixels=0/262144; whole atlas max RGB=0. Use Save Lighting
+Diagnostics and send the report; failed-bake statistics are
+recorded.
+Cycles bake failed; atlas and light calibration restored: Cycles
+finished but sampled BSP lightmap luxels are all zero. Energy
+scale=0.46; imported lamps=4; max lamp energy=138 W; sampled
+luxels=3782; whole atlas nonzero pixels=0/262144; whole atlas
+max RGB=0. Use Save Lighting Diagnostics and send the report;
+failed-bake statistics are recorded.
+Saved
+/home/chnucki/Desktop/QSS_test01_compile_diagnostics.txt;
+report also stored as Blender Text
+"QSS_test01_compile_diagnostics" and copied to clipboard
+Cycles bake failed; atlas and light calibration restored: Cycles
+finished but sampled BSP lightmap luxels are all zero. Energy
+scale=0.46; imported lamps=4; max lamp energy=138 W; sampled
+luxels=3782; whole atlas nonzero pixels=0/262144; whole atlas
+max RGB=0. Use Save Lighting Diagnostics and send the report;
+failed-bake statistics are recorded.
+Python: Traceback (most recent call last):
+File
+"/home/chnucki/.var/app/org.blender.Blender/config/blender/5.2/
+scripts/addons/quake_surface_studio/addon.py", line 3068, in
+execute
+result = bpy.ops.qss.bake_scene_lights()
+RuntimeError: Error: Cycles bake failed; atlas and light calibration
+restored: Cycles finished but sampled BSP lightmap luxels are all
+zero. Energy scale=0.46; imported lamps=4; max lamp
+energy=138 W; sampled luxels=3782; whole atlas nonzero
+pixels=0/262144; whole atlas max RGB=0. Use Save Lighting
+Diagnostics and send the report; failed-bake statistics are
+recorded.
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+13/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+why is roughness .9 instead of 1?
+Worked for 7m 39s
+ChatGPT said:
+quake_surface_studio_0.10.2_README.md
+Document
+You said:
+QSS_test01_comp…
+Document
+just a little aesthtic request: make the menu more ordered.
+collapsable sections and stuff. also use colors for sections if
+possible so its easy to navigate.
+Logs / Errors:
+bpy.ops.object.delete(use_global=False, confirm=False)
+Deleted 1 object(s)
+bpy.context.space_data.system_bookmarks_active = 3
+Modules Installed (quake_surface_studio) from
+'/home/chnucki/Downloads/quake_surface_studio_0.10.2.zip' into
+'/home/chnucki/.var/app/org.blender.Blender/config/blender/5.2/
+scripts/addons'
+bpy.context.region.active_panel_category = 'Quake'
+bpy.context.scene.qss_game_dir = ""
+bpy.context.space_data.recent_folders_active = 3
+bpy.context.space_data.recent_folders_active = 3
+[Errno 21] Is a directory:
+'/mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/'
+bpy.context.space_data.recent_folders_active = 0
+Imported 38 faces, 4 light entities. Palette:
+/mnt/sde1/FPS/IdTech2/QuakeDev/id1/gfx/palette.lmp. Textures:
+4 embedded, 0 WAD, 0 external, 0 white fallback. RGB lightmaps:
+QLIT v1 .lit sidecar. Spawn view set to info_player_start.
+bpy.context.space_data.shading.type = 'RENDERED'
+Live imported-light preview enabled in Eevee Rendered mode.
+Zero energy is black; energy scale changes imported lamps.
+Cycles bake failed; atlas and light calibration restored: Cycles
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+14/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+finished but sampled BSP lightmap luxels are all zero. Energy
+scale=1; imported lamps=4; max lamp energy=300 W; sampled
+luxels=3782; whole atlas nonzero pixels=0/262144; whole atlas
+max RGB=0. Use Save Lighting Diagnostics and send the report;
+failed-bake statistics are recorded.
+Unlit BSP/baked lightmap preview enabled.
+Live imported-light preview enabled in Eevee Rendered mode.
+Zero energy is black; energy scale changes imported lamps.
+Original imported BSP lightmaps are displayed; the
+editable/baked atlas remains untouched.
+Unlit BSP/baked lightmap preview enabled.
+Live imported-light preview enabled in Eevee Rendered mode.
+Zero energy is black; energy scale changes imported lamps.
+bpy.ops.node.select(select_passthrough=True, location=(549,
+281))
+bpy.ops.node.translate_attach(TRANSFORM_OT_translate=
+{"value":(17.816, 367.845, 0), "orient_type":'GLOBAL',
+"orient_matrix":((1, 0, 0), (0, 1, 0), (0, 0, 1)),
+"orient_matrix_type":'GLOBAL', "constraint_axis":(False, False,
+False), "mirror":False, "use_proportional_edit":False,
+"proportional_edit_falloff":'SMOOTH', "proportional_size":1,
+"use_proportional_connected":False,
+"use_proportional_projected":False, "snap":False,
+"snap_elements":{'GRID'}, "use_snap_project":False,
+"snap_target":'CLOSEST', "use_snap_self":True,
+"use_snap_edit":True, "use_snap_nonedit":True,
+"use_snap_selectable":False, "snap_point":(0, 0, 0),
+"snap_align":False, "snap_normal":(0, 0, 0), "gpencil_strokes":False,
+"cursor_transform":False, "texture_space":False,
+"remove_on_cancel":False, "use_duplicated_keyframes":False,
+"view2d_edge_pan":True, "release_confirm":False,
+"use_accurate":False, "use_automerge_and_split":False,
+"translate_origin":False}, NODE_OT_attach={})
+bpy.ops.object.editmode_toggle()
+bpy.ops.mesh.select_mode(use_extend=False, use_expand=False,
+type='FACE')
+bpy.ops.mesh.hide(unselected=True)
+bpy.ops.mesh.reveal(select=False)
+Could not detach face: bpy_prop_collection[index]: index 16 out of
+range, size 0
+Could not detach face: bpy_prop_collection[index]: index 16 out of
+range, size 0
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+15/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+Cycles bake failed; atlas and light calibration restored:
+bpy_prop_collection[index]: index 0 out of range, size 0
+Could not write diagnostics: bpy_prop_collection[index]: index 0
+out of range, size 0
+bpy.ops.object.editmode_toggle()
+Saved
+/home/chnucki/Desktop/QSS_test01_compile_diagnostics.txt;
+report also stored as Blender Text
+"QSS_test01_compile_diagnostics" and copied to clipboard
+Live imported-light preview enabled in Eevee Rendered mode.
+Zero energy is black; energy scale changes imported lamps.
+Original imported BSP lightmaps are displayed; the
+editable/baked atlas remains untouched.
+Live imported-light preview enabled in Eevee Rendered mode.
+Zero energy is black; energy scale changes imported lamps.
+Original imported BSP lightmaps are displayed; the
+editable/baked atlas remains untouched.
+Live imported-light preview enabled in Eevee Rendered mode.
+Zero energy is black; energy scale changes imported lamps.
+bpy.ops.object.editmode_toggle()
+bpy.ops.mesh.hide(unselected=True)
+bpy.ops.mesh.reveal(select=False)
+Viewport clipping set to 0.01 – 100 Blender units.
+Viewport moved to info_player_start.
+Could not detach face: bpy_prop_collection[index]: index 15 out of
+range, size 0
+bpy.ops.object.editmode_toggle()
+bpy.ops.qss.detach_selected_faces()
+Detached 1 face(s) into separate 0–1 paint textures. Use 'Enter
+Texture Paint' to paint the active selected face; select another face
+to switch canvases.
+bpy.ops.paint.texture_paint_toggle()
+Painting image: QSS_Face_00015_Paint
+bpy.ops.paint.texture_paint_toggle()
+bpy.ops.object.editmode_toggle()
+bpy.ops.object.editmode_toggle()
+bpy.ops.paint.texture_paint_toggle()
+Original imported BSP lightmaps are displayed; the
+editable/baked atlas remains untouched.
+Live imported-light preview enabled in Eevee Rendered mode.
+Zero energy is black; energy scale changes imported lamps.
+Unlit BSP/baked lightmap preview enabled.
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+16/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+Cycles bake failed; atlas and light calibration restored: Cycles
+finished but sampled BSP lightmap luxels are all zero. Energy
+scale=1; imported lamps=4; max lamp energy=300 W; sampled
+luxels=3782; whole atlas nonzero pixels=0/262144; whole atlas
+max RGB=0. Use Save Lighting Diagnostics and send the report;
+failed-bake statistics are recorded.
+bpy.ops.paint.texture_paint_toggle()
+bpy.ops.object.editmode_toggle()
+Cycles bake failed; atlas and light calibration restored:
+bpy_prop_collection[index]: index 0 out of range, size 0
+bpy.ops.object.editmode_toggle()
+bpy.ops.paint.texture_paint_toggle()
+Restored original BSP lightmaps.
+bpy.ops.paint.texture_paint_toggle()
+Cycles bake failed; atlas and light calibration restored: Cycles
+finished but sampled BSP lightmap luxels are all zero. Energy
+scale=1; imported lamps=4; max lamp energy=300 W; sampled
+luxels=3782; whole atlas nonzero pixels=0/262144; whole atlas
+max RGB=0. Use Save Lighting Diagnostics and send the report;
+failed-bake statistics are recorded.
+Question:
+Is it impossible to emulate the different lighting "delay"
+behaviours of ericw in blender / cycles?
+You can also implement more diagnostics scripts to run in blender
+to perform tests. I am not in a hurry so i can just let it run for a
+while if necessary.
+Worked for 27m 6s
+ChatGPT said:
+quake_surface_studio_0.11.0_README.md
+Document
+You said:
+errors:
+Saved
+/home/chnucki/Desktop/QSS_test01_compile_diagnostics.txt;
+report also stored as Blender Text
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+17/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+"QSS_test01_compile_diagnostics" and copied to clipboard
+Python: Traceback (most recent call last):
+File
+"/home/chnucki/.var/app/org.blender.Blender/config/blender/5.2/
+scripts/addons/quake_surface_studio/addon.py", line 4460, in
+draw
+diagnostics.operator(QSS_OT_run_blender_selftest.bl_idname,
+text="Run Full Self-Test + Delay Benchmark", icon='EXPERIMENT')
+~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^
+TypeError: UILayout.operator(): error with keyword argument
+"icon" - enum "EXPERIMENT" not found in ('NONE',
+'CHAR_NOTDEF', 'CHAR_REPLACEMENT', 'NOT_FOUND', 'BLANK1',
+'AUTOMERGE_OFF', 'AUTOMERGE_ON', 'CHECKBOX_DEHLT',
+'CHECKBOX_HLT', 'CLIPUV_DEHLT', 'CLIPUV_HLT',
+'DECORATE_UNLOCKED', 'DECORATE_LOCKED', 'FAKE_USER_OFF',
+'FAKE_USER_ON', 'HIDE_ON', 'HIDE_OFF', 'INDIRECT_ONLY_OFF',
+'INDIRECT_ONLY_ON', 'ONIONSKIN_OFF', 'ONIONSKIN_ON',
+'UNPINNED', 'PINNED', 'RADIOBUT_OFF', 'RADIOBUT_ON',
+'RECORD_OFF', 'RECORD_ON', 'RESTRICT_RENDER_ON',
+'RESTRICT_RENDER_OFF', 'RESTRICT_SELECT_ON',
+'RESTRICT_SELECT_OFF', 'RESTRICT_VIEW_ON',
+'RESTRICT_VIEW_OFF', 'RIGHTARROW', 'DOWNARROW_HLT',
+'SELECT_INTERSECT', 'SELECT_DIFFERENCE', 'SNAP_OFF',
+'SNAP_ON', 'PLAYHEAD_SNAP_OFF', 'PLAYHEAD_SNAP_ON',
+'UNLOCKED', 'LOCKED', 'VIS_SEL_11', 'VIS_SEL_10', 'VIS_SEL_01',
+'VIS_SEL_00', 'CANCEL', 'ERROR', 'QUESTION', 'STATUS_ERROR',
+'STATUS_ERROR_FILLED', 'STATUS_INFO', 'STATUS_INFO_FILLED',
+'STATUS_WARNING', 'STATUS_WARNING_FILLED', 'ADD',
+'ARROW_LEFTRIGHT', 'AUTO', 'BLENDER', 'BORDERMOVE',
+'BRUSHES_ALL', 'CHECKMARK', 'COLLAPSEMENU',
+'COLLECTION_NEW', 'COLOR', 'COPY_ID',
+'DISCLOSURE_TRI_DOWN', 'DISCLOSURE_TRI_RIGHT', 'DOT',
+'DRIVER_DISTANCE', 'DRIVER_ROTATIONAL_DIFFERENCE',
+'DRIVER_TRANSFORM', 'DUPLICATE', 'EYEDROPPER',
+'FCURVE_SNAPSHOT', 'FILE_NEW', 'FILE_TICK', 'FREEZE',
+'FULLSCREEN_ENTER', 'FULLSCREEN_EXIT', 'GHOST_DISABLED',
+'GHOST_ENABLED', 'GRIP', 'GRIP_V',
+'GRIP_CORNER_BOTTOM_RIGHT', 'HAND', 'HELP', 'LINKED',
+'MENU_PANEL', 'NODE_SEL', 'NODE', 'OBJECT_HIDDEN', 'OPTIONS',
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+18/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+'PANEL_CLOSE', 'PLUGIN', 'PLUS', 'PRESET_NEW', 'PROJECT', 'QUIT',
+'RECOVER_LAST', 'REMOVE', 'RIGHTARROW_THIN', 'SCREEN_BACK',
+'STATUSBAR', 'STYLUS_PRESSURE', 'THREE_DOTS', 'TOPBAR',
+'TRASH', 'TRIA_DOWN', 'TRIA_LEFT', 'TRIA_RIGHT', 'TRIA_UP',
+'UNLINKED', 'URL', 'VIEWZOOM', 'WINDOW', 'WORKSPACE', 'X',
+'ZOOM_ALL', 'ZOOM_IN', 'ZOOM_OUT', 'ZOOM_PREVIOUS',
+'ZOOM_SELECTED', 'MODIFIER', 'PARTICLES', 'PHYSICS',
+'SHADERFX', 'SPEAKER', 'OUTPUT', 'SCENE', 'TOOL_SETTINGS',
+'LIGHT', 'MATERIAL', 'TEXTURE', 'WORLD', 'ANIM', 'SCRIPT',
+'GEOMETRY_NODES', 'TEXT', 'ACTION', 'ASSET_MANAGER',
+'CONSOLE', 'FILEBROWSER', 'GEOMETRY_SET', 'GRAPH', 'IMAGE',
+'INFO', 'NLA', 'NODE_COMPOSITING', 'NODE_MATERIAL',
+'NODE_TEXTURE', 'NODETREE', 'OUTLINER', 'PREFERENCES',
+'PROPERTIES', 'SEQUENCE', 'SOUND', 'SPREADSHEET', 'TIME',
+'TRACKER', 'UV', 'VIEW3D', 'EDITMODE_HLT', 'OBJECT_DATAMODE',
+'PARTICLEMODE', 'POSE_HLT', 'SCULPTMODE_HLT', 'TPAINT_HLT',
+'UV_DATA', 'VPAINT_HLT', 'WPAINT_HLT', 'TRACKER_DATA',
+'TRACKING_BACKWARDS_SINGLE', 'TRACKING_BACKWARDS',
+'TRACKING_CLEAR_BACKWARDS', 'TRACKING_CLEAR_FORWARDS',
+'TRACKING_FORWARDS_SINGLE', 'TRACKING_FORWARDS',
+'TRACKING_REFINE_BACKWARDS',
+'TRACKING_REFINE_FORWARDS', 'TRACKING', 'GROUP',
+'CONSTRAINT_BONE', 'CONSTRAINT', 'ARMATURE_DATA',
+'BONE_DATA', 'CAMERA_DATA', 'CURVE_DATA', 'EMPTY_DATA',
+'FONT_DATA', 'LATTICE_DATA', 'LIGHT_DATA', 'MESH_DATA',
+'META_DATA', 'PARTICLE_DATA', 'SHAPEKEY_DATA', 'SURFACE_DATA',
+'OBJECT_DATA', 'RENDER_RESULT', 'RENDERLAYERS', 'SCENE_DATA',
+'BRUSH_DATA', 'IMAGE_DATA', 'LINE_DATA', 'MATERIAL_DATA',
+'TEXTURE_DATA', 'WORLD_DATA', 'ANIM_DATA', 'BOIDS',
+'CAMERA_STEREO', 'COMMUNITY', 'FACE_MAPS', 'FCURVE', 'FILE',
+'GREASEPENCIL', 'GREASEPENCIL_LAYER_GROUP', 'GROUP_BONE',
+'GROUP_UVS', 'GROUP_VCOL', 'GROUP_VERTEX',
+'LIBRARY_DATA_BROKEN', 'LIBRARY_DATA_DIRECT',
+'LIBRARY_DATA_OVERRIDE', 'ORPHAN_DATA', 'PACKAGE', 'PRESET',
+'RENDER_ANIMATION', 'RENDER_STILL', 'RNA', 'STRANDS',
+'UGLYPACKAGE', 'GP_DRAW_STROKE', 'GP_DRAW_FILL',
+'GP_DRAW_BOTH', 'MOUSE_LMB', 'MOUSE_MMB', 'MOUSE_RMB',
+'MOUSE_MMB_SCROLL', 'MOUSE_LMB_2X', 'MOUSE_MOVE',
+'MOUSE_LMB_DRAG', 'MOUSE_MMB_DRAG', 'MOUSE_RMB_DRAG',
+'DECORATE_ANIMATE', 'DECORATE_DRIVER',
+'DECORATE_KEYFRAME', 'DECORATE_LIBRARY_OVERRIDE',
+'DECORATE_LINKED', 'DECORATE_OVERRIDE', 'DECORATE',
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+19/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+'OUTLINER_COLLECTION', 'COLLECTION_COLOR_01',
+'COLLECTION_COLOR_02', 'COLLECTION_COLOR_03',
+'COLLECTION_COLOR_04', 'COLLECTION_COLOR_05',
+'COLLECTION_COLOR_06', 'COLLECTION_COLOR_07',
+'COLLECTION_COLOR_08', 'CURVES_DATA',
+'OUTLINER_DATA_ARMATURE', 'OUTLINER_DATA_CAMERA',
+'OUTLINER_DATA_CURVE', 'OUTLINER_DATA_CURVES',
+'OUTLINER_DATA_EMPTY', 'OUTLINER_DATA_FONT',
+'OUTLINER_DATA_GP_LAYER', 'OUTLINER_DATA_GREASEPENCIL',
+'OUTLINER_DATA_LATTICE', 'OUTLINER_DATA_LIGHT',
+'OUTLINER_DATA_LIGHTPROBE', 'OUTLINER_DATA_MESH',
+'OUTLINER_DATA_META', 'OUTLINER_DATA_POINTCLOUD',
+'OUTLINER_DATA_SPEAKER', 'OUTLINER_DATA_SURFACE',
+'OUTLINER_DATA_VOLUME', 'POINTCLOUD_DATA',
+'POINTCLOUD_POINT', 'VOLUME_DATA',
+'OUTLINER_OB_ARMATURE', 'OUTLINER_OB_CAMERA',
+'OUTLINER_OB_CURVE', 'OUTLINER_OB_CURVES',
+'OUTLINER_OB_EMPTY', 'OUTLINER_OB_FONT',
+'OUTLINER_OB_FORCE_FIELD', 'OUTLINER_OB_GREASEPENCIL',
+'OUTLINER_OB_GROUP_INSTANCE', 'OUTLINER_OB_IMAGE',
+'OUTLINER_OB_LATTICE', 'OUTLINER_OB_LIGHT',
+'OUTLINER_OB_LIGHTPROBE', 'OUTLINER_OB_MESH',
+'OUTLINER_OB_META', 'OUTLINER_OB_POINTCLOUD',
+'OUTLINER_OB_SPEAKER', 'OUTLINER_OB_SURFACE',
+'OUTLINER_OB_VOLUME', 'GP_MULTIFRAME_EDITING',
+'GP_ONLY_SELECTED', 'GP_SELECT_BETWEEN_STROKES',
+'GP_SELECT_POINTS', 'GP_SELECT_STROKES', 'HOLDOUT_OFF',
+'HOLDOUT_ON', 'MODIFIER_OFF', 'MODIFIER_ON',
+'RESTRICT_COLOR_OFF', 'RESTRICT_COLOR_ON',
+'RESTRICT_INSTANCED_OFF', 'RESTRICT_INSTANCED_ON',
+'LIGHT_AREA', 'LIGHT_HEMI', 'LIGHT_POINT', 'LIGHT_SPOT',
+'LIGHT_SUN', 'LIGHTPROBE_PLANE', 'LIGHTPROBE_SPHERE',
+'LIGHTPROBE_VOLUME', 'COLOR_BLUE', 'COLOR_GREEN',
+'COLOR_RED', 'CONE', 'CUBE', 'CURVE_BEZCIRCLE',
+'CURVE_BEZCURVE', 'CURVE_NCIRCLE', 'CURVE_NCURVE',
+'CURVE_PATH', 'CURVES', 'EMPTY_ARROWS', 'EMPTY_AXIS',
+'EMPTY_SINGLE_ARROW', 'MESH_CAPSULE', 'MESH_CIRCLE',
+'MESH_CONE', 'MESH_CUBE', 'MESH_CYLINDER', 'MESH_GRID',
+'MESH_ICOSPHERE', 'MESH_MONKEY', 'MESH_PLANE',
+'MESH_TORUS', 'MESH_UVSPHERE', 'META_BALL', 'META_CAPSULE',
+'META_CUBE', 'META_ELLIPSOID', 'META_PLANE', 'MONKEY',
+'SPHERE', 'STROKE', 'SURFACE_NCIRCLE', 'SURFACE_NCURVE',
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+20/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+'SURFACE_NCYLINDER', 'SURFACE_NSPHERE',
+'SURFACE_NSURFACE', 'SURFACE_NTORUS', 'TRIA_DOWN_BAR',
+'TRIA_LEFT_BAR', 'TRIA_RIGHT_BAR', 'TRIA_UP_BAR', 'AREA_DOCK',
+'AREA_JOIN_DOWN', 'AREA_JOIN_LEFT', 'AREA_JOIN_UP',
+'AREA_JOIN', 'AREA_SWAP', 'FORCE_BOID', 'FORCE_CHARGE',
+'FORCE_CURVE', 'FORCE_DRAG', 'FORCE_FLUIDFLOW',
+'FORCE_FORCE', 'FORCE_HARMONIC', 'FORCE_LENNARDJONES',
+'FORCE_MAGNETIC', 'FORCE_TEXTURE', 'FORCE_TURBULENCE',
+'FORCE_VORTEX', 'FORCE_WIND', 'IMAGE_BACKGROUND',
+'IMAGE_PLANE', 'IMAGE_REFERENCE',
+'RENDER_SWAP_DIMENSIONS', 'RIGID_BODY_CONSTRAINT',
+'RIGID_BODY', 'SPLIT_HORIZONTAL', 'SPLIT_VERTICAL',
+'ANCHOR_BOTTOM', 'ANCHOR_CENTER', 'ANCHOR_LEFT',
+'ANCHOR_RIGHT', 'ANCHOR_TOP', 'NODE_CORNER',
+'NODE_INSERT_OFF', 'NODE_INSERT_ON', 'NODE_SIDE',
+'NODE_TOP', 'SELECT_EXTEND', 'SELECT_SET', 'SELECT_SUBTRACT',
+'ALIGN_BOTTOM', 'ALIGN_CENTER', 'ALIGN_FLUSH',
+'ALIGN_JUSTIFY', 'ALIGN_LEFT', 'ALIGN_MIDDLE', 'ALIGN_RIGHT',
+'ALIGN_TOP', 'BOLD', 'ITALIC', 'LINENUMBERS_OFF',
+'LINENUMBERS_ON', 'SCRIPTPLUGINS', 'SMALL_CAPS',
+'SYNTAX_OFF', 'SYNTAX_ON', 'UNDERLINE', 'WORDWRAP_OFF',
+'WORDWRAP_ON', 'CON_ACTION', 'CON_ARMATURE',
+'CON_GEOMETRYATTRIBUTE', 'CON_CAMERASOLVER',
+'CON_CHILDOF', 'CON_CLAMPTO', 'CON_DISTLIMIT', 'CON_FLOOR',
+'CON_FOLLOWPATH', 'CON_FOLLOWTRACK', 'CON_KINEMATIC',
+'CON_LOCKTRACK', 'CON_LOCLIKE', 'CON_LOCLIMIT',
+'CON_OBJECTSOLVER', 'CON_PIVOT', 'CON_ROTLIKE',
+'CON_ROTLIMIT', 'CON_SAMEVOL', 'CON_SHRINKWRAP',
+'CON_SIZELIKE', 'CON_SIZELIMIT', 'CON_SPLINEIK',
+'CON_STRETCHTO', 'CON_TRACKTO', 'CON_TRANSFORM_CACHE',
+'CON_TRANSFORM', 'CON_TRANSLIKE', 'HOOK', 'MOD_ARMATURE',
+'MOD_ARRAY', 'MOD_BEVEL', 'MOD_BOOLEAN', 'MOD_BUILD',
+'MOD_CAST', 'MOD_CLOTH', 'MOD_CURVE',
+'MOD_CURVE_TO_TUBE', 'MOD_DASH', 'MOD_DATA_TRANSFER',
+'MOD_DECIM', 'MOD_DISPLACE', 'MOD_DYNAMICPAINT',
+'MOD_EDGESPLIT', 'MOD_ENVELOPE', 'MOD_EXPLODE',
+'MOD_FLUID', 'MOD_FLUIDSIM', 'MOD_HUE_SATURATION',
+'MOD_INSTANCE', 'MOD_LATTICE', 'MOD_LENGTH',
+'MOD_LINEART', 'MOD_MASK', 'MOD_MESHDEFORM',
+'MOD_MIRROR', 'MOD_MULTIRES', 'MOD_NOISE',
+'MOD_NORMALEDIT', 'MOD_OCEAN', 'MOD_OFFSET',
+'MOD_OPACITY', 'MOD_OUTLINE', 'MOD_PARTICLE_INSTANCE',
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+21/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+'MOD_PARTICLES', 'MOD_PHYSICS', 'MOD_REMESH',
+'MOD_SCATTER_ON_SURFACE', 'MOD_SCREW',
+'MOD_SHRINKWRAP', 'MOD_SIMPLEDEFORM', 'MOD_SIMPLIFY',
+'MOD_SKIN', 'MOD_SMOOTH', 'MOD_SOFT', 'MOD_SOLIDIFY',
+'MOD_SUBSURF', 'MOD_THICKNESS', 'MOD_TIME', 'MOD_TINT',
+'MOD_TRIANGULATE', 'MOD_UVPROJECT', 'MOD_VERTEX_WEIGHT',
+'MOD_WARP', 'MOD_WAVE', 'MOD_WIREFRAME', 'MODIFIER_DATA',
+'ACTION_SLOT', 'ACTION_TWEAK', 'DRIVER', 'FF', 'FRAME_NEXT',
+'FRAME_PREV', 'HANDLE_ALIGNED', 'HANDLE_AUTO',
+'HANDLE_AUTOCLAMPED', 'HANDLE_FREE', 'HANDLE_VECTOR',
+'IPO_BACK', 'IPO_BEZIER', 'IPO_BOUNCE', 'IPO_CIRC',
+'IPO_CONSTANT', 'IPO_CUBIC', 'IPO_EASE_IN_OUT', 'IPO_EASE_IN',
+'IPO_EASE_OUT', 'IPO_ELASTIC', 'IPO_EXPO', 'IPO_LINEAR',
+'IPO_QUAD', 'IPO_QUART', 'IPO_QUINT', 'IPO_SINE', 'KEY_DEHLT',
+'KEY_HLT', 'KEYFRAME_HLT', 'KEYFRAME', 'KEYINGSET',
+'MARKER_HLT', 'MARKER', 'MUTE_IPO_OFF', 'MUTE_IPO_ON',
+'NEXT_KEYFRAME', 'NLA_PUSHDOWN', 'NORMALIZE_FCURVES',
+'ORIENTATION_PARENT', 'PAUSE', 'PLAY_REVERSE', 'PLAY_SOUND',
+'PLAY', 'PMARKER_ACT', 'PMARKER_SEL', 'PMARKER',
+'PREV_KEYFRAME', 'PREVIEW_RANGE', 'REC', 'REW', 'SOLO_OFF',
+'SOLO_ON', 'CENTER_ONLY', 'CURSOR', 'EDGESEL', 'EDGE_BEVEL',
+'EDGE_CREASE', 'EDGE_SEAM', 'EDGE_SHARP', 'FACE_CORNER',
+'FACESEL', 'INVERSESQUARECURVE', 'LINCURVE', 'NOCURVE',
+'PARTICLE_PATH', 'PARTICLE_POINT', 'PARTICLE_TIP',
+'PIVOT_ACTIVE', 'PIVOT_BOUNDBOX', 'PIVOT_CURSOR',
+'PIVOT_INDIVIDUAL', 'PIVOT_MEDIAN', 'PROP_CON', 'PROP_OFF',
+'PROP_ON', 'PROP_PROJECTED', 'RNDCURVE', 'ROOTCURVE',
+'SHARPCURVE', 'SMOOTHCURVE', 'SPHERECURVE', 'VERTEXSEL',
+'VERTEX_CREASE', 'SNAP_EDGE', 'SNAP_FACE_CENTER',
+'SNAP_FACE_NEAREST', 'SNAP_FACE', 'SNAP_GRID',
+'SNAP_INCREMENT', 'SNAP_MIDPOINT', 'SNAP_NORMAL',
+'SNAP_PEEL_OBJECT', 'SNAP_PERPENDICULAR', 'SNAP_VERTEX',
+'SNAP_VOLUME', 'STICKY_UVS_DISABLE', 'STICKY_UVS_LOC',
+'STICKY_UVS_VERT', 'ORIENTATION_GIMBAL',
+'ORIENTATION_GLOBAL', 'ORIENTATION_LOCAL',
+'ORIENTATION_NORMAL', 'ORIENTATION_VIEW', 'COPYDOWN',
+'FIXED_SIZE', 'GIZMO', 'GP_CAPS_FLAT', 'GP_CAPS_ROUND',
+'NORMALS_FACE', 'NORMALS_VERTEX_FACE', 'NORMALS_VERTEX',
+'OBJECT_ORIGIN', 'ORIENTATION_CURSOR', 'PASTEDOWN',
+'PASTEFLIPDOWN', 'PASTEFLIPUP', 'TRANSFORM_ORIGINS',
+'UV_EDGESEL', 'UV_FACESEL', 'UV_ISLANDSEL', 'UV_SYNC_SELECT',
+'UV_VERTEXSEL', 'AXIS_FRONT', 'AXIS_SIDE', 'AXIS_TOP', 'GRID',
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+22/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+'LAYER_ACTIVE', 'LAYER_USED', 'LOCKVIEW_OFF', 'LOCKVIEW_ON',
+'OVERLAY', 'SHADING_BBOX', 'SHADING_RENDERED',
+'SHADING_SOLID', 'SHADING_TEXTURE', 'SHADING_WIRE', 'XRAY',
+'VIEW_CAMERA_UNSELECTED', 'VIEW_CAMERA', 'VIEW_LOCKED',
+'VIEW_ORTHO', 'VIEW_PAN', 'VIEW_PERSPECTIVE',
+'VIEW_UNLOCKED', 'VIEW_ZOOM', 'FILE_ALIAS', 'FILE_FOLDER',
+'FOLDER_REDIRECT', 'APPEND_BLEND', 'BACK', 'BOOKMARKS',
+'CURRENT_FILE', 'DESKTOP', 'DISC', 'DISK_DRIVE', 'DOCUMENTS',
+'DOWNLOAD', 'DOWNLOAD_DONE', 'EXPORT', 'EXTERNAL_DRIVE',
+'USB_DRIVE', 'FILE_3D', 'FILE_ARCHIVE', 'FILE_BACKUP',
+'FILE_BLANK', 'FILE_BLEND', 'FILE_CACHE', 'FILE_FONT',
+'FILE_HIDDEN', 'FILE_IMAGE', 'FILE_MOVIE', 'FILE_PARENT',
+'FILE_REFRESH', 'FILE_SCRIPT', 'FILE_SOUND', 'FILE_TEXT',
+'FILE_VOLUME', 'FILTER', 'FILTER_FILLED', 'FONTPREVIEW',
+'FORWARD', 'HOME', 'IMGDISPLAY', 'IMPORT', 'LINK_BLEND',
+'LONGDISPLAY', 'LOOP_BACK', 'LOOP_FORWARDS',
+'NETWORK_DRIVE', 'NEWFOLDER', 'PREVIEW_LOADING',
+'SETTINGS', 'SHORTDISPLAY', 'SORT_ASC', 'SORT_DESC',
+'SORTALPHA', 'SORTBYEXT', 'SORTSIZE', 'SORTTIME', 'SYSTEM',
+'TAG', 'TEMP', 'ALIASED', 'ANTIALIASED', 'MAT_SPHERE_SKY',
+'MATCLOTH', 'MATCUBE', 'MATFLUID', 'MATPLANE',
+'MATSHADERBALL', 'MATSPHERE', 'SEQ_CHROMA_SCOPE',
+'SEQ_HISTOGRAM', 'SEQ_LUMA_WAVEFORM', 'SEQ_PREVIEW',
+'SEQ_SEQUENCER', 'SEQ_SPLITVIEW', 'SEQ_STRIP_DUPLICATE',
+'SEQ_STRIP_META', 'SEQ_STRIP_MODIFIER',
+'MOD_BRIGHTNESS_CONTRAST', 'MOD_COLOR_BALANCE',
+'MOD_CURVES', 'MOD_HUE_CORRECT', 'MOD_TONEMAP',
+'MOD_WHITE_BALANCE', 'IMAGE_ALPHA', 'IMAGE_RGB_ALPHA',
+'IMAGE_RGB', 'IMAGE_ZDEPTH', 'BLENDER_LOGO_LARGE',
+'CANCEL_LARGE', 'DISC_LARGE', 'DISK_DRIVE_LARGE',
+'EXTERNAL_DRIVE_LARGE', 'USB_DRIVE_LARGE',
+'FILE_FOLDER_LARGE', 'FILE_LARGE', 'FILE_PARENT_LARGE',
+'INFO_LARGE', 'NETWORK_DRIVE_LARGE', 'QUESTION_LARGE',
+'WARNING_LARGE', 'KEY_BACKSPACE_FILLED', 'KEY_BACKSPACE',
+'KEY_COMMAND_FILLED', 'KEY_COMMAND',
+'KEY_CONTROL_FILLED', 'KEY_CONTROL', 'KEY_EMPTY1_FILLED',
+'KEY_EMPTY1', 'KEY_EMPTY2_FILLED', 'KEY_EMPTY2',
+'KEY_EMPTY3_FILLED', 'KEY_EMPTY3', 'KEY_MENU_FILLED',
+'KEY_MENU', 'KEY_OPTION_FILLED', 'KEY_OPTION',
+'KEY_RETURN_FILLED', 'KEY_RETURN', 'KEY_RING_FILLED',
+'KEY_RING', 'KEY_SHIFT_FILLED', 'KEY_SHIFT', 'KEY_TAB_FILLED',
+'KEY_TAB', 'KEY_WINDOWS_FILLED', 'KEY_WINDOWS',
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+23/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+'GESTURE_PAN', 'GESTURE_ROTATE', 'GESTURE_ZOOM', 'FUND',
+'HEART', 'INTERNET_OFFLINE', 'INTERNET', 'USER',
+'EXPERIMENTAL', 'MEMORY', 'RGB_RED', 'RGB_GREEN', 'RGB_BLUE',
+'KEYTYPE_KEYFRAME_VEC', 'KEYTYPE_BREAKDOWN_VEC',
+'KEYTYPE_EXTREME_VEC', 'KEYTYPE_JITTER_VEC',
+'KEYTYPE_MOVING_HOLD_VEC', 'KEYTYPE_GENERATED_VEC',
+'HANDLETYPE_FREE_VEC', 'HANDLETYPE_ALIGNED_VEC',
+'HANDLETYPE_VECTOR_VEC', 'HANDLETYPE_AUTO_VEC',
+'HANDLETYPE_AUTO_CLAMP_VEC', 'COLORSET_01_VEC',
+'COLORSET_02_VEC', 'COLORSET_03_VEC', 'COLORSET_04_VEC',
+'COLORSET_05_VEC', 'COLORSET_06_VEC', 'COLORSET_07_VEC',
+'COLORSET_08_VEC', 'COLORSET_09_VEC', 'COLORSET_10_VEC',
+'COLORSET_11_VEC', 'COLORSET_12_VEC', 'COLORSET_13_VEC',
+'COLORSET_14_VEC', 'COLORSET_15_VEC', 'COLORSET_16_VEC',
+'COLORSET_17_VEC', 'COLORSET_18_VEC', 'COLORSET_19_VEC',
+'COLORSET_20_VEC', 'STRIP_COLOR_01', 'STRIP_COLOR_02',
+'STRIP_COLOR_03', 'STRIP_COLOR_04', 'STRIP_COLOR_05',
+'STRIP_COLOR_06', 'STRIP_COLOR_07', 'STRIP_COLOR_08',
+'STRIP_COLOR_09', 'LIBRARY_DATA_INDIRECT',
+'LIBRARY_DATA_OVERRIDE_NONEDITABLE', 'PACKAGE_INDIRECT',
+'LAYERGROUP_COLOR_01', 'LAYERGROUP_COLOR_02',
+'LAYERGROUP_COLOR_03', 'LAYERGROUP_COLOR_04',
+'LAYERGROUP_COLOR_05', 'LAYERGROUP_COLOR_06',
+'LAYERGROUP_COLOR_07', 'LAYERGROUP_COLOR_08', 'EVENT_A',
+'EVENT_B', 'EVENT_C', 'EVENT_D', 'EVENT_E', 'EVENT_F', 'EVENT_G',
+'EVENT_H', 'EVENT_I', 'EVENT_J', 'EVENT_K', 'EVENT_L', 'EVENT_M',
+'EVENT_N', 'EVENT_O', 'EVENT_P', 'EVENT_Q', 'EVENT_R', 'EVENT_S',
+'EVENT_T', 'EVENT_U', 'EVENT_V', 'EVENT_W', 'EVENT_X', 'EVENT_Y',
+'EVENT_Z', 'EVENT_SHIFT', 'EVENT_CTRL', 'EVENT_ALT', 'EVENT_OS',
+'EVENT_HYPER', 'EVENT_F1', 'EVENT_F2', 'EVENT_F3', 'EVENT_F4',
+'EVENT_F5', 'EVENT_F6', 'EVENT_F7', 'EVENT_F8', 'EVENT_F9',
+'EVENT_F10', 'EVENT_F11', 'EVENT_F12', 'EVENT_F13', 'EVENT_F14',
+'EVENT_F15', 'EVENT_F16', 'EVENT_F17', 'EVENT_F18', 'EVENT_F19',
+'EVENT_F20', 'EVENT_F21', 'EVENT_F22', 'EVENT_F23', 'EVENT_F24',
+'EVENT_ESC', 'EVENT_TAB', 'EVENT_PAGEUP', 'EVENT_PAGEDOWN',
+'EVENT_RETURN', 'EVENT_SPACEKEY', 'EVENT_ZEROKEY',
+'EVENT_ONEKEY', 'EVENT_TWOKEY', 'EVENT_THREEKEY',
+'EVENT_FOURKEY', 'EVENT_FIVEKEY', 'EVENT_SIXKEY',
+'EVENT_SEVENKEY', 'EVENT_EIGHTKEY', 'EVENT_NINEKEY',
+'EVENT_PAD0', 'EVENT_PAD1', 'EVENT_PAD2', 'EVENT_PAD3',
+'EVENT_PAD4', 'EVENT_PAD5', 'EVENT_PAD6', 'EVENT_PAD7',
+'EVENT_PAD8', 'EVENT_PAD9', 'EVENT_PADASTER',
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+24/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+'EVENT_PADSLASH', 'EVENT_PADMINUS', 'EVENT_PADENTER',
+'EVENT_PADPLUS', 'EVENT_PADPERIOD', 'EVENT_MOUSE_4',
+'EVENT_MOUSE_5', 'EVENT_MOUSE_6', 'EVENT_MOUSE_7',
+'EVENT_TABLET_STYLUS', 'EVENT_TABLET_ERASER',
+'EVENT_LEFT_ARROW', 'EVENT_DOWN_ARROW',
+'EVENT_RIGHT_ARROW', 'EVENT_UP_ARROW', 'EVENT_PAUSE',
+'EVENT_INSERT', 'EVENT_HOME', 'EVENT_END',
+'EVENT_UNKNOWN', 'EVENT_GRLESS', 'EVENT_MEDIAPLAY',
+'EVENT_MEDIASTOP', 'EVENT_MEDIAFIRST', 'EVENT_MEDIALAST',
+'EVENT_APP', 'EVENT_CAPSLOCK', 'EVENT_BACKSPACE',
+'EVENT_DEL', 'EVENT_SEMICOLON', 'EVENT_PERIOD',
+'EVENT_COMMA', 'EVENT_QUOTE', 'EVENT_ACCENTGRAVE',
+'EVENT_MINUS', 'EVENT_PLUS', 'EVENT_SLASH',
+'EVENT_BACKSLASH', 'EVENT_EQUAL', 'EVENT_LEFTBRACKET',
+'EVENT_RIGHTBRACKET', 'EVENT_PAD_PAN', 'EVENT_PAD_ROTATE',
+'EVENT_PAD_ZOOM', 'EVENT_NDOF_BUTTON_V1',
+'EVENT_NDOF_BUTTON_V2', 'EVENT_NDOF_BUTTON_V3',
+'EVENT_NDOF_BUTTON_SAVE_V1',
+'EVENT_NDOF_BUTTON_SAVE_V2',
+'EVENT_NDOF_BUTTON_SAVE_V3', 'EVENT_NDOF_BUTTON_1',
+'EVENT_NDOF_BUTTON_2', 'EVENT_NDOF_BUTTON_3',
+'EVENT_NDOF_BUTTON_4', 'EVENT_NDOF_BUTTON_5',
+'EVENT_NDOF_BUTTON_6', 'EVENT_NDOF_BUTTON_7',
+'EVENT_NDOF_BUTTON_8', 'EVENT_NDOF_BUTTON_9',
+'EVENT_NDOF_BUTTON_10', 'EVENT_NDOF_BUTTON_11',
+'EVENT_NDOF_BUTTON_12', 'EVENT_NDOF_BUTTON_MENU',
+'EVENT_NDOF_BUTTON_FIT', 'EVENT_NDOF_BUTTON_TOP',
+'EVENT_NDOF_BUTTON_BOTTOM', 'EVENT_NDOF_BUTTON_LEFT',
+'EVENT_NDOF_BUTTON_RIGHT', 'EVENT_NDOF_BUTTON_FRONT',
+'EVENT_NDOF_BUTTON_BACK', 'EVENT_NDOF_BUTTON_ISO1',
+'EVENT_NDOF_BUTTON_ISO2', 'EVENT_NDOF_BUTTON_ROLL_CW',
+'EVENT_NDOF_BUTTON_ROLL_CCW',
+'EVENT_NDOF_BUTTON_SPIN_CW',
+'EVENT_NDOF_BUTTON_SPIN_CCW',
+'EVENT_NDOF_BUTTON_TILT_CW',
+'EVENT_NDOF_BUTTON_TILT_CCW',
+'EVENT_NDOF_BUTTON_ROTATE',
+'EVENT_NDOF_BUTTON_PANZOOM',
+'EVENT_NDOF_BUTTON_DOMINANT',
+'EVENT_NDOF_BUTTON_PLUS', 'EVENT_NDOF_BUTTON_MINUS',
+'NODE_SOCKET_FLOAT', 'NODE_SOCKET_VECTOR',
+'NODE_SOCKET_RGBA', 'NODE_SOCKET_SHADER',
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+25/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+'NODE_SOCKET_BOOLEAN', 'NODE_SOCKET_INT',
+'NODE_SOCKET_STRING', 'NODE_SOCKET_OBJECT',
+'NODE_SOCKET_IMAGE', 'NODE_SOCKET_GEOMETRY',
+'NODE_SOCKET_COLLECTION', 'NODE_SOCKET_TEXTURE',
+'NODE_SOCKET_MATERIAL', 'NODE_SOCKET_ROTATION',
+'NODE_SOCKET_MENU', 'NODE_SOCKET_MATRIX',
+'NODE_SOCKET_BUNDLE', 'NODE_SOCKET_CLOSURE',
+'NODE_SOCKET_FONT', 'NODE_SOCKET_SCENE',
+'NODE_SOCKET_TEXT', 'NODE_SOCKET_MASK',
+'NODE_SOCKET_SOUND', 'NODE_SOCKET_INT_VECTOR')
+dIAGNOSTICS:
+QUAKE SURFACE STUDIO DIAGNOSTICS
+Blender: 5.2.0 LTS
+QSS object: test01_compile.bsp_QSS
+Source BSP:
+/mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/test01_compile.bsp
+Preview mode: realtime
+Render engine: BLENDER_EEVEE
+RGB source: QLIT v1 .lit sidecar
+BSPX lumps:
+Light energy scale: 1.0
+Source-match calibration: 1.0
+Last bake: raw_mean=n/a source_mean=n/a atlas_mean=n/a
+max=n/a normalization=n/a
+Last attempted bake: scale=n/a max_lamp_energy=n/a
+sampled_luxels=n/a sampled_mean=n/a image_stats=n/a
+Last Cycles bake operator result: n/a
+Last Cycles attempt config: engine=n/a target=n/a type=n/a
+uv=n/a
+Last attempted lamp states: n/a
+Current (restored) bake settings: engine=BLENDER_EEVEE
+target=IMAGE_TEXTURES samples=4096 diffuse_bounces=4
+color=True diffuse=True direct=True indirect=True
+Color management: view_transform=AgX look=None
+exposure=0.0 gamma=1.0
+Compiler bounce: 2
+Compiler bounce color scale: 1.0
+Quake direct bake: luxels=n/a lit=n/a rays=n/a blocked=n/a
+raw_mean=n/a source_mean=n/a normalization=n/a
+Mesh faces: 38; materials: 5; loops=164; vertices=164
+Attribute qss_bsp_face_id: 38 entries / 38 faces
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+26/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+Attribute qss_bsp_texinfo_id: 38 entries / 38 faces
+Attribute qss_bsp_miptex_id: 38 entries / 38 faces
+Attribute qss_lm_has_data: 38 entries / 38 faces
+Attribute qss_lm_atlas_x: 38 entries / 38 faces
+Attribute qss_lm_atlas_y: 38 entries / 38 faces
+Attribute qss_lm_sample_w: 38 entries / 38 faces
+Attribute qss_lm_sample_h: 38 entries / 38 faces
+UV Quake_Texture_UV: 164 entries / 164 loops
+UV Quake_Lightmap_UV: 164 entries / 164 loops
+Last detach error: none
+Last Quake bake error: none
+Lightmap image: QSS_Lightmap_test01_compile.bsp (512, 512)
+float=True colorspace=Non-Color
+Atlas face sample stats: 38 faces; chromatic by atlas pixels: 38/38
+face 0: 75 luxels mean=(0.377,0.209,0.196) range=
+(0.443,0.208,0.188) chroma=0.322
+face 1: 45 luxels mean=(0.562,0.354,0.345) range=
+(0.506,0.314,0.302) chroma=0.325
+face 2: 225 luxels mean=(0.537,0.385,0.421) range=
+(0.569,0.376,0.486) chroma=0.325
+face 3: 225 luxels mean=(0.567,0.315,0.311) range=
+(0.596,0.216,0.208) chroma=0.502
+face 4: 75 luxels mean=(0.532,0.195,0.191) range=
+(0.467,0.153,0.153) chroma=0.498
+face 5: 45 luxels mean=(0.308,0.264,0.565) range=
+(0.369,0.322,0.267) chroma=0.404
+face 6: 15 luxels mean=(0.151,0.115,0.166) range=
+(0.294,0.239,0.224) chroma=0.220
+face 7: 75 luxels mean=(0.217,0.164,0.198) range=
+(0.294,0.239,0.243) chroma=0.220
+face 8: 15 luxels mean=(0.181,0.150,0.155) range=
+(0.153,0.114,0.110) chroma=0.059
+face 9: 99 luxels mean=(0.118,0.093,0.526) range=
+(0.259,0.224,0.388) chroma=0.557
+face 10: 165 luxels mean=(0.087,0.065,0.433) range=
+(0.259,0.224,0.525) chroma=0.557
+face 11: 165 luxels mean=(0.052,0.034,0.097) range=
+(0.169,0.133,0.239) chroma=0.208
+face 12: 135 luxels mean=(0.505,0.220,0.219) range=
+(0.427,0.137,0.137) chroma=0.463
+face 13: 135 luxels mean=(0.355,0.219,0.214) range=
+(0.337,0.133,0.125) chroma=0.271
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+27/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+face 14: 135 luxels mean=(0.043,0.022,0.371) range=
+(0.051,0.031,0.365) chroma=0.498
+face 15: 135 luxels mean=(0.025,0.007,0.063) range=
+(0.024,0.012,0.212) chroma=0.200
+face 16: 135 luxels mean=(0.430,0.359,0.429) range=
+(0.353,0.349,0.447) chroma=0.239
+face 17: 135 luxels mean=(0.160,0.136,0.509) range=
+(0.384,0.337,0.404) chroma=0.561
+face 18: 45 luxels mean=(0.237,0.183,0.176) range=
+(0.239,0.180,0.173) chroma=0.110
+face 19: 135 luxels mean=(0.504,0.309,0.309) range=
+(0.471,0.263,0.255) chroma=0.345
+face 20: 135 luxels mean=(0.104,0.082,0.096) range=
+(0.298,0.247,0.247) chroma=0.067
+face 21: 45 luxels mean=(0.468,0.199,0.197) range=
+(0.282,0.165,0.165) chroma=0.341
+face 22: 45 luxels mean=(0.381,0.334,0.501) range=
+(0.259,0.208,0.149) chroma=0.239
+face 23: 75 luxels mean=(0.386,0.324,0.429) range=
+(0.349,0.325,0.447) chroma=0.239
+face 24: 225 luxels mean=(0.425,0.302,0.315) range=
+(0.518,0.447,0.533) chroma=0.255
+face 25: 225 luxels mean=(0.511,0.258,0.256) range=
+(0.471,0.341,0.341) chroma=0.416
+face 26: 75 luxels mean=(0.359,0.249,0.252) range=
+(0.310,0.180,0.173) chroma=0.188
+face 27: 45 luxels mean=(0.248,0.222,0.513) range=
+(0.298,0.267,0.247) chroma=0.392
+face 28: 65 luxels mean=(0.205,0.164,0.195) range=
+(0.224,0.176,0.180) chroma=0.161
+face 29: 75 luxels mean=(0.195,0.155,0.188) range=
+(0.247,0.200,0.231) chroma=0.212
+face 30: 15 luxels mean=(0.159,0.136,0.141) range=
+(0.122,0.082,0.082) chroma=0.051
+face 31: 33 luxels mean=(0.036,0.025,0.240) range=
+(0.086,0.075,0.133) chroma=0.275
+face 32: 165 luxels mean=(0.077,0.065,0.421) range=
+(0.216,0.196,0.525) chroma=0.561
+face 33: 165 luxels mean=(0.052,0.040,0.101) range=
+(0.149,0.125,0.239) chroma=0.208
+face 34: 45 luxels mean=(0.022,0.013,0.334) range=
+(0.027,0.020,0.239) chroma=0.435
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+28/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+face 35: 45 luxels mean=(0.458,0.376,0.368) range=
+(0.208,0.184,0.188) chroma=0.122
+face 36: 45 luxels mean=(0.144,0.109,0.113) range=
+(0.169,0.129,0.129) chroma=0.067
+face 37: 45 luxels mean=(0.274,0.251,0.537) range=
+(0.200,0.188,0.196) chroma=0.388
+MATERIALS:
+slot 0 QSS_001_wwood1_5: base=
+['QSS_TEX_001_wwood1_5[sRGB]'] lightmap=
+['QSS_Lightmap_test01_compile.bsp[Non-Color]'] uv=['texture_uv:
+Quake_Texture_UV', 'lightmap: Quake_Lightmap_UV']
+slot 1 QSS_003_wwall1_1: base=['QSS_TEX_003_wwall1_1[sRGB]']
+lightmap=['QSS_Lightmap_test01_compile.bsp[Non-Color]'] uv=
+['texture_uv: Quake_Texture_UV', 'lightmap: Quake_Lightmap_UV']
+slot 2 QSS_004_afloor3_1: base=['QSS_TEX_004_afloor3_1[sRGB]']
+lightmap=['QSS_Lightmap_test01_compile.bsp[Non-Color]'] uv=
+['texture_uv: Quake_Texture_UV', 'lightmap: Quake_Lightmap_UV']
+slot 3 QSS_005_wceiling5: base=['QSS_TEX_005_wceiling5[sRGB]']
+lightmap=['QSS_Lightmap_test01_compile.bsp[Non-Color]'] uv=
+['texture_uv: Quake_Texture_UV', 'lightmap: Quake_Lightmap_UV']
+slot 4 QSS_MISSING_TEXTURE: base=
+['QSS_MISSING_TEXTURE_WHITE[sRGB]'] lightmap=
+['QSS_Lightmap_test01_compile.bsp[Non-Color]'] uv=['texture_uv:
+Quake_Texture_UV', 'lightmap: Quake_Lightmap_UV']
+IMPORTED LIGHTS:
+QSS_light_001 type=POINT color=(0.0, 0.0, 1.0) energy=150 W
+style=0 inferred=False value=150.0 delay=0 range=300.0
+calibration=1.0
+QSS_light_002 type=POINT color=(0.6667, 0.0, 0.0) energy=150 W
+style=2 inferred=True value=150.0 delay=0 range=300.0
+calibration=1.0
+QSS_light_004 type=POINT color=(1.0, 1.0, 1.0) energy=150 W
+style=0 inferred=False value=150.0 delay=0 range=300.0
+calibration=1.0
+QSS_light_005 type=POINT color=(1.0, 1.0, 1.0) energy=150 W
+style=2 inferred=False value=150.0 delay=0 range=300.0
+calibration=1.0
+World: QSS_LivePreview_BlackWorld_test01_compile.bsp_QSS
+Background color=(0.0, 0.0, 0.0, 1.0) strength=0.0
+BSP face style distribution: {0: 38, 2: 29}
+BSP face 0: styles=[0, 2] lightofs=0
+BSP face 1: styles=[0, 2] lightofs=252
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+29/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+BSP face 2: styles=[0, 2] lightofs=1724
+BSP face 3: styles=[2, 0] lightofs=3824
+BSP face 4: styles=[2, 0] lightofs=344
+BSP face 5: styles=[0] lightofs=632
+BSP face 6: styles=[2, 0] lightofs=952
+BSP face 7: styles=[2, 0] lightofs=2176
+BSP face 8: styles=[2, 0] lightofs=3200
+BSP face 9: styles=[0] lightofs=152
+BSP face 10: styles=[0, 2] lightofs=2460
+BSP face 11: styles=[0, 2] lightofs=984
+BSP face 12: styles=[2, 0] lightofs=1452
+BSP face 13: styles=[0, 2] lightofs=2928
+BSP face 14: styles=[0] lightofs=496
+BSP face 15: styles=[0] lightofs=1316
+BSP face 16: styles=[0] lightofs=2792
+BSP face 17: styles=[0] lightofs=3656
+BSP face 18: styles=[0] lightofs=4276
+BSP face 19: styles=[2, 0] lightofs=680
+BSP face 20: styles=[2, 0] lightofs=3384
+BSP face 21: styles=[2, 0] lightofs=4324
+BSP face 22: styles=[0, 2] lightofs=4484
+BSP face 23: styles=[0, 2] lightofs=5472
+BSP face 24: styles=[0, 2] lightofs=6368
+BSP face 25: styles=[2, 0] lightofs=5824
+BSP face 26: styles=[2, 0] lightofs=5672
+BSP face 27: styles=[0, 2] lightofs=6276
+BSP face 28: styles=[2, 0] lightofs=2328
+BSP face 29: styles=[2, 0] lightofs=3232
+BSP face 30: styles=[2, 0] lightofs=3792
+BSP face 31: styles=[0, 2] lightofs=4416
+BSP face 32: styles=[0, 2] lightofs=5140
+BSP face 33: styles=[2, 0] lightofs=4668
+BSP face 34: styles=[0] lightofs=5624
+BSP face 35: styles=[0, 2] lightofs=4576
+BSP face 36: styles=[2, 0] lightofs=5000
+BSP face 37: styles=[0] lightofs=5092
+Viewport: RENDERED scene_lights=True scene_world=True
+scene_lights_render=True scene_world_render=True
+NOTE: atlas chroma reports actual sampled face pixels, not the
+source-side summary counter.
+NOTE: Live Lights requires View3D use_scene_lights_render=True
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+30/3111/8/26, 6:26 PM
+Quake Lightmap Workflow
+and use_scene_world_render=True.
+Run ericw-tools bspinfo on the same BSP for independent per-
+style lightmap atlas exports.
+Worked for 8s
+ChatGPT said:
+https://chatgpt.com/c/6aeeb2dd-8bf8-83ed-82d3-ae97bf457d9e
+31/31
 
 ## 2026-11-08 18:20 — Quake Lightmap Workflow (1)
 
