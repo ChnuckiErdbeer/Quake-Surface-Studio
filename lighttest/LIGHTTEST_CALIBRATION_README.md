@@ -69,3 +69,25 @@ The updated script now:
 - writes the detected height in the new `sample_z` CSV column.
 
 The source MAP/BSP remain untouched. A successful compile alone is not proof that sampling works: check the final summary for `missing=0` (or inspect any remaining non-OK rows) before treating the CSV as calibration data.
+
+
+## Run directly from Blender
+
+The repository also includes `run_calibration_in_blender.py`. After pulling the latest branch, open this file from the repository's `lighttest/` folder in Blender's Text Editor and choose **Text → Run Script**.
+
+The launcher:
+
+1. Locates the repository (the standard clone location is `~/Quake-Surface-Studio`).
+2. Checks the expected Git branch, clean working tree, corrected sampler, and ericw-tools executables.
+3. Runs both calibration variants using the existing `run_lighttest_calibration.py`.
+4. Checks the summary and prints sample counts and switchable-style counts.
+5. Stages, commits, and pushes only the newly created `results_<timestamp>/` folder to the current branch.
+
+Requirements and safety notes:
+
+- Git must be installed and authenticated to push to the GitHub repository.
+- The launcher expects ericw-tools at the path configured near the top of the script. Edit `TOOLS_DIR` there if your installation moves.
+- Start with a clean working tree. If there are local changes or untracked files, the launcher stops before compiling.
+- The compile runs synchronously; Blender may appear busy while qbsp, vis, and light execute.
+- The source MAP and BSP are not modified. Partial compiler outputs are retained locally if a build fails; failed runs are not committed or pushed.
+- Missing luxel samples are reported and the diagnostics are uploaded for inspection rather than silently discarded.
