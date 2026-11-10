@@ -12,7 +12,10 @@ from functools import lru_cache
 import math
 import os
 import re
+import shutil
 import struct
+import sys
+import tempfile
 import time
 import traceback
 
@@ -22,11 +25,11 @@ from bpy.types import Operator, Panel, Menu
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
 from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils
-from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils
+from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils
 
 
-ADDON_VERSION = (0, 18, 4)
-QSS_MAX_PAINT_FACES = 64
+ADDON_VERSION = (0, 19, 0)
+QSS_PAINT_CONFIRM_FACE_COUNT = 64
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -5442,28 +5445,146 @@ def _qss_current_paint_image(context):
     return image
 
 
-def _qss_selected_paint_face_count(context, obj):
-    """Count visible selected faces in Edit, Object, or Texture Paint mask mode."""
+def _qss_selected_paint_face_indices(context, obj):
+    """Return visible selected polygon indices from the active mesh selection."""
     if obj is None or getattr(obj, "type", "") != "MESH":
-        return 0
+        return []
     if getattr(context, "mode", "") == "EDIT_MESH":
         import bmesh
         bm = bmesh.from_edit_mesh(obj.data)
-        return sum(1 for face in bm.faces if face.select and not face.hide)
-    return sum(1 for poly in obj.data.polygons if poly.select)
+        bm.faces.ensure_lookup_table()
+        bm.faces.index_update()
+        return [int(face.index) for face in bm.faces if face.select and not face.hide]
+    return [int(poly.index) for poly in obj.data.polygons if poly.select]
 
 
-def _qss_check_paint_face_limit(operator, context, obj):
-    count = _qss_selected_paint_face_count(context, obj)
-    if count > QSS_MAX_PAINT_FACES:
-        _report(
-            operator, "WARNING",
-            f"Painting stopped: {count} faces are selected. QSS limits one paint operation "
-            f"to {QSS_MAX_PAINT_FACES} faces to avoid Blender memory spikes or crashes. "
-            "Split the selection into smaller batches.",
+def _qss_selected_paint_face_count(context, obj):
+    return len(_qss_selected_paint_face_indices(context, obj))
+
+
+def _qss_estimate_texture_paint_memory(context, obj):
+    """Estimate peak CPU image-buffer memory for selected face detachment."""
+    indices = _qss_selected_paint_face_indices(context, obj)
+    mesh = getattr(obj, "data", None)
+    if not indices or mesh is None:
+        return palette_utils.estimate_face_local_paint_bytes([])
+    uv_layer = mesh.uv_layers.get("Quake_Texture_UV")
+    spans = []
+    float_buffer = False
+    for index in indices:
+        if index < 0 or index >= len(mesh.polygons):
+            continue
+        poly = mesh.polygons[index]
+        material_index = int(poly.material_index)
+        material = mesh.materials[material_index] if 0 <= material_index < len(mesh.materials) else None
+        image = _find_image(material, "base_texture") if material else None
+        if image is None:
+            continue
+        float_buffer = float_buffer or bool(getattr(image, "is_float", False))
+        source_width = max(1, int(image.size[0]))
+        source_height = max(1, int(image.size[1]))
+        width_span, height_span = float(source_width), float(source_height)
+        if uv_layer is not None:
+            try:
+                uv_values = [
+                    uv_layer.data[int(loop_index)].uv
+                    for loop_index in poly.loop_indices
+                ]
+                if len(uv_values) >= 3:
+                    width_span = max(
+                        1.0,
+                        (max(float(uv.x) for uv in uv_values) -
+                         min(float(uv.x) for uv in uv_values)) * source_width,
+                    )
+                    height_span = max(
+                        1.0,
+                        (max(float(uv.y) for uv in uv_values) -
+                         min(float(uv.y) for uv in uv_values)) * source_height,
+                    )
+            except Exception:
+                # Stale Edit Mode UV collections should not prevent a warning;
+                # fall back to the full source-image footprint.
+                pass
+        spans.append((width_span, height_span))
+    if len(spans) != len(indices):
+        # Unknown source faces are conservatively estimated as 512x512 images.
+        spans.extend([(512.0, 512.0)] * (len(indices) - len(spans)))
+    return palette_utils.estimate_face_local_paint_bytes(
+        spans, bytes_per_face_pixel=16 if float_buffer else 4,
+        atlas_size=512, bytes_per_atlas_pixel=16,
+    )
+
+
+def _qss_available_memory_bytes():
+    """Return the best available physical/cgroup memory estimate, or None."""
+    candidates = []
+    try:
+        with open("/sys/fs/cgroup/memory.max", "r", encoding="ascii") as handle:
+            limit_text = handle.read().strip()
+        with open("/sys/fs/cgroup/memory.current", "r", encoding="ascii") as handle:
+            current_text = handle.read().strip()
+        if limit_text != "max":
+            available = max(0, int(limit_text) - int(current_text))
+            candidates.append(available)
+    except (OSError, ValueError):
+        pass
+    try:
+        with open("/proc/meminfo", "r", encoding="ascii") as handle:
+            for line in handle:
+                if line.startswith("MemAvailable:"):
+                    candidates.append(max(0, int(line.split()[1]) * 1024))
+                    break
+    except (OSError, ValueError, IndexError):
+        pass
+    if not candidates and hasattr(os, "sysconf"):
+        try:
+            pages = int(os.sysconf("SC_AVPHYS_PAGES"))
+            page_size = int(os.sysconf("SC_PAGE_SIZE"))
+            if pages > 0 and page_size > 0:
+                candidates.append(pages * page_size)
+        except (OSError, ValueError, TypeError):
+            pass
+    return min(candidates) if candidates else None
+
+
+def _qss_map_image_memory_bytes(obj):
+    """Estimate existing image pixel buffers referenced by this map's materials."""
+    if obj is None or getattr(obj, "type", "") != "MESH":
+        return 0
+    images = {}
+    for material in obj.data.materials:
+        if material is None or not material.use_nodes or material.node_tree is None:
+            continue
+        for node in material.node_tree.nodes:
+            image = getattr(node, "image", None)
+            if image is None:
+                continue
+            try:
+                key = int(image.as_pointer())
+            except Exception:
+                key = id(image)
+            images[key] = image
+    total = 0
+    for image in images.values():
+        try:
+            channels = 4
+            bytes_per_channel = 4 if bool(getattr(image, "is_float", False)) else 1
+            total += max(1, int(image.size[0])) * max(1, int(image.size[1])) * channels * bytes_per_channel
+        except Exception:
+            pass
+    return total
+
+
+def _qss_paint_confirmation_needed(face_count, estimated_bytes, available_bytes):
+    """Ask before unusually large selections or allocations; never hard-reject."""
+    return bool(
+        int(face_count) > QSS_PAINT_CONFIRM_FACE_COUNT
+        or int(estimated_bytes) >= 64 * 1024 * 1024
+        or (
+            available_bytes is not None and available_bytes > 0
+            and int(estimated_bytes) >= int(available_bytes * 0.10)
         )
-        return False
-    return True
+    )
 
 
 def _qss_is_texture_paint_context(context):
