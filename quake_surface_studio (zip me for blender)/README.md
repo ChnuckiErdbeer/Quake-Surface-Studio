@@ -1,4 +1,16 @@
-# Quake Surface Studio 0.18.1
+# Quake Surface Studio 0.18.2
+
+## 0.18.2 — Quick Actions, face focus and lightmap layer controls
+
+- After importing a BSP, QSS enters **Edit Mode with Face Select active**, ready for selecting surfaces.
+- Renames NAVIGATION to **QUICK ACTIONS** and arranges WASD, Player Start, Isolate Selection and Focus on Face in one compact horizontal icon row.
+- Restores reversible face isolation and makes it available from both Edit Mode and Texture Paint face-mask mode. The original hidden-face and selection snapshot is retained.
+- **Focus on Face** aims the viewport along the selected polygon's world-space normal and frames it closely. While in Texture Paint, a temporary near/far clipping slab suppresses geometry in front of and behind the focused surface. QSS restores the previous clipping range when painting ends, the view is moved, or another face is focused.
+- Replaces the loose texture/lightmap switches with a two-row **Textures / Lightmaps** matrix and **Painted / Source** columns. Source Textures controls the diffuse/albedo contribution; Source Lightmaps controls the active unpainted Original/Baked lightmap contribution.
+- Reduces subtle texture resampling distortion when creating face-local paint images by using Quake-valid multiples-of-eight dimensions instead of unnecessarily rounding every face image up to a power of two.
+- Tightens Cycles bake visibility: only lights belonging to the active map are included, active-map lights and geometry are temporarily made visible to the bake, and their previous viewport/render visibility is restored afterward. Failed-bake diagnostics now also record the active mesh/map-collection visibility state.
+
+**UI note:** Blender's standard Python panel API does not expose arbitrary per-operator background colors. Quick Actions uses distinct icons and the normal pressed/active state rather than unsupported custom button tints.
 
 ## 0.18.1 — Painting and viewport corrections
 
