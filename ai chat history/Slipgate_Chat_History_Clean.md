@@ -44,12 +44,13 @@
 - Package folder and internal identifiers remain `quake_surface_studio` / QSS for compatibility; visible branding is Slipgate.
 - Target interactive environment: Blender 5.2. Target engine includes Ironwail.
 
-**Latest user-reported status before 0.20.5**
+**Latest user-reported status through 0.20.6**
 
-- Bake is working and the previous black-texture failure is gone.
-- Texture painting works well, with no reported brightness problem.
-- Quick Actions were restored and were present in the user's last test.
-- User reported a dark shadow along all frame edges. Version 0.20.4 added edge-extension bake margin based on the packed atlas gutter; this is a targeted mitigation, not yet proven to eliminate the artefact.
+- Bake works, the previous black-texture failure is gone, and the user confirmed version 0.20.6 produces no visible seams.
+- Texture painting works well; Quick Actions work.
+- User confirmed in Blender that loading a second map no longer brings back the grey/white tint, the viewport floor grid is gone, and lighting modes can be switched in Edit Mode but not Texture Paint.
+- User reports the live Blender lighting preview is still too bright while Cycles bake is close to the expected result. In Ironwail, Original and Baked are close and brighter than Blender's preview. Some light placements remain inaccurate.
+- User's 6-by-3 delay-calibration map is now present in the repository lighttest/ folder.
 - Version 0.20.4 introduced delay-aware Live Lights calibration with documented native-Blender limitations and per-map non-BSP artifact folders.
 - User now wants non-game-rendered/tool textures (examples: trigger, origin, clip) hidden through a dedicated View Options popup, not more controls in the narrow sidebar. They want a gradual TrenchBroom-inspired view-filtering system.
 - User explicitly requires: **never remove existing add-on features unless they explicitly ask for removal.** Preserve existing controls and workflows; ask before retiring or replacing anything.
@@ -59,6 +60,22 @@
 
 - Slipgate 0.20.7 changes: removed the Browse Game Maps sidebar button while retaining its operator for F3 compatibility; Import BSP starts in `<active-game>/maps` (fallback `<active-game>`); Quake palette opens with `invoke_popup` from paint-mode context menu; retained native `template_palette` responsive square swatches. No arbitrary per-button colors added.
 
+**18-light calibration map findings and test harness**
+
+- The correct map is lighttest/lighttest01-compile.map, not mapandbsp/test02_compile.map. Also present: compiled lighttest01-compile.bsp, compiler logs, and lighttest maps info.txt.
+- Map info: six groups for delays 0–5, three lights per group (values 50, 300, 900), all white _color 255 255 255, wait 1; each light is 8 Quake units above the centre of its floor. There are 20 entities total, including worldspawn and player start.
+- Exact ericw-tools folder recovered from the map's original compile log: /mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-alpha11-Linux. Tool commands recorded: qbsp -splitturb, vis, light.
+- Original light options: -extra4 -soft 2 -dirt 1 -bounce 1 -surflight_subdivide 64 -surflightscale 0.7 -phong. The log reports 18 initial lights, 15 switchable light styles, a warning that a face exceeded the four-style limit, 930152 lightmap bytes, and 9.849 s compile time.
+- Source map has targetname on 15 test lights, apparently used as labels such as d0_50 and d3_900. ericw-tools interprets targetname on a light as a switchable-light key, not a harmless label. The count of 15 switchable styles matches the 15 named lights. This contaminates a static-light calibration. Delay 5's three lights lack targetname. Use an inert key such as _qss_test_id for labels; do not use targetname for static-light test IDs.
+- A standalone test harness was prepared: run_lighttest_calibration.py, LIGHTTEST_CALIBRATION_README.md, and Slipgate_Lighttest_Calibration_Scripts.zip. Script SHA-256: 3f40dffb24312ed6cca49be947320ca1f8b40ffb71782f57e9e6bf4f25253fe4. README SHA-256: a6bbf3dcc5ace0645b68dd79a798c7658207d3058c47dfa1396b71b6ff23f0cc. ZIP SHA-256: a73058beae54e4688e807fd26775fca3c7f0bb902270b69ffc1c52923a4d6be2.
+- The script validates the six-by-three matrix; creates non-destructive MAP copies that replace light targetname fields with _qss_test_id; compiles two reference variants; and samples the BSP lightmap at the floor centre and multiple radii in four directions. Each variant targets 594 sample points (18 lights × 33 positions).
+- Variant A, attenuation_only: sets each light _anglescale 0, disables bounce/dirt, and omits extra samples, softening and phong to isolate radial attenuation.
+- Variant B, angle_default: same clean direct-light baseline but _anglescale 0.5, to measure the default surface-incidence contribution separately.
+- Both variants run qbsp -splitturb, vis, and light -verbose -nocolor -bounce 0 -dirt -1. They are test baselines, not production lighting settings. Source MAP/BSP and original logs are not overwritten.
+- Output includes separate BSPs, compiler logs, JSON reports and luxel_samples.csv files with raw luxels, ericw attenuation values, surface-angle factors and combined predictions. User command from lighttest/: python3 run_lighttest_calibration.py --compile. The default compiler path is the exact path above and can be overridden with --tools-dir.
+- Script syntax and entity/matrix parsing were checked against a synthetic 18-light fixture. It has not been run against the user's Linux compiler or real BSP; the compiler invocation and real BSP luxel sampler still require that run.
+- After execution, request the generated timestamped results folder ZIP, especially both CSVs, both run_report.json files and both *-light.log files. Then fit per-delay Live Light and Cycles calibration against compiler luxels. Do not tune preview energy by eye before this reference exists.
+
 **Implemented in Slipgate 0.20.5**
 
 - Restored the original compact root-panel header from the earlier v0.18.0 implementation: version label, cogwheel opening the existing Settings dialog, and Text icon opening the existing `config.json` in Blender's Text Editor in a separate window.
@@ -66,6 +83,13 @@
 - CI: QSS Python tests passed (run 616); converter GUI tests passed (run 71). Package assembly produced the verified install ZIP above.
 - No Blender GUI test was performed for the restored header.
 
+**Quest 3 / VR painting exploration**
+
+- User owns a Meta Quest 3 and asked about spray-painting Quake map walls in VR.
+- Feasible direction: Blender runs on the Linux PC and Quest is the PCVR display/controllers; this is not a native Blender-on-Quest port.
+- WiVRn supports streaming Linux OpenXR applications to Quest 3. Blender's VR Scene Inspection uses OpenXR but is limited to scene inspection, not controller-driven texture painting. Blender's hardware manual still describes Monado Linux support as not recommended for general use yet.
+- XR Mesh Tools is an existing controller-oriented Blender extension with mesh, material and UV workflows, useful as reference, but it does not provide Slipgate's Quake face-local Texture Paint workflow.
+- Proposed Slipgate prototype: track controller pose, raycast to BSP face, convert hit to face-local UV image, stamp a spray/noise brush while trigger is held; off-hand palette, size, flow and undo. Reuse existing QSS paint images, UVs, palette and export path. No VR code has been implemented.
 **TrenchBroom-inspired View Options research — proposal, not implemented yet**
 
 - TrenchBroom's View Options is a dropdown/popup separate from its main editing viewport. It divides controls into Entities, Brushes (game-specific special brush/face types) and Renderer. It also supports per-entity-class visibility checkboxes and show/hide-all controls.
@@ -81,9 +105,10 @@
 
 **Verification status and next user testing**
 
-- 0.20.4 CI validated Python compilation, standalone tests and package assembly; no Blender 5.2 GUI, Cycles bake, QBSP or Ironwail session was run.
-- 0.20.5 CI validates the add-on test suite, package assembly and converter GUI tests. It does not exercise Blender's interactive UI.
-- User should install 0.20.5 to verify the version/cogwheel/Text Editor buttons are back. The previous 0.20.4 bake, delay-light and artifact-folder tests remain useful.
+- 0.20.7 CI passed: QSS Python run 633 and converter GUI run 80; artifact 13765434151 was downloaded and ZIP integrity/Python compilation verified.
+- User has interactively verified 0.20.6 in Blender: second-map tint regression fixed, floor grid hidden, Edit Mode lighting switching works, Texture Paint restriction works, Quick Actions work.
+- User has not yet reported whether 0.20.7's Import BSP initial directory, removal of the Browse Game Maps sidebar button, and cursor-positioned Quake palette popup behave correctly.
+- Calibration harness syntax and MAP entity/matrix parsing were checked synthetically. No actual QBSP/vis/light compile or BSP luxel sampling was run.
 - Do not claim Blender GUI, QBSP or Ironwail validation unless performed in the relevant session.
 
 **Historical issues still worth retaining**
@@ -15313,4 +15338,38 @@ The 0.20.5 ZIP was downloaded from GitHub Actions and its contents and SHA-256 v
 - Verify paint-mode right-click opens palette popup at cursor and selecting a swatch updates brush color.
 - Resize sidebar and verify palette swatches stay square, adapt columns, and labels do not wrap.
 - No Blender GUI test performed during this implementation pass.
+
+## 2026-11-10 — Lighttest map found, compiler semantics checked, calibration harness prepared
+
+### User update and request
+The user said the six-delay/three-intensity calibration map was already built and committed to the repository, and offered to run scripts locally. They also asked whether a Quest 3 could be used to spray-paint Quake BSP walls in VR.
+
+### Repository inspection
+- Located the map in lighttest/lighttest01-compile.map, not mapandbsp/. The folder also contains the BSP, light/vis/qbsp logs, content and texinfo sidecars, and lighttest maps info.txt.
+- The matrix is exactly 18 point lights: delay 0–5 × values 50, 300, 900. All use white _color 255 255 255 and wait 1; each light is 8 map units above the centre of its floor.
+- Historical tool directory from the original compile log: /mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-alpha11-Linux.
+- Original compiler pipeline: qbsp -splitturb, vis, then light -extra4 -soft 2 -dirt 1 -bounce 1 -surflight_subdivide 64 -surflightscale 0.7 -phong.
+- Original light log: 20 entities, 18 lights, 15 switchable light styles, warning that a face exceeded maximum four styles, 930152 lightmap bytes, 9.849 s elapsed.
+
+### Critical test setup issue identified
+- Fifteen light entities use targetname fields as apparent IDs such as d0_50 and d3_900.
+- ericw-tools documentation defines targetname on a light as a switchable-light behavior. The compiler's 15 switchable styles exactly matches the 15 named lights.
+- This contaminates a static attenuation comparison and may contribute to the lightstyle-limit warning. Use an inert custom key such as _qss_test_id for labels; remove targetname from all 18 static test lights.
+
+### Test harness prepared for the user
+- Created run_lighttest_calibration.py, LIGHTTEST_CALIBRATION_README.md, and Slipgate_Lighttest_Calibration_Scripts.zip in the assistant file workspace (not committed to the repository).
+- The harness validates the matrix, rewrites only temporary MAP copies to remove switchable targetnames and retain each light ID in _qss_test_id, runs qbsp/vis/light on two isolated variants, and samples floor luxels at 33 positions per light.
+- attenuation_only sets _anglescale 0, disables bounce/dirt, and omits extra samples, soft, phong and surface-light settings to isolate radial attenuation.
+- angle_default uses the same clean direct-light baseline but _anglescale 0.5, separating the default surface-incidence effect from radial attenuation.
+- Compiler command: light -verbose -nocolor -bounce 0 -dirt -1. Source MAP/BSP and original compile logs are not overwritten.
+- Each variant samples 594 points (18 lights × 33 positions), and produces BSP, logs, run_report.json and luxel_samples.csv with raw luxels, expected ericw attenuation and angle factors.
+- Command from repository lighttest/: python3 run_lighttest_calibration.py --compile. Default tools dir is the recovered Linux path above; --tools-dir overrides it.
+- Script syntax and MAP entity/matrix parsing passed a synthetic 18-light fixture. No actual run against the user's Linux compiler or real BSP has occurred yet.
+- After the user executes it, request the timestamped results folder ZIP, particularly both CSVs, both run_report.json files and both *-light.log files. Fit per-delay live preview and Cycles calibration from those measurements, not by eye.
+
+### Quest 3 / VR feasibility
+- Research conclusion: feasible as PCVR with Blender running on the Linux PC and Quest as headset/controllers; not a native Blender-on-Quest port.
+- WiVRn lists Quest 3 support for Linux PCVR streaming. Blender VR Scene Inspection is OpenXR-based but limited to scene inspection. Blender's manual still describes Monado Linux support as not recommended for general use yet.
+- XR Mesh Tools is an existing Blender extension with controller mesh/material/UV editing, useful as a reference but not the requested Quake face-local texture spray workflow.
+- Proposed Slipgate prototype: controller pose tracking, raycast to BSP face, hit-to-face-local-UV mapping, spray/noise stamps while trigger is held; off-hand controller for palette/size/flow/undo. Reuse QSS face-local paint images, UVs, Quake palette and export pipeline. No VR code implemented.
 
