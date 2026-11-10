@@ -5,6 +5,13 @@ import math
 from typing import Sequence
 
 
+def quake_texture_dimension(value: float, maximum: int = 512) -> int:
+    """Round up to a Quake miptexture dimension (multiple of eight)."""
+    limit = max(8, int(maximum) // 8 * 8)
+    parsed = max(8, int(math.ceil(float(value))))
+    return max(8, min(limit, int(math.ceil(parsed / 8.0)) * 8))
+
+
 def pack_face_rectangles(
     sizes: Sequence[tuple[int, int]],
     atlas_size: int = 512,
