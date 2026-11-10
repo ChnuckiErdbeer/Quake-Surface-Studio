@@ -14919,3 +14919,9 @@ Continued on fix/v0.11.1-metadata-style-order-test. Fixed the missing QSS_PT_mai
 ### ChatGPT
 
 Updated the visible Blender add-on name, sidebar category and install instructions to **Slipgate**, while retaining the `quake_surface_studio` package folder and QSS internal identifiers for compatibility. GitHub Actions run `42769969091` passed module compilation, the complete standalone test suite, version extraction, Blender package assembly and artifact upload for version 0.20.1. The uploaded install artifact is available from the workflow run; interactive Blender 5.2 and Ironwail validation remain outstanding.
+
+## 2026-11-10 — Final 0.20.1 CI result
+
+### ChatGPT
+
+The final branding commit `f67a527d73336f09a059acc3feef65a9bc7a8812` passed GitHub Actions push workflow run `42770104620` (`QSS Python tests`). Module compilation, the complete standalone unittest suite, version extraction, Blender package assembly and artifact upload all completed successfully. The artifact `Quake-Surface-Studio-v0.20.1-Blender-Install` was generated from this exact commit. The corrected raw TXT first chapter was re-fetched and checked: it begins with `Quake Lightmap Workflow (1)`, no longer contains the wrong `Setup Quake Mod Environment` chapter, contains no PDF page-header/counter pattern or repeated chat URLs in that first chapter, and preserves the original `Quake Lightmap Workflow (2)` chapter boundary. Blender GUI and Ironwail tests remain unperformed.
