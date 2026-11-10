@@ -42,6 +42,16 @@ class ViewportUtilsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "aspect"):
             viewport_utils.face_focus_distance(1, 1, 0, 1, 0.0254)
 
+    def test_face_normal_is_flipped_to_viewer_side(self):
+        self.assertEqual(viewport_utils.face_normal_toward_view((0, 0, 1), (0, 0, 1)),
+                         (0.0, 0.0, 1.0))
+        self.assertEqual(viewport_utils.face_normal_toward_view((0, 0, 1), (0, 0, -1)),
+                         (0.0, 0.0, -1.0))
+        self.assertEqual(viewport_utils.face_normal_toward_view((0, 1, 0), (1, 0, 0)),
+                         (0.0, 1.0, 0.0))
+        with self.assertRaisesRegex(ValueError, "three-dimensional"):
+            viewport_utils.face_normal_toward_view((1, 0), (0, 0, 1))
+
     def test_invalid_points_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "empty selection"):
             viewport_utils.bounds_from_points([])
