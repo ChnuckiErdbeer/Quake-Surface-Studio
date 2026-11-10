@@ -41,6 +41,9 @@ _qss_focus_clip_sessions = {}
 _qss_focus_cycle_state = {}
 _qss_focus_transition_sessions = {}
 _qss_camera_transition_sessions = {}
+_qss_edit_overlay_sessions = {}
+
+
 
 
 def _report(op, level, message):
@@ -2958,6 +2961,111 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
     return light_count, spawn is not None
 
 
+class QSS_OT_edit_face_overlay_watch(Operator):
+    bl_idname = "qss.edit_face_overlay_watch"
+    bl_label = "Keep QSS Edit Mode Material Colors Clear"
+    bl_description = "Temporarily hide Blender's face-fill selection overlay while editing a QSS map"
+
+    def _finish_restore(self):
+        if getattr(self, "_finished", False):
+            return
+        self._finished = True
+        try:
+            if not self._space.overlay.show_faces:
+                self._space.overlay.show_faces = self._original_show_faces
+            self._area.tag_redraw()
+        except Exception:
+            pass
+        timer = getattr(self, "_timer", None)
+        if timer is not None:
+            try:
+                self._window_manager.event_timer_remove(timer)
+            except Exception:
+                pass
+            self._timer = None
+        try:
+            key = self._area.as_pointer()
+            if _qss_edit_overlay_sessions.get(key) is self:
+                _qss_edit_overlay_sessions.pop(key, None)
+        except Exception:
+            pass
+
+    def invoke(self, context, event):
+        area = context.area if context.area and context.area.type == "VIEW_3D" else None
+        if area is None or context.object is None or not _qss_is_map_object(context.object):
+            return {"CANCELLED"}
+        previous = _qss_edit_overlay_sessions.get(area.as_pointer())
+        if previous is not None:
+            previous._finish_restore()
+        self._area = area
+        self._space = area.spaces.active
+        self._object = context.object
+        self._window_manager = context.window_manager
+        self._original_show_faces = bool(self._space.overlay.show_faces)
+        self._finished = False
+        self._timer = None
+        if context.mode == "EDIT_MESH":
+            self._space.overlay.show_faces = False
+        try:
+            self._timer = self._window_manager.event_timer_add(0.25, window=context.window)
+            self._window_manager.modal_handler_add(self)
+            _qss_edit_overlay_sessions[area.as_pointer()] = self
+            area.tag_redraw()
+            return {"RUNNING_MODAL"}
+        except Exception as exc:
+            self._finish_restore()
+            self.report({"WARNING"}, f"Could not manage the Edit Mode face overlay: {exc}")
+            return {"CANCELLED"}
+
+    def modal(self, context, event):
+        if self._finished:
+            return {"FINISHED"}
+        if event.type == "TIMER":
+            if getattr(self._object, "name", None) is None or not _qss_is_map_object(self._object):
+                self._finish_restore()
+                return {"FINISHED"}
+            try:
+                should_hide = context.object == self._object and context.mode == "EDIT_MESH"
+                target_value = False if should_hide else self._original_show_faces
+                if bool(self._space.overlay.show_faces) != bool(target_value):
+                    self._space.overlay.show_faces = target_value
+                    self._area.tag_redraw()
+            except Exception:
+                self._finish_restore()
+                return {"FINISHED"}
+        return {"PASS_THROUGH"}
+
+    def cancel(self, context):
+        self._finish_restore()
+
+
+def _qss_start_edit_face_overlay_watchers(context, obj):
+    """Keep face-fill overlay off only while this imported map is in Edit Mode."""
+    if not _qss_is_map_object(obj):
+        return
+    wm = getattr(context, "window_manager", None)
+    if wm is None:
+        return
+    for window in list(wm.windows):
+        screen = getattr(window, "screen", None)
+        if screen is None:
+            continue
+        for area in screen.areas:
+            if area.type != "VIEW_3D" or area.as_pointer() in _qss_edit_overlay_sessions:
+                continue
+            region = next((item for item in area.regions if item.type == "WINDOW"), None)
+            if region is None:
+                continue
+            try:
+                with context.temp_override(
+                    window=window, area=area, region=region,
+                    object=obj, active_object=obj,
+                ):
+                    bpy.ops.qss.edit_face_overlay_watch("INVOKE_DEFAULT")
+            except Exception as exc:
+                print(f"QSS: could not start the Edit Mode overlay watcher: {exc}")
+
+
 def _qss_enter_face_edit_mode(context, obj):
     """Finish BSP import in Edit Mode with Face Select active and nothing selected."""
     if not _qss_is_map_object(obj):
@@ -2986,6 +3094,7 @@ def _qss_enter_face_edit_mode(context, obj):
             bpy.ops.mesh.select_mode(type="FACE")
         except Exception:
             context.scene.tool_settings.mesh_select_mode = (False, False, True)
+        _qss_start_edit_face_overlay_watchers(context, obj)
         return True
     except Exception as exc:
         print(f"QSS: imported BSP but could not enter face-select Edit Mode: {exc}")
@@ -9937,7 +10046,7 @@ CLASSES = (
     QSS_OT_toggle_painted_textures, QSS_OT_toggle_painted_lightmaps,
     QSS_OT_generate_decoupled_lightmaps, QSS_OT_detach_faces,
     QSS_OT_activate_paint, QSS_OT_activate_lightmap_paint,
-    QSS_OT_camera_transition, QSS_OT_frame_selection, QSS_OT_focus_clip_watch, QSS_OT_isolate_faces, QSS_OT_reveal_faces,
+    QSS_OT_edit_face_overlay_watch, QSS_OT_camera_transition, QSS_OT_frame_selection, QSS_OT_focus_clip_watch, QSS_OT_isolate_faces, QSS_OT_reveal_faces,
     QSS_OT_optimize_clipping, QSS_OT_player_start, QSS_OT_fps_walk,
     QSS_OT_preview_imported_lights, QSS_OT_preview_source_lightmaps,
     QSS_OT_preview_bsp_lightmaps, QSS_OT_quake_direct_bake,
@@ -10040,6 +10149,12 @@ def _unregister_qss_classes():
 def _cleanup_previous_registration():
     _qss_restore_focus_clip_session()
     _qss_remove_context_menus()
+    for session in tuple(_qss_edit_overlay_sessions.values()):
+        try:
+            session._finish_restore()
+        except Exception:
+            pass
+    _qss_edit_overlay_sessions.clear()
     for session in tuple(_qss_camera_transition_sessions.values()):
         try:
             session._finish()
