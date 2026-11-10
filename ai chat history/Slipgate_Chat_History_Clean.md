@@ -47,7 +47,7 @@
 4. **Transparency and fullbright handling.** Brace textures use alpha and Quake index 255 for transparent pixels; ordinary miptexes ignore Blender alpha. Embedded original fullbright indices are reused when source and edited image dimensions match; a sibling *_fullbrights.png mask can be used for loose source images. A differently-sized detached face-local image may not inherit the original embedded fullbright mask. This remains an edge case to test/refine.
 5. **Mip alpha regression fix — source and CI verified.** A follow-up source change ensures non-brace textures are made fully opaque before lower-mip downsampling, so alpha in Blender's source image cannot remove/darken RGB in lower mip levels. A regression test compares all four mip outputs for otherwise identical images with differing alpha. Final code commit 1ded23ae63965b47e87a3d4fb2aa0fb52f15fcaa passed the QSS Python and converter GUI workflows.
 6. **Lightmap-paint warning.** User supplied the full message for one face, a 64.0 MiB working atlas and 4881.2 MiB available RAM. The previous 32 MiB fixed minimum prompted even though the user had ample RAM. 0.20.2 changes the lightmap-specific threshold to 256 MiB or 10% of detected available memory and fixes singular/plural wording. Blender 5.2 verification remains outstanding.
-7. **Cycles bake produced black lightmaps — user-reported failure, root cause not yet identified.** The old operator only rejected zero sampled luxels if the original lightmap sample mean was positive. 0.20.2 now rejects a bake with no nonzero sampled BSP luxels even when the source mean is zero, restores the source atlas/calibration and retains lamp/source/whole-atlas statistics for Lighting Diagnostics. This is a fail-safe and diagnostic improvement, not proof that the underlying lighting issue is fixed. A real Blender 5.2 bake is required.
+7. **Cycles bake preview still appears black — new user report, with a concrete calibration issue identified.** The 2026-11-10 repeat bake reported 165,763 luxels, mean 0.2597, max 744, raw mean 0.003793, source mean 0.2597 and atlas scale 68.47, then switched to Baked Lightmaps preview. These nonzero sampled statistics indicate the bake data is not simply all-zero. Source inspection found that the same source/raw ratio is used both for baked-atlas normalization and for new_calibration, which is then written to each imported light and reapplied through _apply_quake_light_energy_scale(). At energy scale 1 this can raise live light energy by about 68.47x. The atlas normalization and live-light calibration must be decoupled; the former is needed for source-matching, while the latter must not silently amplify the user's scene lights. The remaining all-black appearance needs to be separated into image-data vs viewport-preview failure in Blender 5.2.
 8. **Layer toggles — user-reported limitation remains open.** Source controls are intended to permit Object and Edit Mesh modes but are disabled during Texture Paint. The exact user's failure mode must be reproduced in Blender 5.2 before changing the mode transitions.
 9. **Shader suggestion.** BSP export now invokes the sophisticated Python material-zone converter. It is not a shader implementation. A palette-LUT shader could be a separate live preview feature but does not replace SLIC/material-zone segmentation and ramp selection.
 10. **CI/build evidence.** Final code commit 1ded23ae63965b47e87a3d4fb2aa0fb52f15fcaa passed QSS Python tests (run 42776124261) and converter GUI tests (run 42776124464). Compilation, standalone tests, version extraction, Blender package assembly and artifact upload all passed. Artifact Quake-Surface-Studio-v0.20.2-Blender-Install: ID 13743782618, SHA-256 d58877bc09972477b376fe155bc303f2f7271550e1c02a73223d3847c60710ba. The ZIP was retrieved and all entries passed unzip integrity testing. No interactive Blender GUI, QBSP or Ironwail test is claimed.
@@ -14996,3 +14996,34 @@ Updated the 0.20.2 handoff to include the user's full lightmap warning, the requ
 The final 0.20.2 code commit 1ded23ae63965b47e87a3d4fb2aa0fb52f15fcaa passed GitHub Actions QSS Python tests (run 42776124261) and Quake Texture Converter GUI tests (run 42776124464). The build completed module compilation, standalone tests, version extraction, Blender package assembly and artifact upload successfully. The artifact Quake-Surface-Studio-v0.20.2-Blender-Install (ID 13743782618) was retrieved from that exact code commit; SHA-256 d58877bc09972477b376fe155bc303f2f7271550e1c02a73223d3847c60710ba. Local ZIP integrity testing reported no errors across the package files.
 
 The archive snapshot and next steps were updated on the active branch. The 0.20.2 code still needs interactive Blender 5.2 validation of material-zone BSP export, the lightmap warning and Cycles bake diagnostics, plus QBSP/Ironwail testing. CI passing is not a claim that those GUI/engine workflows have been exercised.
+
+
+## 2026-11-10 — Slipgate 0.20.2 user reports: bright Texture Paint preview, black-looking bake, brighter imported lights
+
+### User report
+
+After installing 0.20.2, the user reports that activating Texture Paint for a face makes the face appear much brighter. They suspect the new palette conversion algorithm. They repeated the Cycles bake and supplied this log:
+
+```
+Bake complete: 252 lights, 90 materials, 165763 luxels, mean 0.2597, max 744,
+raw mean 0.003793, source mean 0.2597, atlas scale 68.47, 2 diffuse bounces.
+Switches to Baked Lightmaps preview.
+```
+
+They report the result still looks all black, and ask whether imported lights were changed because they now look much brighter in both Eevee and Cycles.
+
+### Source inspection / diagnosis
+
+- The material-zone palette conversion is invoked from _encode_image_to_miptex() during BSP export. Texture Paint activation does not call it, so the converter cannot directly alter the displayed face when entering paint mode.
+- The 0.20.2 change did not alter _import_bsp_entities() light-value parsing. Imported point/spot lights use effective_intensity = intensity * world_range, and the same value is stored as qss_quake_light_value for subsequent scale application.
+- A concrete live-light amplification path exists in QSS_OT_bake_scene_lights: when source matching is enabled, it computes new_calibration = old_calibration * lighting_utils.calibration_factor(source_mean, raw_bake_mean, energy_scale), writes that calibration to every imported light, and calls _apply_quake_light_energy_scale(scene). calibration_factor() is proportional to source_mean / raw_bake_mean; with the reported means and energy scale 1, this is approximately 68.47. The baked atlas is separately normalized by source_mean / raw_bake_mean. Applying the factor to scene lights as well is a likely explanation for their dramatic post-bake brightness and must be decoupled from atlas normalization.
+- The bake report's nonzero sampled mean and max show that the sampled atlas data is not all zero. The remaining black appearance may be in the selected preview image/material hooks or viewport display. Need ask whether the atlas itself is black when opened in Blender's Image Editor, or only the 3D viewport.
+- Texture Paint activation selects the face-local base image and switches to Material paint-slot mode. No explicit palette quantization occurs in that operator. The brightness transition still needs interactive Blender 5.2 reproduction; likely inspect viewport shading / live-light state and node preview path before changing paint activation.
+
+### Next actions
+
+1. Fix the Cycles source-match implementation so atlas normalization does not multiply imported live-light energy. Preserve the pre-bake lamp calibration/energy unless the user explicitly adjusts it.
+2. Inspect the bake-preview path and add diagnostics distinguishing written atlas pixel statistics from the active image node/viewport preview image.
+3. Reproduce Texture Paint activation in Blender 5.2 and compare Object/Edit/Texture Paint shading with identical material nodes and light energies; do not change the export converter to mask a viewport issue.
+4. Ask whether the lightmap atlas itself is black in the Image Editor or whether only the 3D viewport is black.
+5. Update this archive after the code fix, tests, CI and artifact verification. Do not claim Blender GUI validation without actually running it.
