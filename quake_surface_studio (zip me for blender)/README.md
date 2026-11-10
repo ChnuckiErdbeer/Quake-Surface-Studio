@@ -1,4 +1,12 @@
-# Quake Surface Studio 0.18.2
+# Quake Surface Studio 0.18.3
+
+## 0.18.3 — Face paint correction and smoother focus
+
+- Import still enters **Edit Mode / Face Select**, but now clears all face, edge and vertex selection so the first view is not covered by the orange selection overlay.
+- Fixes **Paint Texture** detachment with the actual 10-field BSP29 texinfo record (8 projection floats plus miptex/flags metadata).
+- **Focus on Face** now fits the selected polygon's projected bounds to the viewport with breathing room and eases the camera over 0.5 seconds.
+- Repeated clicks on Focus cycle through selected faces. While the pointer is over Focus, mouse-wheel up/down cycles forward/backward; scrolling elsewhere remains normal viewport navigation.
+- Edit Mode shading note: QSS requests Material Preview for the Original/Baked preview and does not override the scene view transform. Blender Solid/Flat shading is a separate viewport mode and does not calculate lighting.
 
 ## 0.18.2 — Quick Actions, face focus and lightmap layer controls
 
