@@ -813,6 +813,137 @@ def convert_rgba8(width: int, height: int, rgba: bytes | bytearray | memoryview,
     return bytes(indices), stats
 
 
+
+def _downsample_rgba8(width: int, height: int, rgba: bytes) -> tuple[int, int, bytes]:
+    """Downsample straight-alpha RGBA8 while avoiding colour fringes."""
+    out_width, out_height = max(1, width // 2), max(1, height // 2)
+    output = bytearray(out_width * out_height * 4)
+    for y in range(out_height):
+        for x in range(out_width):
+            rgb_sums = [0, 0, 0]
+            alpha_sum = 0
+            samples = 0
+            for dy in range(2):
+                for dx in range(2):
+                    sx, sy = min(width - 1, x * 2 + dx), min(height - 1, y * 2 + dy)
+                    offset = (sy * width + sx) * 4
+                    alpha = int(rgba[offset + 3])
+                    alpha_sum += alpha
+                    for channel in range(3):
+                        rgb_sums[channel] += int(rgba[offset + channel]) * alpha
+                    samples += 1
+            target = (y * out_width + x) * 4
+            if alpha_sum:
+                for channel in range(3):
+                    output[target + channel] = max(
+                        0, min(255, int(round(rgb_sums[channel] / alpha_sum)))
+                    )
+            output[target + 3] = max(
+                0, min(255, int(round(alpha_sum / max(1, samples))))
+            )
+    return out_width, out_height, bytes(output)
+
+
+def _downsample_fullbright_mask(
+    width: int, height: int, mask: Sequence[bool] | bytes | bytearray
+) -> bytearray:
+    """Keep a lower-mip texel fullbright if any covered source texel was fullbright."""
+    out_width, out_height = max(1, width // 2), max(1, height // 2)
+    output = bytearray(out_width * out_height)
+    for y in range(out_height):
+        for x in range(out_width):
+            selected = False
+            for dy in range(2):
+                for dx in range(2):
+                    sx, sy = min(width - 1, x * 2 + dx), min(height - 1, y * 2 + dy)
+                    if mask[sy * width + sx]:
+                        selected = True
+                        break
+                if selected:
+                    break
+            output[y * out_width + x] = 1 if selected else 0
+    return output
+
+
+def convert_rgba8_mip_chain(
+    width: int,
+    height: int,
+    rgba: bytes | bytearray | memoryview,
+    palette: bytes | bytearray | memoryview,
+    settings: dict | None = None,
+    *,
+    transparent: bool = False,
+    fullbright_mask: Sequence[bool] | bytes | bytearray | None = None,
+) -> tuple[list[bytes], list[dict]]:
+    """Convert a texture and its three Quake mip levels with the material-zone algorithm.
+
+    Every mip is segmented and quantized against the same ramp configuration.
+    Non-transparent miptexes ignore the source image alpha channel. For brace
+    textures, palette index 255 is reserved for texels below alpha_threshold.
+    """
+    width, height = int(width), int(height)
+    raw = bytes(rgba)
+    if width < 1 or height < 1 or width * height > 16_777_216:
+        raise ValueError("Image dimensions are empty or exceed the safe 16-megapixel conversion limit.")
+    if len(raw) != width * height * 4:
+        raise ValueError("RGBA input size does not match the supplied dimensions.")
+    palette = validate_palette(palette)
+    params = dict(DEFAULT_SETTINGS)
+    if settings:
+        params.update(settings)
+    alpha_threshold = int(params["alpha_threshold"])
+    if not 0 <= alpha_threshold <= 255:
+        raise ValueError("Alpha threshold must be between 0 and 255.")
+    current_mask = None if fullbright_mask is None else bytearray(
+        1 if value else 0 for value in fullbright_mask
+    )
+    if current_mask is not None and len(current_mask) != width * height:
+        raise ValueError("Fullbright mask dimensions do not match the source texture.")
+
+    current_width, current_height = width, height
+    current_rgba = raw
+    mip_levels: list[bytes] = []
+    mip_stats: list[dict] = []
+    for level in range(4):
+        conversion_rgba = bytearray(current_rgba)
+        if not transparent:
+            for offset in range(3, len(conversion_rgba), 4):
+                conversion_rgba[offset] = 255
+
+        opaque_count = sum(
+            1 for offset in range(3, len(conversion_rgba), 4)
+            if conversion_rgba[offset] >= alpha_threshold
+        )
+        if transparent and opaque_count == 0:
+            indices = bytes([255]) * (current_width * current_height)
+            stats = {
+                "pixels": current_width * current_height,
+                "regions": 0,
+                "colors_used": 1,
+                "transparent_pixels": current_width * current_height,
+                "fullbright_pixels": 0,
+            }
+        else:
+            indices, stats = convert_rgba8(
+                current_width, current_height, conversion_rgba, palette,
+                settings=params, fullbright_mask=current_mask,
+            )
+        mip_levels.append(indices)
+        mip_stats.append(stats)
+
+        if level < 3:
+            next_width, next_height, current_rgba = _downsample_rgba8(
+                current_width, current_height, current_rgba
+            )
+            if current_mask is not None:
+                current_mask = _downsample_fullbright_mask(
+                    current_width, current_height, current_mask
+                )
+            current_width, current_height = next_width, next_height
+
+    return mip_levels, mip_stats
+
+
 def _palette_distance(color, palette_labs: array, index: int) -> float:
     j = index * 3
     dL = color[0] - palette_labs[j]
