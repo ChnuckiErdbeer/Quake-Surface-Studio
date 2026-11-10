@@ -7747,7 +7747,7 @@ class QSS_OT_refresh_lightmap_preview(Operator):
 class QSS_OT_calibrate_lights_to_source(Operator):
     bl_idname = 'qss.calibrate_lights_to_source'
     bl_label = 'Auto-calibrate Live Lights to Source'
-    bl_description = 'Run a temporary Cycles bake, determine the source-average energy multiplier, restore the original lightmap, and return to Live Lights'
+    bl_description = 'Run a temporary Cycles bake, calibrate imported live lights to the source atlas mean, restore the original lightmap, and return to Live Lights'
 
     @classmethod
     def poll(cls, context):
@@ -7757,32 +7757,76 @@ class QSS_OT_calibrate_lights_to_source(Operator):
 
     def execute(self, context):
         obj = context.object
+        scene = context.scene
         source_image = bpy.data.images.get(obj.get('qss_original_lightmap_backup', ''))
         current_image = bpy.data.images.get(obj.get('qss_lightmap_image_name', ''))
         if source_image is None or current_image is None:
             self.report({'ERROR'}, 'The current or original source lightmap image is missing.')
             return {'CANCELLED'}
-        original_pixels = array.array('f', [0.0]) * (len(current_image.pixels))
+
+        active_map_objects = _qss_active_map_objects(scene, obj)
+        imported_lights = [
+            light_obj for light_obj in active_map_objects
+            if light_obj.type == 'LIGHT'
+            and light_obj.get('qss_light_role') in {'quake_entity_light', 'quake_world_sunlight'}
+        ]
+        if not imported_lights:
+            self.report({'ERROR'}, 'No imported lights belong to the active map.')
+            return {'CANCELLED'}
+
+        original_pixels = array.array('f', [0.0]) * len(current_image.pixels)
         current_image.pixels.foreach_get(original_pixels)
+        old_preview_mode = str(obj.get('qss_preview_mode', 'source'))
         old_source = obj.get('qss_lightmap_source', 'original_bsp_lightmaps')
-        old_scale = float(context.scene.qss_light_energy_scale)
-        old_object_calibration = float(obj.get('qss_light_energy_calibration', 1.0))
-        imported_lights = [light_obj for light_obj in context.scene.objects
-                           if light_obj.type == 'LIGHT' and light_obj.get('qss_light_role') in
-                           {'quake_entity_light', 'quake_world_sunlight'}]
-        old_light_calibrations = {light_obj.name: float(light_obj.get('qss_energy_calibration', old_object_calibration))
-                                  for light_obj in imported_lights}
-        context.scene.qss_light_energy_scale = max(old_scale, 0.01)
-        context.scene.qss_bake_match_source = True
+        old_scale = float(scene.qss_light_energy_scale)
+        old_manual = max(0.0, float(obj.get('qss_manual_light_energy_calibration', 1.0)))
+        old_legacy_calibration = float(obj.get('qss_light_energy_calibration', old_manual))
+        old_light_manual = {
+            light_obj.name: float(light_obj.get('qss_manual_energy_calibration', old_manual))
+            for light_obj in imported_lights
+        }
+        old_light_legacy = {
+            light_obj.name: float(light_obj.get('qss_energy_calibration', old_manual))
+            for light_obj in imported_lights
+        }
+        bake_scale = max(old_scale, 0.01)
+        scene.qss_light_energy_scale = bake_scale
+        scene.qss_bake_match_source = True
+
         result = bpy.ops.qss.bake_scene_lights()
         if 'FINISHED' not in result:
-            # The bake operator handles its own pixel rollback on failure.
-            context.scene.qss_light_energy_scale = old_scale
+            scene.qss_light_energy_scale = old_scale
             obj['qss_lightmap_source'] = old_source
             return {'CANCELLED'}
+
         try:
-            # Bake auto-calibrates the lamp multiplier and image; this command is
-            # only a calibration probe, so restore the pristine source atlas.
+            # The normal bake now source-matches only its atlas. This explicit
+            # calibration action separately promotes that measured source/raw
+            # ratio into the manual live-light multiplier.
+            source_mean = float(obj.get('qss_last_bake_source_mean', 0.0))
+            raw_mean = float(obj.get('qss_last_bake_raw_mean', 0.0))
+            measured_scale = max(0.0, float(obj.get('qss_last_bake_energy_scale', bake_scale)))
+            if source_mean <= 1e-8 or raw_mean <= 1e-8 or measured_scale <= 0.0:
+                raise bsp.BSPError(
+                    'The calibration bake did not produce usable source and raw means. '
+                    'The original lightmap and live-light settings have been restored.'
+                )
+            calibration_step = lighting_utils.calibration_factor(
+                source_mean, raw_mean, measured_scale
+            )
+            new_manual = old_manual * calibration_step
+            if not math.isfinite(new_manual) or new_manual <= 0.0:
+                raise bsp.BSPError('The calculated manual light calibration is invalid.')
+
+            obj['qss_manual_light_energy_calibration'] = float(new_manual)
+            # Keep the legacy summary key readable in existing diagnostics and
+            # saved .blend files, while runtime lamp application uses the
+            # explicitly named manual calibration property.
+            obj['qss_light_energy_calibration'] = float(new_manual)
+            for light_obj in imported_lights:
+                light_obj['qss_manual_energy_calibration'] = float(new_manual)
+                light_obj['qss_energy_calibration'] = float(new_manual)
+
             current_image = bpy.data.images.get(obj.get('qss_lightmap_image_name', ''))
             if current_image is None:
                 raise bsp.BSPError('The lightmap atlas disappeared after calibration bake.')
@@ -7791,30 +7835,43 @@ class QSS_OT_calibrate_lights_to_source(Operator):
             if backup is not None:
                 bpy.data.images.remove(backup)
             obj['qss_last_bake_backup'] = ''
+            obj['qss_painted_baked_lightmap'] = ''
             obj['qss_lightmap_source'] = 'original_bsp_lightmaps'
             obj['qss_lightmap_gradient_baked'] = False
-            context.scene.qss_light_energy_scale = 1.0
-            _apply_quake_light_energy_scale(context.scene)
+            scene.qss_light_energy_scale = 1.0
+            _apply_quake_light_energy_scale(scene)
             _set_lighting_preview(context, obj, 'realtime')
-            self.report({'INFO'},
-                        f"Calibration complete: {float(obj.get('qss_light_energy_calibration', 1.0)):.4g}x; "
-                        "live scale 1 targets source mean brightness. Original atlas restored. "
-                        "Spatial falloff still approximates ericw's linear attenuation.")
+            self.report(
+                {'INFO'},
+                f"Manual live-light calibration set to {new_manual:.4g}x. "
+                "Original lightmap restored; live scale is now 1.0. "
+                "Spatial falloff remains an Eevee/Cycles approximation of Quake attenuation."
+            )
             return {'FINISHED'}
         except Exception as exc:
-            if current_image:
-                try:
+            try:
+                current_image = bpy.data.images.get(obj.get('qss_lightmap_image_name', ''))
+                if current_image is not None:
                     current_image.pixels.foreach_set(original_pixels)
                     current_image.update()
-                except Exception:
-                    pass
-            context.scene.qss_light_energy_scale = old_scale
-            obj['qss_light_energy_calibration'] = old_object_calibration
+            except Exception:
+                pass
+            scene.qss_light_energy_scale = old_scale
+            obj['qss_manual_light_energy_calibration'] = old_manual
+            obj['qss_light_energy_calibration'] = old_legacy_calibration
             for light_obj in imported_lights:
-                light_obj['qss_energy_calibration'] = old_light_calibrations.get(
-                    light_obj.name, old_object_calibration)
-            _apply_quake_light_energy_scale(context.scene)
+                light_obj['qss_manual_energy_calibration'] = old_light_manual.get(
+                    light_obj.name, old_manual
+                )
+                light_obj['qss_energy_calibration'] = old_light_legacy.get(
+                    light_obj.name, old_legacy_calibration
+                )
+            _apply_quake_light_energy_scale(scene)
             obj['qss_lightmap_source'] = old_source
+            try:
+                _set_lighting_preview(context, obj, old_preview_mode)
+            except Exception:
+                pass
             self.report({'ERROR'}, f'Could not finish source calibration: {exc}')
             return {'CANCELLED'}
 
