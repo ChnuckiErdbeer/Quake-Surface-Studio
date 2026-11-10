@@ -282,16 +282,15 @@ def evaluate_quake_luxel(sample_position, surface_normal, lights, active_styles,
                           contribution_gate: float = 0.001):
     """Evaluate static direct ericw-style lighting for one BSP luxel.
 
-    `sample_position`, `surface_normal`, light origins and spot directions use
-    raw Quake map units / Quake Z-up coordinates. Each light is a mapping with
-    origin, value, color, style, delay, wait, falloff, anglescale, direction,
-    outer_angle, inner_angle and nostaticlight keys.
+    This mirrors the ericw-tools direct-light and local-minlight passes for
+    point/spot entity lights. Delay 4 is deliberately processed after ordinary
+    direct contributions: it ignores surface incidence and spotlight cones,
+    checks the average brightness of the existing style sample, and clamps
+    each RGB channel only when the sample is below the light threshold.
 
-    This implements point/spot direct lighting only. `delay=4` contributes a
-    channel-wise local-minlight clamp, not additive energy. `visible(light,
-    sample_position, surface_normal)` may be supplied by a geometry ray caster.
-    The function is Blender-independent so its attenuation and style behavior
-    can be regression-tested without Blender.
+    `sample_position`, `surface_normal`, light origins and spot directions
+    use raw Quake map units / Quake Z-up coordinates. A `visible(light,
+    sample_position, surface_normal)` callback may supply line-of-sight tests.
     """
     import math
 
@@ -309,7 +308,10 @@ def evaluate_quake_luxel(sample_position, surface_normal, lights, active_styles,
         return (0.0, 0.0, 0.0)
 
     additive = {style: [0.0, 0.0, 0.0] for style in style_set}
-    local_min = {style: [0.0, 0.0, 0.0] for style in style_set}
+    local_min_lights = {style: [] for style in style_set}
+
+    # First pass: ordinary point/spot lights. ericw handles delay 4 in a
+    # separate local-minlight pass after normal direct lighting is accumulated.
     for light in lights:
         if bool(light.get('nostaticlight', False)):
             continue
@@ -324,16 +326,27 @@ def evaluate_quake_luxel(sample_position, surface_normal, lights, active_styles,
         else:
             direction_to_light = tuple(v / distance for v in delta)
 
+        delay = int(light.get('delay', 0))
+        intensity = float(light.get('value', 300.0)) * max(0.0, float(energy_scale))
+        colour = tuple(max(0.0, float(v)) for v in light.get('color', (1.0, 1.0, 1.0))[:3])
+
+        if delay == 4:
+            # LF_LOCALMIN is not an additive point-light contribution. Defer
+            # it until after the normal lights have populated this style.
+            local_min_lights[style].append((light, intensity, colour))
+            continue
+
         incidence = sum(normal[i] * direction_to_light[i] for i in range(3))
-        bleed = bool(light.get('bleed', False))
         angle_factor = ericw_surface_angle(
-            incidence, float(light.get('anglescale', 0.5)), bleed=bleed
+            incidence, float(light.get('anglescale', 0.5)),
+            bleed=bool(light.get('bleed', False))
         )
         if angle_factor <= 0.0:
             continue
         if visible is not None and not visible(light, sample, normal):
             continue
 
+        cone_factor = 1.0
         if bool(light.get('is_spot', False)):
             spot_dir = tuple(float(v) for v in light.get('direction', (0.0, 0.0, -1.0))[:3])
             spot_len = math.sqrt(sum(v * v for v in spot_dir))
@@ -349,39 +362,40 @@ def evaluate_quake_luxel(sample_position, surface_normal, lights, active_styles,
             )
             if cone_factor <= 0.0:
                 continue
-        else:
-            cone_factor = 1.0
 
-        intensity = float(light.get('value', 300.0)) * max(0.0, float(energy_scale))
-        falloff = float(light.get('falloff', 0.0))
-        wait = float(light.get('wait', 1.0))
         amount = ericw_light_value(
-            intensity, int(light.get('delay', 0)), distance, wait,
-            float(world_dist), falloff
+            intensity, delay, distance,
+            float(light.get('wait', 1.0)), float(world_dist),
+            float(light.get('falloff', 0.0))
         ) * angle_factor * cone_factor
         if abs(amount) < gate or abs(amount) <= 0.0:
             continue
-        colour = tuple(max(0.0, float(v)) for v in light.get('color', (1.0, 1.0, 1.0))[:3])
-        target = local_min[style] if int(light.get('delay', 0)) == 4 else additive[style]
         for channel in range(3):
-            value = amount * (colour[channel] if channel < len(colour) else 1.0)
-            if int(light.get('delay', 0)) == 4:
-                # ericw delay 4 is a local minlight cap. Keep the largest cap
-                # per channel; it does not add to the regular light sum.
-                target[channel] = max(target[channel], value)
-            else:
-                target[channel] += value
+            component = colour[channel] if channel < len(colour) else 1.0
+            additive[style][channel] += amount * component
 
+    # Second pass: ericw's LightFace_LocalMin. Its brightness test is the
+    # arithmetic RGB mean of the already accumulated style sample. If below
+    # the entity's light value, a visible sample is clamped per channel to
+    # light * colour. It does not use _anglescale or a spotlight cone.
     total = [0.0, 0.0, 0.0]
     for style in style_set:
-        values = [max(additive[style][c], local_min[style][c]) for c in range(3)]
+        values = additive[style]
+        for light, threshold, colour in local_min_lights[style]:
+            if (values[0] + values[1] + values[2]) / 3.0 >= threshold:
+                continue
+            if visible is not None and not visible(light, sample, normal):
+                continue
+            for channel in range(3):
+                component = colour[channel] if channel < len(colour) else 1.0
+                values[channel] = max(values[channel], threshold * component)
         for channel in range(3):
             total[channel] += values[channel]
+
     return ericw_postprocess_rgb(
         total, range_scale=float(world_range), gamma=float(world_gamma),
         maxlight=float(maxlight)
     )
-
 
 def lightmap_bake_margin_pixels(gutter: int = 2, resolution: int = 1) -> int:
     """Return the safe Cycles edge-extension margin for a packed atlas island.
