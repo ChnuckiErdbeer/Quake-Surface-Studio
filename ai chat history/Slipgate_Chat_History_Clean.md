@@ -15162,3 +15162,31 @@ recorded the new user feedback and implementation priorities. The historical
 conversation transcript remains append-only. The raw TXT first-chapter cleanup
 was already completed and verified in the 0.20.1 maintenance pass; it is not
 currently outstanding.
+
+## 2026-11-10 — First implementation pass: Cycles bake feedback
+
+### User direction
+The user approved proceeding with development and expressed eagerness to continue.
+
+### Implemented
+- Added a shared Slipgate console logger in `addon.py`, emitting timestamped `[Slipgate] [LEVEL] [event]` messages.
+- Added staged progress/status feedback to the imported-light Cycles bake: setup, scene visibility, bake settings, material preparation, Cycles execution, and atlas validation/update.
+- Added success and failure console summaries.
+- Progress cleanup and workspace status-text reset are performed in the bake operator's `finally` block.
+- The progress bar is deliberately stage-based, not a fabricated percentage of Cycles rendering: `bpy.ops.object.bake` is a synchronous operator here and exposes no reliable per-sample callback to this code.
+
+### Git state
+- Branch: `fix/v0.11.1-metadata-style-order-test`
+- Implementation commit: `811bce7066763bd553390021eb70f82eca4c260d`
+- Changed file: `quake_surface_studio (zip me for blender)/addon.py`
+
+### Verification status
+- GitHub Actions QSS Python tests and Quake Texture Converter GUI tests were observed in progress immediately after the commit; their final result has not yet been confirmed.
+- No Blender GUI/Cycles bake was run in this implementation pass. The user must verify the staged progress display in Blender 5.2.
+
+### Next engineering steps
+1. Confirm CI result and inspect progress/log behavior in Blender 5.2.
+2. Diagnose dark frame-edge shadows by comparing atlas source texels, raw Cycles target pixels, and final material/viewport output before changing atlas gutters, UVs, normals, or bake margin.
+3. Design a technically honest live-light approximation for Quake `delay` modes. Blender's native point/spot lights do not expose an arbitrary attenuation curve; delay 4 (local minlight clamp) in particular cannot be represented by simply changing point-light energy or cutoff distance. Keep the exact ericw attenuation implementation in the Quake Direct CPU path.
+4. Continue toward the generated-artifact layout `<maps>/##slipgate/<map-name>/` when non-BSP outputs are generated.
+
