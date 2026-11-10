@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Quake Texture Converter
+Comment=Convert textures to the Quake palette
+Exec=bash -lc '"$(dirname "%k")/launch_converter.sh"'
+Terminal=false
+Categories=Graphics;
