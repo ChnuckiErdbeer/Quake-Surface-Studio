@@ -22,6 +22,26 @@ class ViewportUtilsTests(unittest.TestCase):
         point_bounds = viewport_utils.bounds_from_points([(0, 0, 0)])
         self.assertEqual(viewport_utils.view_distance_from_bounds(point_bounds), 0.05)
 
+    def test_selected_face_cycle_uses_active_then_wraps_both_directions(self):
+        self.assertEqual(viewport_utils.next_selected_face_index([7, 2, 5], active_index=5), 5)
+        self.assertEqual(viewport_utils.next_selected_face_index([7, 2, 5], active_index=5,
+                                                                  previous_index=5, direction=1), 7)
+        self.assertEqual(viewport_utils.next_selected_face_index([7, 2, 5], active_index=5,
+                                                                  previous_index=2, direction=-1), 7)
+        self.assertEqual(viewport_utils.next_selected_face_index([7], active_index=7,
+                                                                  previous_index=7, direction=1), 7)
+        with self.assertRaisesRegex(ValueError, "selected face"):
+            viewport_utils.next_selected_face_index([])
+
+    def test_face_focus_distance_fits_aspect_ratio_and_has_safe_margin(self):
+        square = viewport_utils.face_focus_distance(1.0, 1.0, 1.0, 1.5, 0.0254)
+        narrow = viewport_utils.face_focus_distance(1.0, 1.0, 0.5, 1.5, 0.0254)
+        self.assertGreaterEqual(square, 1.5 * 2.9)
+        self.assertGreater(narrow, square)
+        self.assertGreaterEqual(viewport_utils.face_focus_distance(0, 0, 1, 0, 0.0254), 0.25)
+        with self.assertRaisesRegex(ValueError, "aspect"):
+            viewport_utils.face_focus_distance(1, 1, 0, 1, 0.0254)
+
     def test_invalid_points_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "empty selection"):
             viewport_utils.bounds_from_points([])
