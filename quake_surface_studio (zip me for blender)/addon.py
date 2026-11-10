@@ -7446,7 +7446,11 @@ class QSS_OT_bake_scene_lights(Operator):
             obj['qss_last_bake_output_scale'] = float(post_scale)
             obj['qss_last_bake_raw_mean'] = float(raw_bake_mean)
             obj['qss_last_bake_source_mean'] = float(source_mean)
-            obj['qss_last_bake_calibration'] = float(new_calibration)
+            # Source matching now changes only the image atlas; lamp calibration
+            # remains the user's live-light multiplier.
+            obj['qss_last_bake_calibration'] = float(
+                obj.get('qss_light_energy_calibration', 1.0)
+            )
             obj['qss_last_bake_bounces'] = bake_bounces
             obj['qss_lightmap_source'] = 'cycles_bake_from_quake_entities'
             obj['qss_lightmap_gradient_baked'] = True
