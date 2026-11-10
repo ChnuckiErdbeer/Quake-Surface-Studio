@@ -12,7 +12,7 @@ from functools import lru_cache
 import math
 import os
 import re
-import shutil
+import hashlib
 import struct
 import sys
 import tempfile
@@ -78,7 +78,7 @@ _QSS_CONFIG_DEFAULTS = {
     "rebake_behavior": "ASK",
     "lighting_mode_storage": "PER_MAP",
     "global_lighting_mode": "source",
-    "palette_converter_python": "",
+    "viewport_fov_degrees": 90.0,
 }
 
 
@@ -5560,10 +5560,77 @@ def _qss_on_paint_color_picker_changed(self, context):
             print(f"QSS: could not load the map's Quake brush palette: {exc}")
 
 
-def _qss_converter_python_path():
-    configured = str(_qss_config_settings().get("palette_converter_python", "") or "")
-    candidate = _qss_abspath(configured) if configured else sys.executable
-    return os.path.abspath(os.path.expanduser(candidate or ""))
+def _qss_image_pixels_to_rgba8(image):
+    """Read a Blender image as top-down sRGB RGBA8 for palette conversion."""
+    width, height = int(image.size[0]), int(image.size[1])
+    if width < 1 or height < 1 or width * height > 16_777_216:
+        raise bsp.BSPError(
+            "The image is empty or larger than the 16-megapixel safe conversion limit."
+        )
+    image.update()
+    pixels = array.array("f", [0.0]) * (width * height * 4)
+    image.pixels.foreach_get(pixels)
+    color_space = str(getattr(image.colorspace_settings, "name", "") or "").lower()
+    encode_srgb = "srgb" in color_space
+    output = bytearray(width * height * 4)
+
+    def byte(value):
+        return max(0, min(255, int(round(float(value) * 255.0))))
+
+    def encode(value):
+        value = max(0.0, float(value))
+        if not encode_srgb:
+            return min(1.0, value)
+        if value <= 0.0031308:
+            return 12.92 * value
+        return 1.055 * (value ** (1.0 / 2.4)) - 0.055
+
+    for y in range(height):
+        source_row = (height - 1 - y) * width
+        target_row = y * width
+        for x in range(width):
+            source = (source_row + x) * 4
+            target = (target_row + x) * 4
+            output[target] = byte(encode(pixels[source]))
+            output[target + 1] = byte(encode(pixels[source + 1]))
+            output[target + 2] = byte(encode(pixels[source + 2]))
+            output[target + 3] = byte(pixels[source + 3])
+    return width, height, bytes(output)
+
+
+def _qss_read_fullbright_mask(source_path, width, height):
+    """Read an optional sibling *_fullbrights.png mask through Blender's image API."""
+    if not source_path:
+        return None, None
+    mask_path = os.path.splitext(source_path)[0] + "_fullbrights.png"
+    if not os.path.isfile(mask_path):
+        return None, None
+    mask_image = None
+    try:
+        mask_image = bpy.data.images.load(mask_path, check_existing=False)
+        if tuple(int(value) for value in mask_image.size[:2]) != (width, height):
+            raise bsp.BSPError("The *_fullbrights.png mask dimensions do not match the source image.")
+        pixels = array.array("f", [0.0]) * (width * height * 4)
+        mask_image.pixels.foreach_get(pixels)
+        mask = bytearray(width * height)
+        for target_y in range(height):
+            source_y = height - 1 - target_y
+            for x in range(width):
+                index = (source_y * width + x) * 4
+                luminance = (
+                    0.2126 * pixels[index]
+                    + 0.7152 * pixels[index + 1]
+                    + 0.0722 * pixels[index + 2]
+                )
+                mask[target_y * width + x] = 1 if luminance >= 0.5 else 0
+        return mask, mask_image
+    except Exception:
+        if mask_image is not None:
+            try:
+                bpy.data.images.remove(mask_image, do_unlink=True)
+            except Exception:
+                pass
+        raise
 
 
 def _qss_converter_source_image(context):
