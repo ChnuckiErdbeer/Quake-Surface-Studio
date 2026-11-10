@@ -3293,6 +3293,7 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
     surfedges = parsed.surfedges()
     texinfos = parsed.texinfos()
     faces = parsed.faces()
+    planes = parsed.planes()
     entries, materials, material_by_miptex, missing_mat, texture_sources, missing_texture_names = (
         _load_quake_image_and_materials(parsed, palette, wad_textures, loose_textures)
     )
@@ -3313,6 +3314,18 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
             if any(v < 0 or v >= len(vertices) for v in vertex_ids):
                 continue
             positions = [vertices[v] for v in vertex_ids]
+            plane_id = int(face[0])
+            if plane_id < 0 or plane_id >= len(planes):
+                raise bsp.BSPError(f"BSP face {face_id} references invalid plane {plane_id}.")
+            if bsp.face_winding_needs_reversal(
+                positions, planes[plane_id][:3], side=face[1], flip_z=flip_z
+            ):
+                # Honour dface.side and the optional Z reflection. Without
+                # this, faces whose surfedge winding disagrees with their
+                # oriented plane import with inverted normals and can receive
+                # almost no Cycles diffuse light.
+                vertex_ids.reverse()
+                positions.reverse()
             start = len(mesh_vertices)
             # BSP positions remain in raw Quake units in imported_vertex_positions
             # for texinfo/lightmap maths. Blender mesh coordinates are converted
@@ -9823,7 +9836,7 @@ class QSS_PT_quick_actions(Panel):
         obj = context.object
         layout = self.layout
         row = layout.row(align=True)
-        row.operator(QSS_OT_fps_walk.bl_idname, text="WASD", icon="WALK")
+        row.operator(QSS_OT_fps_walk.bl_idname, text="WASD", icon="CAMERA_DATA")
         row.operator(QSS_OT_player_start.bl_idname, text="Start", icon="EMPTY_AXIS")
         row.operator(QSS_OT_isolate_faces.bl_idname, text="Isolate", icon="HIDE_OFF")
         row.operator(QSS_OT_frame_selection.bl_idname, text="Focus", icon="VIEWZOOM")
