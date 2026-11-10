@@ -43,13 +43,7 @@
 - Sets `ramp_candidates_per_zone = 5` as the default, matching the successful setting confirmed in Blender texture tests.
 - Converts the active Texture Paint canvas, an Image Editor image, or the current Render Result to an indexed Quake-palette PNG. Optionally creates the converter's layered OpenRaster (`.ora`) diagnostic project.
 - Uses the active map's exact palette file when constructing the JASC-PAL input. The converted PNG is loaded and packed into the Blender file as a new image; the source image is not overwritten.
-- The converter uses NumPy, Pillow, SciPy and scikit-image. Blender's bundled Python is not assumed to have these installed. Configure **Quake converter Python** in QSS Settings to point to a Python executable in a virtual environment with those packages installed. Use **Check Converter Python** in the QUAKE PALETTE panel before the first conversion. On Linux, for example:
-
-```bash
-python3 -m venv ~/.local/share/qss/converter-venv
-~/.local/share/qss/converter-venv/bin/python -m pip install --upgrade pip
-~/.local/share/qss/converter-venv/bin/python -m pip install numpy Pillow scipy scikit-image
-```
+- **Historical v0.19.0 implementation:** this first version launched the converter in a separate Python environment. That external runtime was removed in **v0.20.0**; current conversion runs inside Blender and needs no third-party Python packages.
 
 ### Paint preparation and map workflow
 - Large paint selections now show a **confirmation dialog**, not a hard rejection. The dialog estimates peak face-image and atlas pixel-buffer allocation, reports existing QSS image-buffer memory, and compares the estimate with available host/cgroup memory when the platform exposes it.
