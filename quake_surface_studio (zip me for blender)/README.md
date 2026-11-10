@@ -1,4 +1,40 @@
-# Quake Surface Studio 0.18.4
+# Quake Surface Studio 0.19.0
+
+## 0.19.0 — Quake palette painting, conversion and safer map workflow
+
+### Quake palette brush picker
+- Adds a switch between Blender's **Standard** brush color picker and **Quake** palette mode in the new **QUAKE PALETTE** sidebar panel.
+- The Quake picker is populated from the active map's actual 256-entry palette (the resolved game `gfx/palette.lmp` or explicitly imported palette), not from a hard-coded approximation.
+- The selected palette is synchronized when changing the active loaded map. Quake entries 0–223 are ordinary colors, 224–254 are the palette's fullbright range, and 255 is the conventional transparent index; transparency itself is handled by the texture format, not as a brush alpha mode.
+
+### Integrated Quake texture converter
+- Bundles the existing `conv_layers.py` material-zone converter and its settings as part of QSS. The algorithm is preserved: OKLab analysis, detail enhancement, SLIC superpixels, adjacency-based hierarchical material-zone merging, all 14 palette ramps, multiple candidate ramps per zone, independent alpha/transparency and optional fullbright masks.
+- Sets `ramp_candidates_per_zone = 5` as the default, matching the successful setting confirmed in Blender texture tests.
+- Converts the active Texture Paint canvas, an Image Editor image, or the current Render Result to an indexed Quake-palette PNG. Optionally creates the converter's layered OpenRaster (`.ora`) diagnostic project.
+- Uses the active map's exact palette file when constructing the JASC-PAL input. The converted PNG is loaded and packed into the Blender file as a new image; the source image is not overwritten.
+- The converter uses NumPy, Pillow, SciPy and scikit-image. Blender's bundled Python is not assumed to have these installed. Configure **Quake converter Python** in QSS Settings to point to a Python executable in a virtual environment with those packages installed. Use **Check Converter Python** in the QUAKE PALETTE panel before the first conversion. On Linux, for example:
+
+```bash
+python3 -m venv ~/.local/share/qss/converter-venv
+~/.local/share/qss/converter-venv/bin/python -m pip install --upgrade pip
+~/.local/share/qss/converter-venv/bin/python -m pip install numpy Pillow scipy scikit-image
+```
+
+### Paint preparation and map workflow
+- Large paint selections now show a **confirmation dialog**, not a hard rejection. The dialog estimates peak face-image and atlas pixel-buffer allocation, reports existing QSS image-buffer memory, and compares the estimate with available host/cgroup memory when the platform exposes it.
+- Memory estimates cover CPU image pixel buffers only. They cannot predict Blender undo history, GPU copies, material datablocks, allocator fragmentation, or memory consumed by other processes, so they are guidance rather than an out-of-memory guarantee.
+- Focus-on-face temporary near/far clipping now runs in **Edit Mode as well as Texture Paint**, and restores the previous clipping when leaving the mode or moving the view.
+- Adds **Close** beside the Loaded Map selector. It asks for confirmation before removing that map's imported objects and map-specific data. Closing the final QSS map restores the scene objects that QSS hid during map isolation. The original BSP on disk is not changed.
+- Removes the separate **Last Export** Ironwail button; **Test in Ironwail** is the single in-panel launch workflow.
+
+### Viewport shading clarification
+- Blender's Solid/Flat and Material Preview are viewport shading modes, not separate Object Mode and Edit Mode color spaces. QSS now displays a hint and a **Material Preview** shortcut when the active viewport is in Solid shading. Material Preview is the mode that evaluates the imported QSS image/material nodes and lightmap preview. Each 3D View stores its own shading mode.
+
+### Validation
+- The standalone test suite now includes a converter smoke test: it runs the bundled converter against a generated 256-entry JASC-PAL and a small synthetic texture, and verifies that it produces a same-size indexed PNG.
+- GitHub Actions installs the converter's Python dependencies, compiles the add-on and converter, runs the full standalone suite, checks the metadata version, and assembles the Blender package.
+- Interactive Blender 5.2 checks are still required for palette UI behavior, image/render conversion, memory confirmation, and the close-map dialog.
+
 
 ## 0.18.4 — Safer painting, aligned layers and smoother camera travel
 
