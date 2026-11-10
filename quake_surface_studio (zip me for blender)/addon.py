@@ -5596,6 +5596,14 @@ def _qss_is_texture_paint_context(context):
     return bool(obj is not None and getattr(obj, "mode", "") == "TEXTURE_PAINT")
 
 
+def _qss_focus_clip_context(context):
+    """Face-focus depth clipping applies in Edit Mode and Texture Paint."""
+    return bool(
+        getattr(context, "mode", "") == "EDIT_MESH"
+        or _qss_is_texture_paint_context(context)
+    )
+
+
 def _qss_exit_texture_paint(context, obj):
     """Leave Texture Paint and restore the pre-paint Object/Edit mode."""
     return_to_edit = bool(obj.get("qss_paint_return_edit", False))
@@ -5636,6 +5644,56 @@ class QSS_OT_activate_paint(Operator):
     bl_label = "Enter Texture Paint"
     bl_description = "Paint the active selected face material; switches from Edit Mode automatically"
 
+    warning_face_count: IntProperty(default=0, options={'HIDDEN'})
+    warning_peak_bytes: IntProperty(default=0, options={'HIDDEN'})
+    warning_available_bytes: IntProperty(default=0, options={'HIDDEN'})
+    warning_existing_bytes: IntProperty(default=0, options={'HIDDEN'})
+
+    def invoke(self, context, event):
+        obj = context.object
+        already_texture_painting = (
+            _qss_is_texture_paint_context(context)
+            and str(obj.get("qss_active_paint_kind", "texture")) == "texture"
+        )
+        if already_texture_painting:
+            return self.execute(context)
+        estimate = _qss_estimate_texture_paint_memory(context, obj)
+        available = _qss_available_memory_bytes()
+        self.warning_face_count = int(estimate["face_count"])
+        self.warning_peak_bytes = int(estimate["peak_pixel_bytes"])
+        self.warning_available_bytes = int(available or 0)
+        self.warning_existing_bytes = _qss_map_image_memory_bytes(obj)
+        if _qss_paint_confirmation_needed(
+            self.warning_face_count, self.warning_peak_bytes, available
+        ):
+            return context.window_manager.invoke_props_dialog(self, width=500)
+        return self.execute(context)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.alert = True
+        layout.label(
+            text=f"Prepare Texture Paint for {self.warning_face_count} selected faces?",
+            icon="ERROR",
+        )
+        layout.label(
+            text=f"Estimated peak new image buffers: {palette_utils.format_mib(self.warning_peak_bytes)}"
+        )
+        layout.label(
+            text=f"Existing QSS map image buffers: {palette_utils.format_mib(self.warning_existing_bytes)}"
+        )
+        if self.warning_available_bytes > 0:
+            layout.label(
+                text=f"System/cgroup memory currently available: {palette_utils.format_mib(self.warning_available_bytes)}"
+            )
+        else:
+            layout.label(text="Available system memory could not be queried; estimate covers image buffers only.")
+        layout.label(
+            text="Estimate excludes Blender undo data, material datablocks, GPU copies and other process overhead.",
+            icon="INFO",
+        )
+        layout.alert = False
+
     @classmethod
     def poll(cls, context):
         obj = context.object
@@ -5657,8 +5715,6 @@ class QSS_OT_activate_paint(Operator):
             _qss_is_texture_paint_context(context)
             and str(obj.get("qss_active_paint_kind", "texture")) == "texture"
         )
-        if not currently_painting_texture and not _qss_check_paint_face_limit(self, context, obj):
-            return {"CANCELLED"}
         if _qss_is_texture_paint_context(context):
             current_kind = str(obj.get("qss_active_paint_kind", ""))
             if not current_kind:
@@ -5785,6 +5841,47 @@ class QSS_OT_activate_lightmap_paint(Operator):
     bl_idname = "qss.activate_lightmap_paint"
     bl_label = "Enter Lightmap Paint"
     bl_description = "Paint the working lightmap atlas, restricted to selected lightmapped faces"
+    warning_face_count: IntProperty(default=0, options={'HIDDEN'})
+    warning_atlas_bytes: IntProperty(default=0, options={'HIDDEN'})
+
+    def invoke(self, context, event):
+        obj = context.object
+        already_painting_lightmap = (
+            _qss_is_texture_paint_context(context)
+            and str(obj.get("qss_active_paint_kind", "")) == "lightmap"
+        )
+        if already_painting_lightmap:
+            return self.execute(context)
+        count = _qss_selected_paint_face_count(context, obj)
+        self.warning_face_count = int(count)
+        image = bpy.data.images.get(str(obj.get("qss_lightmap_image_name", "")))
+        self.warning_atlas_bytes = 0
+        if image is not None:
+            bpp = 16 if bool(getattr(image, "is_float", False)) else 4
+            self.warning_atlas_bytes = max(1, int(image.size[0])) * max(1, int(image.size[1])) * bpp
+        if count > QSS_PAINT_CONFIRM_FACE_COUNT:
+            return context.window_manager.invoke_props_dialog(self, width=460)
+        return self.execute(context)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.alert = True
+        layout.label(
+            text=f"Paint the lightmap on {self.warning_face_count} selected faces?",
+            icon="ERROR",
+        )
+        layout.label(
+            text="Lightmap Paint reuses the existing atlas; it does not create one texture per face."
+        )
+        layout.label(
+            text=f"Current working atlas: {palette_utils.format_mib(self.warning_atlas_bytes)}"
+        )
+        layout.label(
+            text="A large face mask can still increase brush/undo work. Continue?",
+            icon="INFO",
+        )
+        layout.alert = False
+
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
@@ -5805,8 +5902,6 @@ class QSS_OT_activate_lightmap_paint(Operator):
             _qss_is_texture_paint_context(context)
             and str(obj.get("qss_active_paint_kind", "")) == "lightmap"
         )
-        if not currently_painting_lightmap and not _qss_check_paint_face_limit(self, context, obj):
-            return {"CANCELLED"}
         if _qss_is_texture_paint_context(context):
             current_kind = str(obj.get("qss_active_paint_kind", ""))
             if not current_kind:
@@ -7337,7 +7432,7 @@ class QSS_OT_focus_clip_watch(Operator):
         if self._finished:
             return {"FINISHED"}
         if event.type == "TIMER":
-            if not _qss_is_texture_paint_context(context) or context.object != self._object:
+            if not _qss_focus_clip_context(context) or context.object != self._object:
                 self._finish_restore()
                 return {"FINISHED"}
             if self._view_was_moved():
@@ -7378,7 +7473,7 @@ class QSS_OT_frame_selection(Operator):
         from mathutils import Vector
 
         _qss_restore_focus_clip_session(self._area)
-        if _qss_is_texture_paint_context(context):
+        if _qss_focus_clip_context(context):
             if self._clip_original is None:
                 self._clip_original = (
                     float(self._space.clip_start), float(self._space.clip_end)
@@ -7439,7 +7534,7 @@ class QSS_OT_frame_selection(Operator):
     def _launch_clip_watch(self, context):
         if self._clip_original is None or self._clip_watch_started:
             return
-        if not _qss_is_texture_paint_context(context):
+        if not _qss_focus_clip_context(context):
             self._space.clip_start, self._space.clip_end = self._clip_original
             self._clip_original = None
             return
@@ -7515,7 +7610,7 @@ class QSS_OT_frame_selection(Operator):
         self._timer = None
         self._clip_original = None
         self._clip_watch_started = False
-        self._initial_paint_mode = _qss_is_texture_paint_context(context)
+        self._initial_paint_mode = _qss_focus_clip_context(context)
 
         try:
             self._begin_focus(context, direction=1)
@@ -7563,7 +7658,7 @@ class QSS_OT_frame_selection(Operator):
         if context.object != self._object:
             self._finish_modal(context, restore_clip=not self._clip_watch_started)
             return {"FINISHED"}
-        if self._initial_paint_mode and not _qss_is_texture_paint_context(context):
+        if self._initial_paint_mode and not _qss_focus_clip_context(context):
             self._finish_modal(context, restore_clip=True)
             return {"FINISHED"}
 
