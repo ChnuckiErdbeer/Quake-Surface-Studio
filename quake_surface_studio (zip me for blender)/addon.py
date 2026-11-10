@@ -7427,7 +7427,7 @@ class QSS_OT_bake_scene_lights(Operator):
                 f"hide_get={bool(obj.hide_get())}; active_map={active_map_collection.name if active_map_collection else 'none'}"
             )
 
-            for name in ('target', 'use_pass_color', 'use_pass_diffuse', 'use_pass_emit', 'use_pass_glossy', 'use_pass_transmission', 'use_pass_direct', 'use_pass_indirect', 'use_clear', 'margin'):
+            for name in ('target', 'use_pass_color', 'use_pass_diffuse', 'use_pass_emit', 'use_pass_glossy', 'use_pass_transmission', 'use_pass_direct', 'use_pass_indirect', 'use_clear', 'margin', 'margin_type'):
                 if hasattr(scene.render.bake, name):
                     old_bake_settings[name] = getattr(scene.render.bake, name)
             scene.render.bake.use_pass_color = False  # bake illumination, not albedo
