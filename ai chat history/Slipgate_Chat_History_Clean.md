@@ -577,7 +577,7 @@ Detect a player firing a weapon. Detect nearby explosions. Investigate the locat
 
 Store the last known player position. Remember where the player was last seen. Search nearby rooms after losing sight. Eventually abandon the search. The relevant building blocks are already available in QuakeC, including entity fields, vectors, distance calculations and collision traces.
 
-**GitHub +2**
+
 
 5. What I'd consider achievable
 
@@ -613,7 +613,7 @@ can a monster cast rays?
 
 Absolutely. QuakeC has a built-in function called traceline(), which performs a raycast. And the good news: it's a standard Quake engine builtin, so it's suitable for your rerelease and Ironwail compatibility target.
 
-**GitHub +1**
+
 
 1. Basic raycast
 
@@ -730,7 +730,7 @@ A ray will hit that wall regardless of which part of the texture it appears to h
 with { ).
 ```
 
-They can visually contain holes, but those holes are a rendering feature, not automatically holes in the collision geometry. QuakeBook So a monster might see the player through a fence visually, while traceline() still reports that a wall blocks its view.
+They can visually contain holes, but those holes are a rendering feature, not automatically holes in the collision geometry. So a monster might see the player through a fence visually, while traceline() still reports that a wall blocks its view.
 
 What can you do instead?
 
@@ -11787,7 +11787,10 @@ Paste the contents of palette_data.txt here. It will give me the original palett
 
 If you want to keep gentext.py, delete its contents; it isn't needed for this step.
 
-### You:/mnt/sde1/FPS/IdTech2/sof/base/textures/iraq/tga/tests$.venv/bin/python -c '
+### You
+
+```text
+:/mnt/sde1/FPS/IdTech2/sof/base/textures/iraq/tga/tests$ .venv/bin/python -c '
 
 ```text
 from conv import load_palette
@@ -13217,7 +13220,9 @@ Krita can open, plus optionally separate PNGs. I'd also make the layers align pi
 
 This would be optional and would not change the appearance of the regular output.
 
-### You.ora sounds great. Go for it
+### You
+
+.ora sounds great. Go for it
 
 ### ChatGPT
 
@@ -14086,7 +14091,9 @@ just stumbled upon the "zorn palette" looks a lot like the colors chosen for qua
 
 [Open original conversation](https://chatgpt.com/c/6af24930-95f0-83ed-8d4d-93555ef6d64e) · 22 source pages
 
-### You. It installs!
+### You
+
+. It installs!
 
 2. Settings work! Love the cogwheel and file solition.
 
