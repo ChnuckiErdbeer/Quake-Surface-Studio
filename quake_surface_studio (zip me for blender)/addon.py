@@ -2947,6 +2947,12 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
             sun_data.angle = math.radians(max(0.0, min(90.0, penumbra)))
         sun_obj['qss_light_role'] = 'quake_world_sunlight'
         sun_obj['qss_quake_light_value'] = float(sun_value)
+        sun_obj['qss_manual_energy_calibration'] = float(
+            obj.get('qss_manual_light_energy_calibration', 1.0)
+        )
+        sun_obj['qss_energy_calibration'] = float(
+            obj.get('qss_manual_light_energy_calibration', 1.0)
+        )
         sun_obj['qss_applied_energy_scale'] = energy_scale
         light_count += 1
 
@@ -8729,12 +8735,12 @@ def _qss_diagnostics_text(context, obj):
     for light_obj in context.scene.objects:
         if light_obj.type != 'LIGHT' or light_obj.get('qss_light_role') not in {'quake_entity_light', 'quake_world_sunlight'}:
             continue
-        lines.append('  {} type={} color={} energy={:.6g} W style={} inferred={} value={} delay={} range={} calibration={}'.format(
+        lines.append('  {} type={} color={} energy={:.6g} W style={} inferred={} value={} delay={} range={} manual_calibration={}'.format(
             light_obj.name, light_obj.data.type, tuple(round(float(v), 4) for v in light_obj.data.color),
             float(light_obj.data.energy), light_obj.get('qss_quake_light_style', 0),
             light_obj.get('qss_quake_style_was_inferred', False), light_obj.get('qss_quake_light_value', ''),
             light_obj.get('qss_quake_light_delay', 0), light_obj.get('qss_quake_range', ''),
-            light_obj.get('qss_energy_calibration', 1.0)))
+            light_obj.get('qss_manual_energy_calibration', 1.0)))
     world = context.scene.world
     lines.append(f'World: {world.name if world else "None"}')
     if world and world.use_nodes and world.node_tree:
