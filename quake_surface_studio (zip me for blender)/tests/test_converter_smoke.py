@@ -67,7 +67,8 @@ class QuakeTextureConverterSmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             output = os.path.join(temp, "indexed.png")
             palette_utils.save_indexed_png(output, width, height, pixels, palette)
-            data = open(output, "rb").read()
+            with open(output, "rb") as handle:
+                data = handle.read()
         self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
         offset = 8
         chunks = {}
