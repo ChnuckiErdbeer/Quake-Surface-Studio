@@ -8888,13 +8888,16 @@ class QSS_OT_write_diagnostics(Operator, ExportHelper):
     def invoke(self, context, event):
         obj = context.object
         stem = os.path.splitext(os.path.basename(obj.get('qss_source_path', obj.name)))[0]
-        if bpy.data.filepath:
-            start_dir = os.path.dirname(bpy.data.filepath)
-        else:
-            start_dir = os.path.expanduser('~/Desktop')
-            if not os.path.isdir(start_dir):
-                start_dir = os.path.expanduser('~')
-        self.filepath = os.path.join(start_dir, f'QSS_{stem}_diagnostics.txt')
+        try:
+            self.filepath = _qss_map_artifact_path(obj, f'QSS_{stem}_diagnostics.txt', create=False)
+        except Exception:
+            if bpy.data.filepath:
+                start_dir = os.path.dirname(bpy.data.filepath)
+            else:
+                start_dir = os.path.expanduser('~/Desktop')
+                if not os.path.isdir(start_dir):
+                    start_dir = os.path.expanduser('~')
+            self.filepath = os.path.join(start_dir, f'QSS_{stem}_diagnostics.txt')
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
