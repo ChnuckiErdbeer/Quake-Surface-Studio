@@ -15027,3 +15027,10 @@ They report the result still looks all black, and ask whether imported lights we
 3. Reproduce Texture Paint activation in Blender 5.2 and compare Object/Edit/Texture Paint shading with identical material nodes and light energies; do not change the export converter to mask a viewport issue.
 4. Ask whether the lightmap atlas itself is black in the Image Editor or whether only the 3D viewport is black.
 5. Update this archive after the code fix, tests, CI and artifact verification. Do not claim Blender GUI validation without actually running it.
+
+
+### Follow-up code correction — live lamp calibration separated from atlas normalization
+
+On the active feature branch, the Cycles source-match ratio is now used only for the baked lightmap atlas. `_apply_quake_light_energy_scale()` applies the explicit user live-light slider to imported Quake lamp values without multiplying by a bake-derived calibration. The bake operator no longer writes `source_mean / raw_bake_mean` into the imported lamp calibration properties or reapplies the enlarged energy. This addresses the concrete 68.47x live-light amplification path seen in the user's log. It does not by itself establish why the baked image appears black in the viewport, nor does it establish the Texture Paint brightness behavior.
+
+Code commits: `485801435111bfdaba0d528cb9f08788b12fb2de` and `4b973246b6ee4d11b192b8287f9fe9f5b1dc1e16`. CI and Blender 5.2 interactive verification are pending.
