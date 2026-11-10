@@ -245,7 +245,16 @@ class ConverterGUI(tk.Tk):
         output_path = Path(output)
         candidates = [output_path.with_suffix('.ora')]
         if self.ora_dir_var.get().strip():
-            candidates.insert(0, Path(self.ora_dir_var.get()).expanduser() / output_path.with_suffix('.ora').name)
+            ora_root = Path(self.ora_dir_var.get()).expanduser()
+            source_root = Path(self.input_var.get()).expanduser()
+            if source_root.is_dir() and self.recursive_var.get():
+                try:
+                    ora_relative = Path(_source).relative_to(source_root).with_suffix('.ora')
+                except ValueError:
+                    ora_relative = output_path.with_suffix('.ora').name
+            else:
+                ora_relative = output_path.with_suffix('.ora').name
+            candidates.insert(0, ora_root / ora_relative)
         ora = next((p for p in candidates if p.is_file()), None)
         if ora is None:
             self.ora_layer_combo['values'] = []
