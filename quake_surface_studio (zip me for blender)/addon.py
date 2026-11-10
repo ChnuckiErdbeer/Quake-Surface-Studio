@@ -7417,12 +7417,9 @@ class QSS_OT_bake_scene_lights(Operator):
             # claim that Blender's inverse-square lights reproduce every Quake luxel.
             baked = array.array('f', [0.0]) * (int(bake_target.size[0]) * int(bake_target.size[1]) * 4)
             bake_target.pixels.foreach_get(baked)
-            # The live lamp calibration and atlas normalization are different
-            # quantities. The calibration makes slider=1 reproduce the source
-            # *mean* after accounting for the slider value used for this bake.
-            # The baked image itself must be normalized by source_mean/raw_mean
-            # (not by new_calibration/old_calibration, which would multiply the
-            # slider value a second time whenever it is not exactly 1).
+            # The bake already contains the selected live-light scale.
+            # Normalize only the baked image to the source atlas mean; never
+            # feed this image multiplier back into the imported scene lights.
             atlas_match_scale = 1.0
             if bool(getattr(scene, 'qss_bake_match_source', True)) and source_mean > 1e-8 and raw_bake_mean > 1e-8:
                 atlas_match_scale = lighting_utils.bake_atlas_match_scale(source_mean, raw_bake_mean)
