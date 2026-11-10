@@ -2779,8 +2779,11 @@ def _apply_quake_light_energy_scale(scene):
             continue
         range_scale = float(light_obj.get('qss_quake_world_range', 1.0))
         calibration = max(0.0, float(light_obj.get('qss_energy_calibration', 1.0)))
+        # Keep the user's live-light scale independent of bake source matching.
+        # Atlas normalization belongs to the baked image only; applying that
+        # ratio to scene lamps can amplify every imported light dramatically.
         light_obj.data.energy = lighting_utils.scaled_quake_light_energy(
-            raw_value, scale * calibration
+            raw_value, scale
         )
         if range_scale <= 0.0:
             light_obj.data.energy = 0.0
@@ -7331,11 +7334,8 @@ class QSS_OT_bake_scene_lights(Operator):
             source_image = bpy.data.images.get(obj.get('qss_original_lightmap_backup', ''))
             source_values = _lightmap_sample_luminances(obj, source_image) if source_image else []
             source_mean = (sum(source_values) / len(source_values)) if source_values else 0.0
-            old_calibration = max(1e-8, float(obj.get('qss_light_energy_calibration', 1.0)))
             energy_scale = max(0.0, float(scene.qss_light_energy_scale))
             max_energy_after_bake = max((float(o.data.energy) for o in imported_lights), default=0.0)
-            new_calibration = old_calibration
-            calibration_output_scale = 1.0
             obj['qss_last_bake_attempt_scale'] = energy_scale
             obj['qss_last_bake_attempt_max_lamp_energy'] = max_energy_after_bake
             obj['qss_last_bake_attempt_sample_count'] = len(bake_values)
@@ -7363,15 +7363,13 @@ class QSS_OT_bake_scene_lights(Operator):
                     'The failed bake was discarded. Use Save Lighting Diagnostics and send the report.'
                 )
             if bool(getattr(scene, 'qss_bake_match_source', True)) and source_mean > 1e-8:
-                new_calibration = old_calibration * lighting_utils.calibration_factor(source_mean, raw_bake_mean, energy_scale)
-                calibration_output_scale = new_calibration / old_calibration
-                obj['qss_light_energy_calibration'] = new_calibration
+                # Source matching is an image-atlas operation only. Preserve
+                # imported lamp energies and the user's live energy slider.
                 obj['qss_calibration_source_mean'] = source_mean
                 obj['qss_calibration_bake_mean'] = raw_bake_mean
-                obj['qss_calibration_factor'] = new_calibration
-                for light_obj in imported_lights:
-                    light_obj['qss_energy_calibration'] = new_calibration
-                _apply_quake_light_energy_scale(scene)
+                obj['qss_last_bake_atlas_match_scale'] = (
+                    lighting_utils.bake_atlas_match_scale(source_mean, raw_bake_mean)
+                )
 
             # Copy the completed float bake into the project's current atlas.
             # Source-match normalization is a global linear calibration, not a
