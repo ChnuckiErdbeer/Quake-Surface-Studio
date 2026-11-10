@@ -41,3 +41,40 @@ def view_distance_from_bounds(bounds, scale=1.5, minimum=0.05):
     if not math.isfinite(diagonal) or diagonal < 0.0:
         raise ValueError("Bounds diagonal must be a non-negative finite number.")
     return max(minimum, diagonal * scale)
+
+
+
+def next_selected_face_index(selected_indices, active_index=None, previous_index=None, direction=1):
+    """Choose the active/first selected face, then cycle deterministically."""
+    indices = tuple(sorted({int(index) for index in selected_indices}))
+    if not indices:
+        raise ValueError("At least one selected face is required.")
+    if previous_index in indices:
+        position = indices.index(int(previous_index))
+        step = 1 if int(direction) >= 0 else -1
+        return indices[(position + step) % len(indices)]
+    if active_index in indices:
+        return int(active_index)
+    return indices[0]
+
+
+def face_focus_distance(half_width, half_height, aspect, radius, unit_scale,
+                        fov_degrees=45.0, margin=1.4):
+    """Fit a face's projected bounding box in a perspective viewport with margin."""
+    values = tuple(float(value) for value in (
+        half_width, half_height, aspect, radius, unit_scale, fov_degrees, margin
+    ))
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError("Face-focus dimensions must be finite.")
+    half_width, half_height, aspect, radius, unit_scale, fov_degrees, margin = values
+    if half_width < 0.0 or half_height < 0.0 or radius < 0.0:
+        raise ValueError("Face-focus extents and radius cannot be negative.")
+    if aspect <= 0.0 or unit_scale <= 0.0:
+        raise ValueError("Viewport aspect and Quake unit scale must be positive.")
+    if not 10.0 <= fov_degrees <= 100.0 or margin < 1.0:
+        raise ValueError("Face-focus FOV must be 10–100 degrees and margin at least 1.")
+    tangent = math.tan(math.radians(fov_degrees) * 0.5)
+    fit_height = half_height / tangent
+    fit_width = half_width / (tangent * aspect)
+    return max(0.25, unit_scale * 4.0, radius * 2.9,
+               max(fit_height, fit_width) * margin)
