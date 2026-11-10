@@ -14160,3 +14160,45 @@ QSS v0.20.0 — CI passed Download QSS v0.20.0 for Blender 5.2 SHA-256: 520ef77f
 
 ---
 
+### You
+
+Does not install!!
+
+```python
+bpy.ops.object.delete(use_global=False, confirm=False)
+Deleted 1 object(s)
+bpy.context.space_data.system_bookmarks_active = 3
+Python: Traceback (most recent call last):
+  File "/app/blender/5.2/scripts/addons_core/bl_pkg/bl_extension_ops.py", line
+  1504, in execute
+    cmd_batch = self.exec_command_iter(is_modal)
+  File "/app/blender/5.2/scripts/addons_core/bl_pkg/bl_extension_ops.py", line
+  2598, in exec_command_iter
+    self.exec_legacy(source_filepath)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+  File "/app/blender/5.2/scripts/addons_core/bl_pkg/bl_extension_ops.py", line
+  2731, in exec_legacy
+    bpy.types.PREFERENCES_OT_addon_install.execute(self, bpy.context)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/app/blender/5.2/scripts/startup/bl_operators/userpref.py", line 830, in
+    execute
+    bpy.ops.preferences.addon_enable(module=mod.__name__)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+RuntimeError: Error: name 'QSS_PT_main' is not defined
+```
+
+Since the scope may not always be about only surfaces i decided to name it
+Slipgate instead. Like the quake slipgate it connects different worlds.
+
+This error afer painting a wall and then trying  test in ironwail, worked
+before painting.
+
+```text
+Could not test map in Ironwail: Image 'QSS_Face_04924_Paint' is 80x128; width
+and height must be powers of two.
+```
+
+probably qbsp dividing brushes?
+
+---
+
