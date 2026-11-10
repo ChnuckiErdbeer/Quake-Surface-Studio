@@ -12,7 +12,7 @@
 - The Cycles bake report now includes how many faces and raw luxels received nonzero illumination. Lighting Diagnostics continues to include per-face atlas sample statistics.
 
 ### Lighting
-- Source-match normalization remains an atlas-only operation; it no longer raises imported live-light energy.
+- Source-match normalization remains an atlas-only operation; it no longer raises imported live-light energy. The separate Auto-calibrate Live Lights to Source action still intentionally measures and stores a manual live-light multiplier.
 - Bake-success bookkeeping no longer references the removed lamp-calibration variable.
 - Eevee's faster apparent falloff is recorded as an outstanding engine-preview tuning issue; no unverified light-radius multiplier has been added.
 
