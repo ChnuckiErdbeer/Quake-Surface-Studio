@@ -78,25 +78,14 @@ from array import array
 from collections import deque
 from pathlib import Path
 
-"""In-process, standard-library Quake texture palette conversion.
-
-This module ports the material-zone converter into Blender's own Python runtime.
-It intentionally uses no external executables, NumPy, Pillow, SciPy or
-scikit-image. The processing order and design are retained: OKLab detail
-analysis, SLIC-style superpixels, conservative adjacency-only material-zone
-merging, distribution-fitted candidate palette ramps (five by default), and
-per-pixel quantization. The indexed PNG writer is also implemented here.
-"""
-from __future__ import annotations
-
+# Blender-native, standard-library implementation of the material-zone converter.
 import configparser
-import math
 import struct
 import zlib
 from array import array
 from collections import deque
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
 
 RAMPS = {
