@@ -35,43 +35,49 @@
 
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
 - Working branch: `fix/v0.11.1-metadata-style-order-test`
-- Add-on version: **Slipgate 0.20.4** (`__init__.py` and `addon.py`).
+- Add-on version: **Slipgate 0.20.5** (`__init__.py` and `addon.py`).
 - Main implementation: `quake_surface_studio (zip me for blender)/addon.py`; Quake lighting helpers: `lighting.py`; tests: `tests/`.
-- Latest implementation commit recorded in this handoff: `ad5a5c013ce1fa07fd574da15d8dcc908f092701`. Latest README-only update: `0fb124e720a66501b53608a56bacc3edf6538649`.
-- Latest verified Blender install artifact for the implementation commit: `Quake-Surface-Studio-v0.20.4-Blender-Install`, artifact ID `13755493333`, SHA-256 `62e731424fd76795e7455cfa3560263e555c737fb1b4f9af32aea8876895295b`. It is a GitHub Actions artifact from run 606 and expires 2027-02-08.
+- Latest UI implementation commit: `2c8d202e1a9550093a00776025e3205aaac1e8d0`. Version metadata commit: `8499d5b42ebf0de5fc1bf6424732cb68185e6b57`. Latest README commit: `2efede40796644507dada8ef1400d534ecddd3ee`.
+- Blender install artifact: `Quake-Surface-Studio-v0.20.5-Blender-Install`, artifact ID `13757062978`, SHA-256 `1b8298070a36322f2c304b81d76d9bd122b74b0468adbb7f364e0d5bccc4f0b7`. GitHub Actions run 616. Artifact expires 2027-02-08.
 - Package folder and internal identifiers remain `quake_surface_studio` / QSS for compatibility; visible branding is Slipgate.
 - Target interactive environment: Blender 5.2. Target engine includes Ironwail.
 
-**Latest user-reported status**
+**Latest user-reported status before 0.20.5**
 
 - Bake is working and the previous black-texture failure is gone.
 - Texture painting works well, with no reported brightness problem.
 - Quick Actions were restored and were present in the user's last test.
-- The user reported a dark shadow along all frame edges. Version 0.20.4 adds edge-extension bake margin based on the packed atlas gutter; this is a targeted mitigation, not yet proven to eliminate the user's artefact.
-- User asked for the remaining development work to be implemented and a directly usable add-on download link supplied.
+- User reported a dark shadow along all frame edges. Version 0.20.4 added edge-extension bake margin based on the packed atlas gutter; this is a targeted mitigation, not yet proven to eliminate the artefact.
+- Version 0.20.4 introduced delay-aware Live Lights calibration with documented native-Blender limitations and per-map non-BSP artifact folders.
+- User now wants non-game-rendered/tool textures (examples: trigger, origin, clip) hidden through a dedicated View Options popup, not more controls in the narrow sidebar. They want a gradual TrenchBroom-inspired view-filtering system.
+- User explicitly requires: **never remove existing add-on features unless they explicitly ask for removal.** Preserve existing controls and workflows; ask before retiring or replacing anything.
 
-**Implemented in Slipgate 0.20.4**
+**Implemented in Slipgate 0.20.5**
 
-1. **Bake progress and logging:** The Cycles bake now reports timestamped `[Slipgate] [LEVEL] [event]` console messages, staged progress and workspace status text, with cleanup on both success and failure. The progress is stage-based; the synchronous Cycles bake does not expose a reliable per-sample callback here, so no fake render percentage is shown.
-2. **Frame-edge coverage mitigation:** Cycles bake margin is now computed from the map's packed gutter and working resolution, and `margin_type` is set to `EXTEND` where supported. Both margin and margin type are restored to the user's prior settings in the bake cleanup. This is not a Blender GUI-verified fix yet; the user's frame-edge test remains essential.
-3. **Quake delay-aware Live Lights:** Imported point/spot lamps now use delay-aware native-light energy/range/soft-source calibration. Delay 2 is calibrated to Blender's inverse-square curve. Delays 0, 1 and 5 are explicitly labelled approximations. Delays 3 (constant field) and 4 (local minlight clamp) remain native-light fallbacks because standard Blender point/spot lamps cannot express those semantics. The Quake Direct CPU solver continues to evaluate all six static ericw attenuation formulas, including visibility rays. Do not claim exact Live Lights parity for delays 0, 1, 3, 4 or 5.
-4. **Per-map non-BSP artifacts:** Removed the manual **Create ##slipgate Folder** Quick Action and its operator. Importing a BSP does not create folders. Palette-converted PNGs, lighting diagnostics and the full self-test report are routed to `<map directory>/##slipgate/<map name>/`; the folder is created only when the output is actually written. Ordinary BSP exports and decoupled BSP copies remain beside their source map.
-5. **Version/documentation/tests:** Bumped the add-on to 0.20.4, documented the new behavior and added unit tests for bake-margin scaling and live-delay calibration.
+- Restored the original compact root-panel header from the earlier v0.18.0 implementation: version label, cogwheel opening the existing Settings dialog, and Text icon opening the existing `config.json` in Blender's Text Editor in a separate window.
+- The settings and config-editor operators had remained in the 0.20.4 source; only the visible buttons had been lost. This release restores their entry points without removing or changing other panels, settings, or workflows.
+- CI: QSS Python tests passed (run 616); converter GUI tests passed (run 71). Package assembly produced the verified install ZIP above.
+- No Blender GUI test was performed for the restored header.
 
-**Verification status**
+**TrenchBroom-inspired View Options research — proposal, not implemented yet**
 
-- GitHub Actions QSS Python tests passed (run 611).
-- GitHub Actions Quake Texture Converter GUI tests passed (run 68).
-- CI compiles the Python package, runs standalone tests, and assembles the Blender install artifact. It does not run Blender 5.2 GUI, a real Cycles bake, live Eevee preview, QBSP or Ironwail.
-- No Blender GUI or engine test was performed during this implementation pass. The user must verify bake-edge appearance, delay modes, folder creation and general workflow in Blender 5.2.
+- TrenchBroom's View Options is a dropdown/popup separate from its main editing viewport. It divides controls into Entities, Brushes (game-specific special brush/face types) and Renderer. It also supports per-entity-class visibility checkboxes and show/hide-all controls.
+- TrenchBroom classifies special brushes by entity classname patterns; special faces can be classified by material-name patterns, content flags, surface flags or surface parameters. This is more robust than relying only on a few literal texture names.
+- Quake texture names are meaningful but not all names have the same compiler/game behavior. Reference examples: `sky*` denotes sky; `*...` denotes liquids; `clip` is invisible collision; ericw-tools `skip`, `hint`, `hintskip` are compiler controls; `origin` is used to set brush-entity origin and is removed; `trigger` is a common trigger material, but triggers become invisible due to QuakeC entity behavior rather than the texture alone; `{...` indicates a fence texture and should remain visible.
+- Slipgate's imported mesh retains the source miptex index per face (`qss_bsp_miptex_id`) and each material stores its original name in `qss_texture_name`. This is a good basis for material-name classification and per-face filters.
+- Blender 5.2 exposes `MeshPolygon.hide`, which may provide a non-destructive per-face viewport hide mechanism. It must be tested carefully in Object Mode, Edit Mode, Texture Paint, Cycles bake and export before adopting it. Do not use destructive geometry deletion or alter source material/texture data just to hide editor-only faces.
+- Recommended first version: popup sections for **Tool / Non-rendered surfaces** (trigger, clip, origin, hint, hintskip, skip and a configurable custom-name list), **World rendering** (sky, liquids, fences as optional separate toggles, off by default), and **Entities** (later, when entity objects and class metadata are available). Provide Show All / Reset filters.
+- Default hide candidates should be limited to clear tool/non-game-rendered categories. Do not auto-hide sky, liquids or fences: those are actual game-visible surface types. Do not assume that every map contains these faces in its BSP render-face lump; some compilers remove them before BSP output.
+- UI recommendation: one compact **View Options** button in the existing Slipgate header opens a dedicated popup/popover/dialog. Keep all filter controls out of the narrow sidebar. Preserve the settings cogwheel and config Text Editor button beside the version.
+- Store filter preferences per map or per scene with a clear scope, and apply reversible face-visibility flags. Keep classification rules data-driven so mod-specific material prefixes can be added without changing the core code.
+- Next implementation stage, after agreeing on the proposal: add a read-only classifier and diagnostic list of detected special texture names first; then implement reversible visibility toggles and regression tests. This prevents guesses about the current map's actual texture set from silently hiding valid geometry.
 
-**Next validation priorities**
+**Verification status and next user testing**
 
-1. Install the 0.20.4 Blender artifact and import a fresh BSP.
-2. Run an imported-light Cycles bake; inspect whether the dark frame-edge shadows are gone or reduced. If still present, save Lighting Diagnostics and compare the raw bake target against the final atlas/material output.
-3. Compare Live Lights and Quake Direct CPU output for a small map containing point lights with delays 0–5, including a spotlight and non-default `wait`/`_falloff`. Expect delays 3 and 4 to remain visibly approximate in Live Lights.
-4. Generate a palette PNG and a lighting diagnostics report. Confirm the folder appears only on generation and that two maps get separate subfolders. Confirm BSP exports remain in their existing map directory.
-5. Report any Blender console traceback, unexpected lamp energy/range, bake seam or path issue. Do not mark visual behavior complete based on CI alone.
+- 0.20.4 CI validated Python compilation, standalone tests and package assembly; no Blender 5.2 GUI, Cycles bake, QBSP or Ironwail session was run.
+- 0.20.5 CI validates the add-on test suite, package assembly and converter GUI tests. It does not exercise Blender's interactive UI.
+- User should install 0.20.5 to verify the version/cogwheel/Text Editor buttons are back. The previous 0.20.4 bake, delay-light and artifact-folder tests remain useful.
+- Do not claim Blender GUI, QBSP or Ironwail validation unless performed in the relevant session.
 
 **Historical issues still worth retaining**
 
@@ -15217,4 +15223,28 @@ The user approved implementing the remaining development work and requested an i
 
 ### User test request
 Install the 0.20.4 package, then test Cycles bake edge coverage, live-light delay modes, per-map non-BSP output folders and normal map/paint/export workflows. Capture diagnostics if the dark frame edges persist.
+
+## 2026-11-10 — Slipgate 0.20.5 header restoration and View Options research
+
+### User request
+The user wants a TrenchBroom-inspired way to hide common tool/special textures that are not rendered in game (examples: trigger, origin, clip), with a long-term View Options system. The controls should live in a popup rather than cluttering the narrow Slipgate sidebar. They also asked to restore the previous settings cogwheel, version number and Blender Text Editor config-edit button. The user explicitly instructed that no add-on feature may be removed without asking, unless the user explicitly directs removal.
+
+### Restored in 0.20.5
+- Restored the compact main-panel header from the earlier v0.18.0 design: version label, cogwheel for existing Settings dialog, Text icon for existing config.json editor.
+- Both operators were still present and registered in the current source; only their visible entry points had disappeared.
+- No other controls or features were removed or repurposed.
+- Version 0.20.5, CI QSS Python run 616 and converter GUI run 71 passed.
+- Artifact: `Quake-Surface-Studio-v0.20.5-Blender-Install`, artifact ID `13757062978`, SHA-256 `1b8298070a36322f2c304b81d76d9bd122b74b0468adbb7f364e0d5bccc4f0b7`.
+- UI implementation commit: `2c8d202e1a9550093a00776025e3205aaac1e8d0`; metadata commit `8499d5b42ebf0de5fc1bf6424732cb68185e6b57`; README commit `2efede40796644507dada8ef1400d534ecddd3ee`.
+
+### TrenchBroom research
+- Official TrenchBroom 2026.2 manual: View Options is a dropdown attached to the info bar. It has per-entity-class checkboxes with show/hide-all actions and separate Entities, Brushes, Renderer groups. Special brush types are matched by entity classname patterns; face types can be matched by material-name patterns, content flags, surface flags or surface parameters.
+- Quake special names research: `sky*` = sky; `*...` = liquid; `clip` = invisible collision; ericw-tools `skip`, `hint`, `hintskip` = compiler controls; `origin` brush sets brush-entity origin and is removed; `trigger` is a common trigger texture but invisibility is due to QuakeC entity behavior, not merely the texture name; `{...` denotes fence texture and remains game-visible.
+- Source inspection: imported mesh has `qss_bsp_miptex_id` face attribute; source material stores original name in `qss_texture_name`. Blender 5.2 `MeshPolygon.hide` is available, but viewport/edit/paint/bake/export behavior requires direct Blender testing before adopting it.
+- Proposed first step: read-only scan that lists special texture names found in the active map, then reversible per-face visibility filters. Keep sky/liquid/fence separate and visible by default. Add custom material-name patterns later. Never delete faces or mutate source texture data for a view filter.
+- Proposed UI: one View Options popup button in the compact root header, separate from the settings cogwheel and config editor. Do not add more controls to the narrow sidebar.
+- No View Options filtering was implemented in this pass; this is a research/design proposal awaiting agreement and later implementation.
+
+### Testing boundary
+The 0.20.5 ZIP was downloaded from GitHub Actions and its contents and SHA-256 verified. CI passed, but no Blender GUI test was performed. User should install 0.20.5 to verify the restored header controls.
 
