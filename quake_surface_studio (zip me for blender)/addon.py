@@ -3048,8 +3048,11 @@ class QSS_OT_edit_face_overlay_watch(Operator):
             return
         self._finished = True
         try:
-            if not self._space.overlay.show_faces:
-                self._space.overlay.show_faces = self._original_show_faces
+            overlay = self._space.overlay
+            if bool(overlay.show_faces) != self._original_show_faces:
+                overlay.show_faces = self._original_show_faces
+            if hasattr(overlay, "show_floor") and bool(overlay.show_floor) != self._original_show_floor:
+                overlay.show_floor = self._original_show_floor
             self._area.tag_redraw()
         except Exception:
             pass
@@ -3079,10 +3082,13 @@ class QSS_OT_edit_face_overlay_watch(Operator):
         self._object = context.object
         self._window_manager = context.window_manager
         self._original_show_faces = bool(self._space.overlay.show_faces)
+        self._original_show_floor = bool(getattr(self._space.overlay, "show_floor", True))
         self._finished = False
         self._timer = None
         if context.mode == "EDIT_MESH":
             self._space.overlay.show_faces = False
+        if hasattr(self._space.overlay, "show_floor"):
+            self._space.overlay.show_floor = False
         try:
             self._timer = self._window_manager.event_timer_add(0.25, window=context.window)
             self._window_manager.modal_handler_add(self)
@@ -3099,21 +3105,37 @@ class QSS_OT_edit_face_overlay_watch(Operator):
             return {"FINISHED"}
         if event.type == "TIMER":
             try:
-                object_is_valid = (
-                    self._object is not None
-                    and bool(self._object.name)
-                    and _qss_is_map_object(self._object)
-                )
-            except (ReferenceError, RuntimeError):
-                object_is_valid = False
-            if not object_is_valid:
-                self._finish_restore()
-                return {"FINISHED"}
-            try:
-                should_hide = context.object == self._object and context.mode == "EDIT_MESH"
-                target_value = False if should_hide else self._original_show_faces
-                if bool(self._space.overlay.show_faces) != bool(target_value):
-                    self._space.overlay.show_faces = target_value
+                active_object = getattr(context, "object", None)
+                active_is_qss = _qss_is_map_object(active_object)
+                if active_is_qss:
+                    # A 3D View owns one watcher, not one watcher per map.
+                    # Retarget it when the user imports or activates another BSP.
+                    self._object = active_object
+                else:
+                    try:
+                        previous_object_valid = (
+                            self._object is not None
+                            and bool(self._object.name)
+                            and _qss_is_map_object(self._object)
+                        )
+                    except (ReferenceError, RuntimeError):
+                        previous_object_valid = False
+                    if not previous_object_valid:
+                        self._finish_restore()
+                        return {"FINISHED"}
+
+                should_hide_faces = active_is_qss and context.mode == "EDIT_MESH"
+                target_faces = False if should_hide_faces else self._original_show_faces
+                target_floor = False if active_is_qss else self._original_show_floor
+                overlay = self._space.overlay
+                changed = False
+                if bool(overlay.show_faces) != bool(target_faces):
+                    overlay.show_faces = target_faces
+                    changed = True
+                if hasattr(overlay, "show_floor") and bool(overlay.show_floor) != bool(target_floor):
+                    overlay.show_floor = target_floor
+                    changed = True
+                if changed:
                     self._area.tag_redraw()
             except Exception:
                 self._finish_restore()
@@ -3136,7 +3158,22 @@ def _qss_start_edit_face_overlay_watchers(context, obj):
         if screen is None:
             continue
         for area in screen.areas:
-            if area.type != "VIEW_3D" or area.as_pointer() in _qss_edit_overlay_sessions:
+            if area.type != "VIEW_3D":
+                continue
+            existing = _qss_edit_overlay_sessions.get(area.as_pointer())
+            if existing is not None:
+                # The area watcher must follow the active map. Without this,
+                # importing a second BSP leaves it bound to the first map and
+                # the timer turns the Edit Mode face-fill overlay back on.
+                existing._object = obj
+                try:
+                    existing._space = area.spaces.active
+                    existing._space.overlay.show_floor = False
+                    if context.mode == "EDIT_MESH":
+                        existing._space.overlay.show_faces = False
+                    area.tag_redraw()
+                except Exception as exc:
+                    print(f"QSS: could not retarget the Edit Mode overlay watcher: {exc}")
                 continue
             region = next((item for item in area.regions if item.type == "WINDOW"), None)
             if region is None:
@@ -9134,7 +9171,10 @@ class QSS_OT_set_lighting_mode(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _qss_is_map_object(context.object)
+        return bool(
+            _qss_is_map_object(context.object)
+            and context.mode in {"OBJECT", "EDIT_MESH"}
+        )
 
     def execute(self, context):
         obj = context.object
@@ -10164,7 +10204,9 @@ class QSS_PT_lighting(Panel):
         layout = self.layout
         mode = obj.get("qss_preview_mode", "source")
         row = layout.row(align=True)
-        row.enabled = context.mode == "OBJECT"
+        # Switching material nodes/render engine is safe in Edit Mode, but
+        # deliberately unavailable while Texture Paint owns the active image.
+        row.enabled = context.mode in {"OBJECT", "EDIT_MESH"}
         for value, label in (("source", "Original"), ("realtime", "Eevee"),
                              ("cycles", "Cycles"), ("baked", "Baked")):
             button = row.row(align=True)
