@@ -1,5 +1,30 @@
-# Slipgate 0.20.2
+# Slipgate 0.20.3
 
+## 0.20.3 — BSP export colour correctness, face normals and Quick Actions
+
+### BSP texture export
+- The export image reader now distinguishes Blender byte-backed images from float buffers. Byte-backed sRGB texels are preserved as encoded colour codes; float buffers are converted from scene-linear values to sRGB before Quake palette quantization.
+- This prevents a second sRGB encoding pass from brightening edited textures when the exported BSP is viewed in Ironwail.
+
+### Imported face normals and light baking
+- BSP import now compares each face's vertex winding with its oriented plane normal and the dface side flag, including the optional Z-axis reflection. Faces whose mesh winding disagrees are reversed consistently before mesh creation, preserving texture UV correspondence.
+- This targets a possible reason Cycles may illuminate only a subset of surfaces. It requires a fresh BSP re-import to affect existing Blender scenes and still needs the user's Blender 5.2 bake verification.
+- The Cycles bake report now includes how many faces and raw luxels received nonzero illumination. Lighting Diagnostics continues to include per-face atlas sample statistics.
+
+### Lighting
+- Source-match normalization remains an atlas-only operation; it no longer raises imported live-light energy.
+- Bake-success bookkeeping no longer references the removed lamp-calibration variable.
+- Eevee's faster apparent falloff is recorded as an outstanding engine-preview tuning issue; no unverified light-radius multiplier has been added.
+
+### Quick Actions and map folder
+- Restores the QUICK ACTIONS sidebar panel with one horizontal row for WASD, Player Start, Isolate and Focus.
+- Adds Create ##slipgate Folder, which creates a ##slipgate directory beside the currently loaded source BSP and records the resolved path on the map object.
+
+### Validation
+- Python unit tests, converter GUI tests, package assembly and Blender package installation artifact are covered by CI for this release.
+- CI does not run Blender's interactive GUI, a Cycles bake, QBSP or Ironwail. Those remain user-side validation steps.
+
+---
 ## 0.20.2 — Material-zone BSP texture export and lighting safeguards
 
 ### BSP texture export
