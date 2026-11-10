@@ -321,10 +321,8 @@ def build_face_records(lumps: list[bytes]) -> list[dict[str, Any]]:
         if not valid or any(vertex_id >= len(vertices) for vertex_id in vertex_ids):
             continue
         plane = planes[planenum]
-        plane_sign = -1.0 if side else 1.0
-        normal = tuple(float(value) * plane_sign for value in plane[:3])
-        # BSP face side reverses the complete plane equation, not just its normal.
-        distance = float(plane[3]) * plane_sign
+        normal = tuple(float(value) * (-1.0 if side else 1.0) for value in plane[:3])
+        distance = float(plane[3])
         tex = texinfos[texinfo_index]
         s_axis, t_axis = tex[:4], tex[4:8]
         polygon_world = [vertices[vertex_id] for vertex_id in vertex_ids]
@@ -362,52 +360,42 @@ def build_face_records(lumps: list[bytes]) -> list[dict[str, Any]]:
 def sample_floor_luxel(lumps: list[bytes], face_records: list[dict[str, Any]],
                        point: tuple[float, float, float], source: tuple[float, float, float]
                        ) -> tuple[float | None, dict[str, Any] | None]:
-    """Find the actual upward-facing floor under x/y, then read its lightmap.
-
-    Do not assume the floor is exactly eight units below the light. The MAP's
-    brush geometry determines the floor height; read that from the compiled BSP.
-    """
     lightdata = lumps[LUMP_LIGHTING]
-    x, y = point[0], point[1]
-    candidates = []
+    best = None
+    best_dot = -float("inf")
     for face in face_records:
         nx, ny, nz = face["normal"]
-        if nz < 0.9:
+        plane_distance = nx * point[0] + ny * point[1] + nz * point[2]
+        # The plane equation is stored with the unoriented BSP plane.
+        if abs(abs(plane_distance) - abs(face["plane_distance"])) > 0.15:
             continue
-        floor_z = (face["plane_distance"] - nx * x - ny * y) / nz
-        if floor_z >= source[2] - 0.5:
+        direction = (source[0] - point[0], source[1] - point[1], source[2] - point[2])
+        length = math.sqrt(sum(value * value for value in direction)) or 1.0
+        dot = (nx * direction[0] + ny * direction[1] + nz * direction[2]) / length
+        if dot < 0.5:
             continue
         s_axis, t_axis = face["s_axis"], face["t_axis"]
-        s_value = x * s_axis[0] + y * s_axis[1] + floor_z * s_axis[2] + s_axis[3]
-        t_value = x * t_axis[0] + y * t_axis[1] + floor_z * t_axis[2] + t_axis[3]
-        if not _point_in_polygon(s_value, t_value, face["polygon_st"]):
+        s_value = sum(point[k] * s_axis[k] for k in range(3)) + s_axis[3]
+        t_value = sum(point[k] * t_axis[k] for k in range(3)) + t_axis[3]
+        polygon = face["polygon_st"]
+        if not _point_in_polygon(s_value, t_value, polygon):
             continue
         sx = (s_value - face["min_s"] * 16.0) / 16.0
         ty = (t_value - face["min_t"] * 16.0) / 16.0
-        if (sx < -1e-4 or ty < -1e-4 or
-                sx > face["width"] - 1 + 1e-4 or
-                ty > face["height"] - 1 + 1e-4):
+        if sx < -1e-4 or ty < -1e-4 or sx > face["width"] - 1 + 1e-4 or ty > face["height"] - 1 + 1e-4:
             continue
-        candidates.append((floor_z, face, sx, ty))
-    if not candidates:
+        if dot > best_dot:
+            best, best_dot = (face, sx, ty, dot), dot
+    if best is None:
         return None, None
-
-    floor_z, face, sx, ty = max(candidates, key=lambda item: item[0])
-    direction = (source[0] - x, source[1] - y, source[2] - floor_z)
-    length = math.sqrt(sum(value * value for value in direction)) or 1.0
-    dot = (face["normal"][0] * direction[0] +
-           face["normal"][1] * direction[1] +
-           face["normal"][2] * direction[2]) / length
-
+    face, sx, ty, dot = best
     if face["lightofs"] < 0 or not face["style_ids"]:
-        return None, {"face": face["index"], "styles": face["styles"],
-                      "normal_dot": dot, "sample_z": floor_z}
+        return None, {"face": face["index"], "styles": face["styles"], "normal_dot": dot}
     sample_count = face["width"] * face["height"]
     style_index = face["styles"].index(0) if 0 in face["styles"] else 0
     offset = face["lightofs"] + style_index * sample_count
     if offset + sample_count > len(lightdata):
-        return None, {"face": face["index"], "styles": face["styles"],
-                      "error": "lightdata bounds", "sample_z": floor_z}
+        return None, {"face": face["index"], "styles": face["styles"], "error": "lightdata bounds"}
     value = _bilinear(lightdata, offset, face["width"], face["height"], sx, ty)
     return value, {
         "face": face["index"],
@@ -415,8 +403,8 @@ def sample_floor_luxel(lumps: list[bytes], face_records: list[dict[str, Any]],
         "normal_dot": dot,
         "lightmap_width": face["width"],
         "lightmap_height": face["height"],
-        "sample_z": floor_z,
     }
+
 
 def sample_compiled_bsp(bsp_path: Path, lights: list[dict[str, Any]], variant: str,
                         output_dir: Path) -> dict[str, int]:
@@ -434,7 +422,7 @@ def sample_compiled_bsp(bsp_path: Path, lights: list[dict[str, Any]], variant: s
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=(
             "test_id", "delay", "light", "radius", "direction", "distance",
-            "x", "y", "z", "sample_z", "luxel", "ericw_attenuation", "surface_factor",
+            "x", "y", "z", "luxel", "ericw_attenuation", "surface_factor",
             "ericw_with_surface_angle", "normal_dot", "face", "styles",
             "lightmap_width", "lightmap_height", "status",
         ))
@@ -448,9 +436,8 @@ def sample_compiled_bsp(bsp_path: Path, lights: list[dict[str, Any]], variant: s
                     x = ox + dx * radius
                     y = oy + dy * radius
                     point = (x, y, floor_z)
+                    distance = math.sqrt(radius * radius + 8.0 * 8.0)
                     value, meta = sample_floor_luxel(lumps, faces, point, light["origin"])
-                    actual_z = meta.get("sample_z", floor_z) if meta else floor_z
-                    distance = math.sqrt((x - ox) ** 2 + (y - oy) ** 2 + (oz - actual_z) ** 2)
                     status = "OK" if value is not None else "NO_FLOOR_LUXEL"
                     if value is None:
                         missing += 1
@@ -479,8 +466,7 @@ def sample_compiled_bsp(bsp_path: Path, lights: list[dict[str, Any]], variant: s
                         "radius": radius,
                         "direction": direction_name,
                         "distance": f"{distance:.6f}",
-                        "x": f"{x:.3f}", "y": f"{y:.3f}", "z": f"{actual_z:.3f}",
-                        "sample_z": "" if not meta else f"{meta.get('sample_z', '')}",
+                        "x": f"{x:.3f}", "y": f"{y:.3f}", "z": f"{floor_z:.3f}",
                         "luxel": "" if value is None else f"{value:.4f}",
                         "ericw_attenuation": "" if predicted == "" else f"{predicted:.6f}",
                         "surface_factor": "" if surface_factor == "" else f"{surface_factor:.6f}",
