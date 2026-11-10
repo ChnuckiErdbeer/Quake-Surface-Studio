@@ -33,45 +33,44 @@
 
 **Repository and source state**
 
-- Repository: [ChnuckiErdbeer/Quake-Surface-Studio](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio)
-- Working branch for this archive update: [`fix/v0.11.1-metadata-style-order-test`](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/tree/fix/v0.11.1-metadata-style-order-test)
-- The add-on patch version is **Slipgate 0.20.1**. The installable Python package folder and internal QSS identifiers remain `quake_surface_studio` / `QSS` for compatibility; Blender's visible add-on name and sidebar category are Slipgate.
-- The user is testing in **Blender 5.2** and wants the map workflow to launch/test in **Ironwail**.
+- Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
+- Active working branch: fix/v0.11.1-metadata-style-order-test
+- Current package version: **Slipgate 0.20.2**. Package metadata in __init__.py and diagnostic metadata in addon.py both declare 0.20.2.
+- The installable folder and internal QSS identifiers remain quake_surface_studio / QSS for compatibility. Blender's visible add-on name and sidebar category are Slipgate.
+- Target interactive environment: Blender 5.2. Ironwail remains a target engine.
 
-**Current implementation status — user-tested 2026-11-10; source inspected at HEAD fbb8a66**
+**Current implementation status — latest source commit pending final CI at time of this note**
 
-1. **Blender 5.2 activation and Edit Mode appearance — user-reported PASS.** The user confirms the 0.20.1 add-on loads and the greyish Edit Mode hue is gone.
-2. **Face texture painting and export — user-reported PASS.** The user painted and exported the same wall that previously triggered the 80×128 image-dimension failure. This is the strongest end-to-end confirmation so far for the 0.20.1 face-local texture dimension fix.
-3. **Lightmap paint warning — observed in source; interactive result not yet established.** The user attempted lightmap painting and saw the confirmation dialog. Its current text is `You selected {count} faces for Lightmap Paint.`, which has a pluralisation bug for one face. The dialog is a memory-safety confirmation, not inherently a paint failure: `QSS_OT_activate_lightmap_paint.invoke()` estimates memory using the full shared atlas (and a copy for a first painted override), then `_qss_paint_confirmation_needed()` triggers at 32 MiB or 5% of available RAM. Thus it can legitimately appear with one selected face. The message should make the shared-atlas memory reason clearer and use singular/plural correctly.
-4. **Layer toggles — user-reported limitation; source behaviour inspected, GUI reproduction outstanding.** The texture/lightmap layer-toggle table sets `can_toggle_layers` only for `OBJECT` and `EDIT_MESH`; toggle operator polls use the same modes. They are therefore disabled while Texture Paint is active. The painted-texture toggle temporarily enters Object Mode and restores Edit Mode; the painted-lightmap toggle updates the material preview directly. The current source intends to permit Edit Mode, so the user's report that toggles work only in Object Mode needs a Blender 5.2 reproduction to distinguish Edit Mode failure from the explicit Texture Paint restriction.
-5. **Quake palette converter — source inspected.** `QSS_OT_convert_quake_palette` invokes `palette_utils.convert_rgba8()` inside Blender and writes an indexed PNG; it is not implemented as a shader. The earlier user suggestion to implement conversion as a shader is present in the archived conversation but was not followed. Standard BSP texture export separately quantizes image pixels against the Quake palette in `_encode_image_to_miptex()`, so the separate converter button is not required for ordinary paint-and-export. It remains an optional material-aware image-conversion workflow.
-6. **Version metadata discrepancy — source inspected.** `__init__.py` declares version `(0, 20, 1)`, but `addon.py` still declares `ADDON_VERSION = (0, 20, 0)` and uses it in exported diagnostics metadata (`qss_version`). Correct this internal metadata constant in the next source update.
-7. **CI and remaining engine validation.** Historical CI run `42770104620` passed compilation, standalone tests, version extraction, package assembly and artifact upload. The user's successful texture export is now additional user-reported interactive evidence. QBSP compilation and Ironwail acceptance have not yet been reported. Do not claim them as passed.
+1. **Blender 5.2 activation and Edit Mode appearance — user-reported PASS on 0.20.1.** The add-on enables and the greyish Edit Mode hue is gone.
+2. **Face texture painting and export — user-reported PASS on 0.20.1.** The user painted and exported the same wall that previously triggered the 80×128 image-dimension error. This verifies the face-local dimension repair, but does not yet verify 0.20.2's new material-zone BSP quantizer.
+3. **Material-zone conversion is now in the BSP export path.** The old nearest-colour-only encoder was removed. addon.py's _encode_image_to_miptex() now calls palette_utils.convert_rgba8_mip_chain(); each of the four mip levels is segmented/quantized through the material-zone algorithm with the configured five candidate ramps per zone. Standard BSP export performs conversion automatically. The separate Convert Image to Quake Palette button was removed from the regular Lighting panel; its operator remains available as an optional advanced image utility.
+4. **Transparency and fullbright handling.** Brace textures use alpha and Quake index 255 for transparent pixels; ordinary miptexes ignore Blender alpha. Embedded original fullbright indices are reused when source and edited image dimensions match; a sibling *_fullbrights.png mask can be used for loose source images. A differently-sized detached face-local image may not inherit the original embedded fullbright mask. This remains an edge case to test/refine.
+5. **Mip alpha regression fix.** A follow-up source change ensures non-brace textures are made fully opaque before lower-mip downsampling, so alpha in Blender's source image cannot remove/darken RGB in lower mip levels. A regression test compares all four mip outputs for otherwise identical images with differing alpha. This follow-up commit is newer than the first 0.20.2 CI pass; its CI run was queued at the time of this snapshot.
+6. **Lightmap-paint warning.** User supplied the full message for one face, a 64.0 MiB working atlas and 4881.2 MiB available RAM. The previous 32 MiB fixed minimum prompted even though the user had ample RAM. 0.20.2 changes the lightmap-specific threshold to 256 MiB or 10% of detected available memory and fixes singular/plural wording. Blender 5.2 verification remains outstanding.
+7. **Cycles bake produced black lightmaps — user-reported failure, root cause not yet identified.** The old operator only rejected zero sampled luxels if the original lightmap sample mean was positive. 0.20.2 now rejects a bake with no nonzero sampled BSP luxels even when the source mean is zero, restores the source atlas/calibration and retains lamp/source/whole-atlas statistics for Lighting Diagnostics. This is a fail-safe and diagnostic improvement, not proof that the underlying lighting issue is fixed. A real Blender 5.2 bake is required.
+8. **Layer toggles — user-reported limitation remains open.** Source controls are intended to permit Object and Edit Mesh modes but are disabled during Texture Paint. The exact user's failure mode must be reproduced in Blender 5.2 before changing the mode transitions.
+9. **Shader suggestion.** BSP export now invokes the sophisticated Python material-zone converter. It is not a shader implementation. A palette-LUT shader could be a separate live preview feature but does not replace SLIC/material-zone segmentation and ramp selection.
+10. **CI/build evidence.** The first 0.20.2 implementation commit 0dfa6ceff9a87afb92c463056e46a22214d71fd1 passed QSS Python tests (run 42775805675) and converter GUI tests (run 42775805485). The later alpha-mip correction commits 0702f2525803dc6c5127b5382cfa95b94ce2fda4 and 1ded23ae63965b47e87a3d4fb2aa0fb52f15fcaa have a newer QSS run queued; check its final conclusion before issuing a release ZIP. No interactive Blender GUI, QBSP or Ironwail test is claimed.
 
-**Useful source locations in the inspected branch**
+**Useful source locations**
 
-- `addon.py`: face-local texture dimension helper and bake path, approximately lines 840–945; miptexture validation in `_encode_image_to_miptex`, approximately line 3475; panel definitions and `CLASSES` registration tuple, approximately lines 9750–10100; `register()` begins around line 10225.
-- `texture_export.py`: `quake_texture_dimension()` and face-local texinfo projection helpers, approximately lines 1–50.
-- `README.md`: current package feature description and validation notes.
-- `tests/`: BSP29, colour and lighting tests. Check the current tree for the complete test set before assuming these are exhaustive.
+- addon.py: ADDON_VERSION around line 31; _miptex_fullbright_mask() around 3422; _encode_image_to_miptex() around 3464; _export_object() around 3505; QSS_OT_activate_lightmap_paint around 6264; QSS_OT_bake_scene_lights around 7096; zero-luxel rejection around 7357.
+- palette_utils.py: _downsample_rgba8() around 817; convert_rgba8_mip_chain() around 868.
+- tests/test_palette_utils.py: mip-chain generation, brace transparency, fullbright masks, and ordinary texture alpha invariance.
+- README.md: 0.20.2 release notes.
 
 **Immediate next technical steps**
 
-1. Reproduce the layer-toggle limitation in Blender 5.2. Confirm whether the user's limitation occurs in Edit Mode or specifically in Texture Paint. Consider making the toggles available during Texture Paint by safely exiting to the stored pre-paint mode, applying the selected visibility change, and leaving the object in a predictable mode without silently changing the active paint image.
-2. Improve the lightmap-paint confirmation dialog: use correct singular/plural wording and explain that memory is estimated for the shared atlas and its working copy, not a separate image per selected face. Keep the warning if the memory estimate justifies it.
-3. Correct `ADDON_VERSION` in `addon.py` to match the package's 0.20.1 version before the next release, and add a consistency regression test so diagnostic metadata cannot lag behind `__init__.py`.
-4. Decide whether a shader-based palette-quantization preview is worth prototyping. A LUT-based shader can provide a live nearest-palette preview, but it cannot reproduce the existing SLIC/material-zone analysis and ramp assignment by itself. Preserve the in-process Python converter unless a shader path demonstrates equivalent output quality; do not make ordinary BSP export depend on the optional converter button.
-5. Obtain the user's QBSP and Ironwail result when available. The 0.20.1 texture export was user-tested successfully, but compiler and engine validation remain outstanding.
-6. Continue maintaining this archive and verify every GitHub write on the active feature branch. The first chapter of `fullhisory01.txt` was already repaired and verified during the 0.20.1 maintenance pass; it is no longer pending.
+1. Confirm CI success for the final 0.20.2 alpha-mip follow-up commit and retrieve the artifact produced from that exact commit.
+2. Have the user install 0.20.2 and repaint/export the previously tested wall. Inspect texture quality, any change in material-zone appearance and export duration.
+3. Try a brace texture and an original fullbright texture through paint/export. The differently-sized detached face-local fullbright case remains a known edge to validate.
+4. Repeat the Cycles bake in Blender 5.2. If rejected, collect the exact error and Save Lighting Diagnostics report to distinguish zero-energy/visibility issues from UV/atlas write issues.
+5. Verify the 64 MiB lightmap warning no longer appears with about 4.8 GiB available, while a truly large allocation still triggers a useful warning.
+6. Reproduce the painted/source layer toggle limitation and establish whether the user means Edit Mode or Texture Paint mode.
+7. Compile the exported BSP with QBSP and open it in Ironwail. Previous 0.20.1 wall export did not establish compiler/engine acceptance.
+8. Continue updating this archive on the active feature branch. The first chapter in fullhisory01.txt was already repaired and verified during the 0.20.1 maintenance pass; it is not pending.
 
 ---
-
-
-**Coverage:** 8–10 November 2026  
-**Ordering:** Conversation exports are sorted by their recorded date and time. Posts remain in their original order within each conversation. The Quake Texture Converter transcript (10 November, 03:58) is placed before *Quake Lightmap Workflow (13)* (10 November, 05:45), correcting the order in the raw extraction.  
-**Cleanup:** Repeated PDF page headers, page counters, chat-footer URLs, citation-card scraps and extraction-status lines have been removed. Text wrapping has been reflowed; code, command sequences, lists and console output are separately formatted.  
-**Preservation:** The raw `fullhisory01.txt` is an extraction artifact. Its first chapter was replaced with the corrected `Quake Lightmap Workflow (1)` chapter from this clean Markdown archive during the 0.20.1 maintenance pass, and the chapter boundary to `Quake Lightmap Workflow (2)` was checked. The original extraction counts (217 user posts and 212 assistant posts) describe the earlier source and must not be treated as a verified count after chapter replacement.  
-**Scope note:** `Quake Lightmap Workflow (0).pdf` is present separately in the repository but was not included in the TXT extraction, so it is not reconstructed or silently added here.
 
 ## Conversation index
 
@@ -14959,3 +14958,33 @@ Source inspection on branch `fix/v0.11.1-metadata-style-order-test`, HEAD `fbb8a
 - Found a version metadata mismatch: package `__init__.py` declares `(0, 20, 1)`, while `addon.py` has `ADDON_VERSION = (0, 20, 0)`; the latter is used to write `qss_version` in diagnostics metadata. Correct this in the next source update.
 
 No source code was changed during this feedback pass. Next implementation priorities are to reproduce/fix layer toggling from paint mode, clarify the lightmap memory warning and singular/plural copy, align internal version metadata with 0.20.1, and decide whether to prototype a shader-based live preview without replacing the material-aware Python converter. QBSP and Ironwail results remain unreported.
+
+## 2026-11-10 — Full lightmap warning, BSP export converter requirement and black Cycles bake
+
+### You
+
+This is the ful lighmap warning:
+You selected 1 faces for Lightmap Paint.
+QSS reuses the existing atlas; it does not create a separate image for every face.
+Current working lightmap atlas: about 64.0 MiB
+Currently available system memory: about 4881.2 MiB
+Blender may also need memory for und…ay crash and unsaved work may be lost.
+
+I want the sophisticated conversion algorithm sprecially for exporting the modified textures back to the bsp!
+
+i just loaded a map klicked cycles and then bake
+all resulting lightmaps were black.
+
+### ChatGPT
+
+The old lightmap confirmation used a 32 MiB fixed minimum, so a 64 MiB shared atlas (with two buffers budgeted) could trigger despite roughly 4.8 GiB available. 0.20.2 raises the lightmap-specific threshold to 256 MiB or 10% of detected available memory and fixes one-face wording.
+
+The user's export requirement is now implemented in the BSP path: edited and newly detached textures are processed by the material-zone algorithm for all four mip levels. Brace transparency maps to index 255; ordinary textures ignore Blender alpha; fullbright masks are recovered from embedded source indices when dimensions match or sibling mask images for loose sources. The standard Lighting panel no longer exposes the separate Convert Image to Quake Palette button; the operator remains as an optional advanced utility.
+
+The user then reported all-black lightmaps after selecting Cycles and clicking Bake. Source inspection found a validation hole: the previous code only rejected zero sampled luxels if the source BSP lightmap mean was positive. 0.20.2 now rejects absent/all-zero sampled luxels regardless of source mean, restores the source atlas and calibration, and retains statistics for Lighting Diagnostics. This is a safety/diagnostic change, not a confirmed root-cause fix. A real Blender 5.2 bake is required to identify the lighting failure.
+
+A further code review caught that ordinary texture alpha was ignored at the top mip but was still used when downsampling lower mip levels. The converter now forces alpha opaque before each lower-mip reduction for non-brace textures, with a regression test comparing all four mip levels under different source alpha. This follow-up commit has a CI run queued and must be checked before artifact distribution.
+
+### ChatGPT
+
+Updated the 0.20.2 handoff to include the user's full lightmap warning, the requirement that material-zone conversion happen automatically during BSP export, the all-black Cycles bake report, the diagnostic safeguard, known fullbright/layer-toggle edge cases and remaining Blender/QBSP/Ironwail validation. Archive update and final CI/artifact status are to be verified after the write.
