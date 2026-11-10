@@ -15033,4 +15033,9 @@ They report the result still looks all black, and ask whether imported lights we
 
 On the active feature branch, the Cycles source-match ratio is now used only for the baked lightmap atlas. `_apply_quake_light_energy_scale()` applies the explicit user live-light slider to imported Quake lamp values without multiplying by a bake-derived calibration. The bake operator no longer writes `source_mean / raw_bake_mean` into the imported lamp calibration properties or reapplies the enlarged energy. This addresses the concrete 68.47x live-light amplification path seen in the user's log. It does not by itself establish why the baked image appears black in the viewport, nor does it establish the Texture Paint brightness behavior.
 
-Code commits: `485801435111bfdaba0d528cb9f08788b12fb2de` and `4b973246b6ee4d11b192b8287f9fe9f5b1dc1e16`. CI and Blender 5.2 interactive verification are pending.
+Code commits: `485801435111bfdaba0d528cb9f08788b12fb2de` and `4b973246b6ee4d11b192b8287f9fe9f5b1dc1e16`. QSS Python tests passed in workflow run `42779159445`; converter GUI tests passed in `42779159701`. Install artifact `Quake-Surface-Studio-v0.20.2-Blender-Install`, ID `13745646185`, SHA-256 `142a4ab9abe4b7c9f4ecdb1b4d40cc00a95cecb86297ef319ad66067e6ec893a`; downloaded and ZIP integrity verified. Interactive Blender 5.2 verification remains pending.
+
+
+### Follow-up CI and install artifact verification
+
+The live-light calibration correction passed QSS Python tests (workflow run 42779159445) and converter GUI tests (workflow run 42779159701). The Blender install artifact was retrieved from the QSS workflow: artifact ID 13745646185, SHA-256 142a4ab9abe4b7c9f4ecdb1b4d40cc00a95cecb86297ef319ad66067e6ec893a. ZIP integrity check passed. No interactive Blender 5.2 test is claimed.
