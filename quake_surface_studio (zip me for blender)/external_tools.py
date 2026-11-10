@@ -192,8 +192,8 @@ def build_ironwail_command(
     return command
 
 
-def launch_process(command: Iterable[str], *, cwd: str, log_path: str) -> int:
-    """Launch a GUI process detached from Blender and redirect output to a log."""
+def launch_process_handle(command: Iterable[str], *, cwd: str, log_path: str) -> subprocess.Popen:
+    """Launch a detached GUI process and return its handle for lifecycle cleanup."""
     args = [str(item) for item in command]
     if not args or not os.path.isfile(args[0]):
         raise FileNotFoundError(args[0] if args else "No executable specified")
@@ -210,7 +210,11 @@ def launch_process(command: Iterable[str], *, cwd: str, log_path: str) -> int:
         }
         if os.name == "nt":
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        process = subprocess.Popen(args, **kwargs)
+        return subprocess.Popen(args, **kwargs)
     finally:
         log_handle.close()
-    return int(process.pid)
+
+
+def launch_process(command: Iterable[str], *, cwd: str, log_path: str) -> int:
+    """Launch a detached GUI process and return its PID."""
+    return int(launch_process_handle(command, cwd=cwd, log_path=log_path).pid)
