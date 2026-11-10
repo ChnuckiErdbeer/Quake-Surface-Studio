@@ -3929,27 +3929,6 @@ class QSS_OT_player_start(Operator):
 
 
 
-class QSS_OT_create_slipgate_folder(Operator):
-    bl_idname = "qss.create_slipgate_folder"
-    bl_label = "Create ##slipgate Folder"
-    bl_description = "Create a ##slipgate working folder beside the currently loaded BSP"
-
-    @classmethod
-    def poll(cls, context):
-        obj = getattr(context, "object", None)
-        source = _qss_abspath(obj.get("qss_source_path", "")) if _qss_is_map_object(obj) else ""
-        return bool(source and os.path.isdir(os.path.dirname(source)))
-
-    def execute(self, context):
-        obj = context.object
-        source = _qss_abspath(obj.get("qss_source_path", ""))
-        if not source:
-            self.report({"ERROR"}, "The active map has no source BSP path.")
-            return {"CANCELLED"}
-        map_directory = os.path.dirname(os.path.abspath(source))
-        if not os.path.isdir(map_directory):
-            self.report({"ERROR"}, f"The current map directory does not exist: {map_directory}")
-            return {"CANCELLED"}
 class QSS_OT_confirm_import(Operator):
     bl_idname = "qss.confirm_import"
     bl_label = "Import BSP into Project"
