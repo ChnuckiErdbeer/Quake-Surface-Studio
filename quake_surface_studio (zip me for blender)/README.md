@@ -1,20 +1,27 @@
-# Slipgate 0.20.1
+# Slipgate 0.20.2
 
-## 0.20.1 — Registration and face-paint export fixes
+## 0.20.2 — Material-zone BSP texture export and lighting safeguards
 
-### Blender panel registration
-- Restores the missing QSS_PT_main parent panel used by the Project, Lighting and Stats sections.
-- Removes the stale QSS_PT_navigation registration entry; the current quick actions are integrated into the existing panels.
-- Adds a Blender-independent AST regression test that checks every class in CLASSES is defined and every panel parent resolves to a registered panel.
+### BSP texture export
+- Edited and newly detached textures are now quantized with Slipgate's integrated material-zone algorithm during BSP export, not the older per-pixel nearest-colour lookup.
+- The same five-candidate-ramp material-zone conversion is applied independently to all four mip levels.
+- `{` texture alpha is encoded as Quake index 255; ordinary textures do not become transparent because of incidental Blender alpha.
+- Fullbright masks are recovered from the original indexed miptex when the image dimensions match, or from a sibling `*_fullbrights.png` mask for loose source images.
+- The standard Lighting panel no longer shows a separate **Convert Image to Quake Palette** button. Normal BSP export performs palette conversion automatically; the standalone image-conversion operator remains available as an optional advanced utility.
 
-### Face-local texture export
-- Face-local paint images are padded upward to power-of-two dimensions between 16 and 512 pixels, matching Slipgate's indexed miptexture exporter.
-- Padding does not stretch the visible face's texinfo/UV footprint. Source texel density is retained; only spans above 512 pixels are downsampled.
-- Adds regression coverage for 80×128, 65×65, minimum-size and maximum-size dimension handling, plus projection preservation.
+### Lightmap paint warning
+- The first lightmap-paint pass still accounts for the shared atlas and its working copy, but the confirmation threshold is now 256 MiB or 10% of detected available memory.
+- The confirmation message explains the shared-atlas allocation and uses singular/plural wording correctly.
 
-### Validation
-- The standalone Python suite and GitHub Actions compile/test workflow are the automated validation path.
-- Blender 5.2 GUI activation, painting, BSP export and Ironwail acceptance still require an interactive end-to-end test.
+### Cycles bake safeguards
+- A Cycles bake with no nonzero BSP luxel samples is now rejected even if the source BSP lightmap mean is also zero.
+- The failed bake is discarded and the source atlas and light calibration are restored. Energy, source mean, sampled-luxel count and whole-atlas pixel statistics remain available for the Lighting Diagnostics report.
+- A zero bake-output scale is rejected before starting.
+
+### Validation and user testing
+- GitHub Actions passed the standalone Python suite and converter GUI workflow for the 0.20.2 implementation commit.
+- The user reports that 0.20.1 enables in Blender 5.2, removes the Edit Mode grey hue, and successfully paints/exports the previously failing wall.
+- QBSP compilation and Ironwail acceptance have not yet been reported for the current implementation. A real Blender Cycles bake is also still required to identify the root cause of the user's all-black result; this release adds a hard failure and diagnostics rather than claiming the root cause is fixed.
 
 ## 0.20.0 — Quake brush palette, in-process conversion and viewport controls
 
