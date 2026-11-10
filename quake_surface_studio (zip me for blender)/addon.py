@@ -25,7 +25,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils
 
 
-ADDON_VERSION = (0, 18, 2)
+ADDON_VERSION = (0, 18, 3)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -34,6 +34,8 @@ DEFAULT_QUAKE_UNIT_SCALE = 0.0254
 # Track keymap items created by this add-on. This must exist before register().
 _addon_keymaps = []
 _qss_focus_clip_sessions = {}
+_qss_focus_cycle_state = {}
+_qss_focus_transition_sessions = {}
 
 
 def _report(op, level, message):
@@ -2868,10 +2870,11 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
 
 
 def _qss_enter_face_edit_mode(context, obj):
-    """Finish BSP import in Edit Mode with face selection active."""
+    """Finish BSP import in Edit Mode with Face Select active and nothing selected."""
     if not _qss_is_map_object(obj):
         return False
     try:
+        import bmesh
         if getattr(obj, "mode", "OBJECT") != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
         for selected in list(context.selected_objects):
@@ -2880,6 +2883,16 @@ def _qss_enter_face_edit_mode(context, obj):
         context.view_layer.objects.active = obj
         context.scene.tool_settings.mesh_select_mode = (False, False, True)
         bpy.ops.object.mode_set(mode="EDIT")
+        bm = bmesh.from_edit_mesh(obj.data)
+        for face in bm.faces:
+            face.select = False
+        for edge in bm.edges:
+            edge.select = False
+        for vertex in bm.verts:
+            vertex.select = False
+        bm.select_history.clear()
+        bm.faces.active = None
+        bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
         try:
             bpy.ops.mesh.select_mode(type="FACE")
         except Exception:
@@ -6900,35 +6913,55 @@ def _qss_restore_focus_clip_session(area=None):
             _qss_focus_clip_sessions.pop(key, None)
 
 
-def _qss_selected_face_for_focus(context, obj):
-    """Return a selected face's centre, normal, world vertices and stable label."""
+def _qss_selected_face_for_focus(context, obj, cycle_direction=1):
+    """Return the next selected face's world-space focus geometry."""
     import bmesh
     from mathutils import Vector
+
+    area = context.area if context.area and context.area.type == "VIEW_3D" else None
+    area_key = int(area.as_pointer()) if area is not None else 0
+    state_key = (int(obj.as_pointer()), area_key)
 
     if context.mode == "EDIT_MESH":
         bm = bmesh.from_edit_mesh(obj.data)
         bm.faces.ensure_lookup_table()
-        selected = [face for face in bm.faces if face.select and not face.hide]
+        bm.faces.index_update()
+        selected = sorted(face.index for face in bm.faces if face.select and not face.hide)
         if not selected:
             raise bsp.BSPError("Select a visible face before using Focus.")
         active = bm.faces.active
-        face = active if active is not None and active.select and not active.hide else selected[-1]
+        active_index = active.index if active is not None and active.select and not active.hide else None
+        signature = (tuple(selected), active_index)
+        previous = _qss_focus_cycle_state.get(state_key)
+        previous_index = previous.get("face_index") if previous and previous.get("signature") == signature else None
+        face_index = viewport_utils.next_selected_face_index(
+            selected, active_index, previous_index, cycle_direction
+        )
+        face = bm.faces[face_index]
         center_local = face.calc_center_median()
         normal_local = face.normal.copy()
         points_local = [vertex.co.copy() for vertex in face.verts]
-        label = f"face {face.index}"
     elif _qss_is_texture_paint_context(context):
-        selected = [poly for poly in obj.data.polygons if poly.select]
+        selected = sorted(poly.index for poly in obj.data.polygons if poly.select)
         if not selected:
             raise bsp.BSPError("No faces are selected in the Texture Paint face mask.")
-        face = max(selected, key=lambda poly: (float(poly.area), -int(poly.index)))
+        signature = (tuple(selected), None)
+        previous = _qss_focus_cycle_state.get(state_key)
+        previous_index = previous.get("face_index") if previous and previous.get("signature") == signature else None
+        face_index = viewport_utils.next_selected_face_index(
+            selected, None, previous_index, cycle_direction
+        )
+        face = obj.data.polygons[face_index]
         center_local = face.center.copy()
         normal_local = face.normal.copy()
         points_local = [obj.data.vertices[index].co.copy() for index in face.vertices]
-        label = f"face {face.index}"
     else:
         raise bsp.BSPError("Focus requires a selected face in Edit Mode or Texture Paint face-mask mode.")
 
+    _qss_focus_cycle_state[state_key] = {
+        "signature": signature,
+        "face_index": int(face_index),
+    }
     world_matrix = obj.matrix_world
     normal_matrix = world_matrix.to_3x3().inverted_safe().transposed()
     center_world = world_matrix @ Vector(center_local)
@@ -6937,7 +6970,7 @@ def _qss_selected_face_for_focus(context, obj):
         raise bsp.BSPError("The selected face has an invalid surface normal.")
     points_world = [world_matrix @ Vector(point) for point in points_local]
     radius = max((point - center_world).length for point in points_world) if points_world else 0.0
-    return center_world, normal_world, points_world, max(radius, 1e-4), label
+    return center_world, normal_world, points_world, max(radius, 1e-4), f"face {face_index}"
 
 
 class QSS_OT_focus_clip_watch(Operator):
@@ -7031,7 +7064,10 @@ class QSS_OT_focus_clip_watch(Operator):
 class QSS_OT_frame_selection(Operator):
     bl_idname = "qss.frame_selection"
     bl_label = "Focus on Face"
-    bl_description = "Aim the viewport along the selected face normal and frame it closely"
+    bl_description = (
+        "Smoothly frame the selected face; click again to cycle selected faces. "
+        "Hover over this button and scroll to cycle forward or backward."
+    )
 
     @classmethod
     def poll(cls, context):
@@ -7041,64 +7077,265 @@ class QSS_OT_frame_selection(Operator):
             and (context.mode == "EDIT_MESH" or _qss_is_texture_paint_context(context))
         )
 
-    def execute(self, context):
+    def _mouse_over_button(self, event):
+        # Blender's Python panel API does not expose the exact button rectangle
+        # to a modal operator. The activation point plus a tight hit box gives
+        # wheel gestures to this control without stealing viewport zoom.
+        return (
+            abs(float(event.mouse_x) - self._button_x) <= 36.0
+            and abs(float(event.mouse_y) - self._button_y) <= 16.0
+        )
+
+    def _begin_focus(self, context, direction=1):
         from mathutils import Vector
 
-        obj = context.object
+        _qss_restore_focus_clip_session(self._area)
+        if _qss_is_texture_paint_context(context):
+            if self._clip_original is None:
+                self._clip_original = (
+                    float(self._space.clip_start), float(self._space.clip_end)
+                )
+            else:
+                self._space.clip_start, self._space.clip_end = self._clip_original
+
+        center, normal, points, radius, label = _qss_selected_face_for_focus(
+            context, self._object, cycle_direction=direction
+        )
+        region_3d = self._space.region_3d
+        if region_3d.view_perspective == "CAMERA":
+            region_3d.view_perspective = "PERSP"
+
+        target_rotation = normal.to_track_quat("Z", "Y")
+        right = target_rotation @ Vector((1.0, 0.0, 0.0))
+        up = target_rotation @ Vector((0.0, 1.0, 0.0))
+        half_width = max(abs((point - center).dot(right)) for point in points)
+        half_height = max(abs((point - center).dot(up)) for point in points)
+        window_region = next(
+            (item for item in self._area.regions if item.type == "WINDOW"), None
+        )
+        if window_region is None:
+            raise bsp.BSPError("The 3D View has no usable window region for face framing.")
+        aspect = max(0.1, float(window_region.width) / max(1.0, float(window_region.height)))
+        unit_scale = max(
+            1e-5, float(self._object.get("qss_unit_scale", DEFAULT_QUAKE_UNIT_SCALE))
+        )
+        distance = viewport_utils.face_focus_distance(
+            half_width, half_height, aspect, radius, unit_scale,
+            fov_degrees=45.0, margin=1.4,
+        )
+
+        self._start_location = region_3d.view_location.copy()
+        self._start_rotation = region_3d.view_rotation.copy()
+        self._start_distance = float(region_3d.view_distance)
+        self._target_location = Vector(center)
+        self._target_rotation = target_rotation
+        self._target_distance = float(distance)
+        self._animation_start = time.perf_counter()
+        self._animation_duration = 0.5
+        self._is_animating = True
+        self._target_label = label
+        self._clip_watch_started = False
+
+        if _qss_is_texture_paint_context(context):
+            near_gap = max(radius * 0.02, unit_scale * 0.05, 0.005)
+            far_gap = max(radius * 1.5, unit_scale * 2.0, 0.1)
+            self._space.clip_start = max(0.0001, distance - near_gap)
+            self._space.clip_end = max(
+                self._space.clip_start * 1.05, distance + far_gap
+            )
+        self._area.tag_redraw()
+        return label
+
+    def _launch_clip_watch(self, context):
+        if self._clip_original is None or self._clip_watch_started:
+            return
+        if not _qss_is_texture_paint_context(context):
+            self._space.clip_start, self._space.clip_end = self._clip_original
+            self._clip_original = None
+            return
+        try:
+            with context.temp_override(window=self._window, area=self._area):
+                result = bpy.ops.qss.focus_clip_watch(
+                    "INVOKE_DEFAULT",
+                    clip_start=self._clip_original[0],
+                    clip_end=self._clip_original[1],
+                )
+            if "CANCELLED" in result:
+                raise RuntimeError("Blender could not start the clipping restoration watcher.")
+            self._clip_watch_started = True
+        except Exception as exc:
+            self._space.clip_start, self._space.clip_end = self._clip_original
+            self._clip_original = None
+            self.report({"WARNING"}, f"Temporary face clipping was not retained: {exc}")
+
+    def _finish_modal(self, context, restore_clip=False):
+        if getattr(self, "_finished", False):
+            return
+        self._finished = True
+        if restore_clip:
+            try:
+                _qss_restore_focus_clip_session(self._area)
+                if self._clip_original is not None:
+                    self._space.clip_start, self._space.clip_end = self._clip_original
+            except Exception:
+                pass
+        timer = getattr(self, "_timer", None)
+        if timer is not None:
+            try:
+                self._window_manager.event_timer_remove(timer)
+            except Exception:
+                pass
+            self._timer = None
+        try:
+            key = self._area.as_pointer()
+            if _qss_focus_transition_sessions.get(key) is self:
+                _qss_focus_transition_sessions.pop(key, None)
+        except Exception:
+            pass
+        try:
+            self._area.tag_redraw()
+        except Exception:
+            pass
+
+    def invoke(self, context, event):
         area = context.area if context.area and context.area.type == "VIEW_3D" else None
         if area is None:
-            area = next(
-                (item for item in (context.screen.areas if context.screen else [])
-                 if item.type == "VIEW_3D"),
-                None,
-            )
-        if area is None:
-            _report(self, "WARNING", "Focus needs an open 3D View.")
+            self.report({"WARNING"}, "Focus needs an open 3D View.")
             return {"CANCELLED"}
         space = area.spaces.active if area.spaces.active and area.spaces.active.type == "VIEW_3D" else None
         if space is None or space.region_3d is None:
-            _report(self, "WARNING", "The active 3D View has no usable 3D region.")
+            self.report({"WARNING"}, "The active 3D View has no usable 3D region.")
             return {"CANCELLED"}
+
+        existing = _qss_focus_transition_sessions.get(area.as_pointer())
+        if existing is not None and existing is not self:
+            existing._finish_modal(
+                context, restore_clip=not getattr(existing, "_clip_watch_started", False)
+            )
+
+        self._area = area
+        self._space = space
+        self._object = context.object
+        self._window = context.window
+        self._window_manager = context.window_manager
+        self._button_x = float(event.mouse_x)
+        self._button_y = float(event.mouse_y)
+        self._hovered = True
+        self._finished = False
+        self._timer = None
+        self._clip_original = None
+        self._clip_watch_started = False
+        self._initial_paint_mode = _qss_is_texture_paint_context(context)
 
         try:
-            _qss_restore_focus_clip_session(area)
-            center, normal, points, radius, label = _qss_selected_face_for_focus(context, obj)
-            unit_scale = max(1e-5, float(obj.get("qss_unit_scale", DEFAULT_QUAKE_UNIT_SCALE)))
-            distance = max(radius * 2.6, unit_scale * 4.0, 0.25)
-            region = space.region_3d
-            if region.view_perspective == "CAMERA":
-                region.view_perspective = "PERSP"
-            region.view_rotation = normal.to_track_quat("Z", "Y")
-            region.view_location = Vector(center)
-            region.view_distance = distance
+            self._begin_focus(context, direction=1)
+            self._timer = self._window_manager.event_timer_add(
+                0.02, window=self._window
+            )
+            self._window_manager.modal_handler_add(self)
+            _qss_focus_transition_sessions[area.as_pointer()] = self
+            return {"RUNNING_MODAL"}
+        except Exception as exc:
+            self._finish_modal(context, restore_clip=True)
+            self.report({"ERROR"}, f"Could not focus the selected face: {exc}")
+            return {"CANCELLED"}
 
-            if _qss_is_texture_paint_context(context):
-                old_clip_start = float(space.clip_start)
-                old_clip_end = float(space.clip_end)
-                # Move the near clipping plane almost onto the selected face
-                # so nearby occluding geometry is removed without clipping
-                # the focused surface itself.
-                near_gap = max(radius * 0.02, unit_scale * 0.05, 0.005)
-                far_gap = max(radius * 1.5, unit_scale * 2.0, 0.1)
-                # The camera sits on the face normal. A tight depth slab keeps
-                # nearer occluders and far-away geometry out while preserving
-                # the complete focused polygon.
-                space.clip_start = max(0.0001, distance - near_gap)
-                space.clip_end = max(space.clip_start * 1.05, distance + far_gap)
-                watch = bpy.ops.qss.focus_clip_watch(
-                    "INVOKE_DEFAULT",
-                    clip_start=old_clip_start,
-                    clip_end=old_clip_end,
-                )
-                if "CANCELLED" in watch:
-                    space.clip_start = old_clip_start
-                    space.clip_end = old_clip_end
-            area.tag_redraw()
-            _report(self, "INFO", f"Focused {label} along its surface normal.")
+    def execute(self, context):
+        area = context.area if context.area and context.area.type == "VIEW_3D" else None
+        if area is None:
+            self.report({"WARNING"}, "Focus needs an open 3D View.")
+            return {"CANCELLED"}
+        self._area = area
+        self._space = area.spaces.active
+        self._object = context.object
+        self._window = context.window
+        self._clip_original = None
+        self._clip_watch_started = False
+        try:
+            self._begin_focus(context, direction=1)
+            region_3d = self._space.region_3d
+            region_3d.view_location = self._target_location
+            region_3d.view_rotation = self._target_rotation
+            region_3d.view_distance = self._target_distance
+            self._launch_clip_watch(context)
+            self._area.tag_redraw()
+            self.report({"INFO"}, f"Focused {self._target_label} along its surface normal.")
             return {"FINISHED"}
         except Exception as exc:
-            _report(self, "ERROR", f"Could not focus the selected face: {exc}")
+            if self._clip_original is not None:
+                self._space.clip_start, self._space.clip_end = self._clip_original
+            self.report({"ERROR"}, f"Could not focus the selected face: {exc}")
             return {"CANCELLED"}
+
+    def modal(self, context, event):
+        if self._finished:
+            return {"FINISHED"}
+        if context.object != self._object:
+            self._finish_modal(context, restore_clip=not self._clip_watch_started)
+            return {"FINISHED"}
+        if self._initial_paint_mode and not _qss_is_texture_paint_context(context):
+            self._finish_modal(context, restore_clip=True)
+            return {"FINISHED"}
+
+        if event.type == "TIMER":
+            if self._is_animating:
+                progress = min(
+                    1.0,
+                    max(0.0, (time.perf_counter() - self._animation_start) / self._animation_duration),
+                )
+                eased = progress * progress * (3.0 - 2.0 * progress)
+                region_3d = self._space.region_3d
+                region_3d.view_location = self._start_location.lerp(
+                    self._target_location, eased
+                )
+                region_3d.view_rotation = self._start_rotation.slerp(
+                    self._target_rotation, eased
+                )
+                region_3d.view_distance = (
+                    self._start_distance
+                    + (self._target_distance - self._start_distance) * eased
+                )
+                self._area.tag_redraw()
+                if progress >= 1.0:
+                    self._is_animating = False
+                    self._launch_clip_watch(context)
+                    self.report(
+                        {"INFO"},
+                        f"Focused {self._target_label}. Click again or scroll over Focus to cycle selected faces.",
+                    )
+                    if not self._hovered:
+                        self._finish_modal(context, restore_clip=False)
+                        return {"FINISHED"}
+            elif not self._hovered:
+                self._finish_modal(context, restore_clip=False)
+                return {"FINISHED"}
+            return {"RUNNING_MODAL"}
+
+        if event.type in {"MOUSEMOVE", "INBETWEEN_MOUSEMOVE"}:
+            self._hovered = self._mouse_over_button(event)
+            if not self._hovered and not self._is_animating:
+                self._finish_modal(context, restore_clip=False)
+                return {"FINISHED"}
+            return {"PASS_THROUGH"}
+
+        if event.type in {"WHEELUPMOUSE", "WHEELDOWNMOUSE"} and self._hovered and self._mouse_over_button(event):
+            try:
+                self._begin_focus(
+                    context, direction=1 if event.type == "WHEELUPMOUSE" else -1
+                )
+            except Exception as exc:
+                self.report({"WARNING"}, f"Could not cycle focused face: {exc}")
+            return {"RUNNING_MODAL"}
+
+        if event.type in {"LEFTMOUSE", "RIGHTMOUSE", "ESC"} and event.value == "PRESS":
+            restore = not self._clip_watch_started
+            self._finish_modal(context, restore_clip=restore)
+            return {"CANCELLED"} if event.type == "ESC" else {"PASS_THROUGH"}
+
+        return {"PASS_THROUGH"}
+
+    def cancel(self, context):
+        self._finish_modal(context, restore_clip=not self._clip_watch_started)
 
 
 def _qss_toggle_face_isolation_in_edit(obj):
@@ -8611,6 +8848,13 @@ def _unregister_qss_classes():
 
 def _cleanup_previous_registration():
     _qss_restore_focus_clip_session()
+    for session in tuple(_qss_focus_transition_sessions.values()):
+        try:
+            session._finish_modal(bpy.context, restore_clip=True)
+        except Exception:
+            pass
+    _qss_focus_transition_sessions.clear()
+    _qss_focus_cycle_state.clear()
     # Stop any legacy QSS modal navigation session left by v0.17.6 or earlier.
     # globals().get keeps fresh installs independent of that removed state.
     legacy_sessions = globals().get("_qss_fps_navigation_sessions", {})
