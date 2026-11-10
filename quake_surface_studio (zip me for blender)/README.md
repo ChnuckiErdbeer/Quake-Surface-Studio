@@ -15,6 +15,7 @@
 ### Generated artifacts
 - Removed the manual **Create ##slipgate Folder** Quick Action. Importing a BSP does not create any output folders.
 - Non-BSP generated files such as palette-converted PNGs and saved lighting diagnostics use `<map directory>/##slipgate/<map name>/`; the folder is created only when the output is actually written.
+- The full Blender self-test report is also written to that per-map folder when a map is active; without an active QSS map it falls back to the user's Desktop/home folder.
 - BSP exports and decoupled BSP copies remain beside their source map, avoiding a change to the established game-map workflow.
 
 ### Version and validation
