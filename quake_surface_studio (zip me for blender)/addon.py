@@ -49,6 +49,12 @@ def _report(op, level, message):
     op.report({level}, message)
 
 
+def _qss_log(level, event, message):
+    """Write a consistently tagged Slipgate message to Blender's console."""
+    stamp = time.strftime('%H:%M:%S')
+    print(f"[{stamp}] [Slipgate] [{str(level).upper()}] [{event}] {message}", flush=True)
+
+
 # QSS per-user installation settings are kept outside .blend files in config.json.
 _qss_config_update_depth = False
 _qss_game_map_entries = []
@@ -7307,6 +7313,18 @@ class QSS_OT_bake_scene_lights(Operator):
         )
         material_states = []
         bake_succeeded = False
+        progress_wm = context.window_manager
+        progress_workspace = getattr(context, 'workspace', None)
+        progress_started = False
+        def _bake_progress(step, label):
+            if progress_started:
+                progress_wm.progress_update(step)
+            if progress_workspace is not None and hasattr(progress_workspace, 'status_text_set'):
+                try:
+                    progress_workspace.status_text_set(f"Slipgate: {label}")
+                except Exception:
+                    pass
+            _qss_log('INFO', 'bake', label)
         old_preview_mode = obj.get('qss_preview_mode', 'lightmap')
         old_object_calibration = float(obj.get('qss_light_energy_calibration', 1.0))
         old_light_calibrations = {
@@ -7316,6 +7334,9 @@ class QSS_OT_bake_scene_lights(Operator):
         updated_lights = _apply_quake_light_energy_scale(scene)
         max_energy = max((float(o.data.energy) for o in imported_lights), default=0.0)
         try:
+            progress_wm.progress_begin(0, 5)
+            progress_started = True
+            _bake_progress(0, f"Starting Cycles lightmap bake for {obj.name}: {len(imported_lights)} lights")
             _set_black_preview_world(scene, obj)
             scene.render.engine = 'CYCLES'
             # Blender allows baking to either image textures or the active mesh
@@ -7360,6 +7381,7 @@ class QSS_OT_bake_scene_lights(Operator):
                 active_map_collection.hide_render = False
                 active_map_collection.hide_viewport = False
             context.view_layer.update()
+            _bake_progress(1, 'Preparing active map visibility and Cycles bake settings')
             obj['qss_last_bake_attempt_scene_visibility'] = (
                 f"mesh hide_render={bool(obj.hide_render)} hide_viewport={bool(obj.hide_viewport)} "
                 f"hide_get={bool(obj.hide_get())}; active_map={active_map_collection.name if active_map_collection else 'none'}"
@@ -7389,6 +7411,7 @@ class QSS_OT_bake_scene_lights(Operator):
             bake_bounces = max(0, int(getattr(scene, 'qss_bake_bounces', 2)))
             scene.cycles.diffuse_bounces = bake_bounces
             scene.cycles.max_bounces = max(old_cycles['max_bounces'], bake_bounces + 1)
+            _bake_progress(2, f'Configuring {len(mesh.materials)} material slots and {bake_bounces} diffuse bounces')
 
             for selected in list(context.selected_objects):
                 selected.select_set(False)
@@ -7434,12 +7457,14 @@ class QSS_OT_bake_scene_lights(Operator):
                 links.new(diffuse.outputs[0], output.inputs['Surface'])
                 material_states.append((mat, output, old_surface, diffuse, target_node, old_target_image))
 
+            _bake_progress(3, f'Running Cycles diffuse bake ({len(material_states)} materials, {int(image.size[0])}x{int(image.size[1])} atlas)')
             with context.temp_override(
                 object=obj, active_object=obj, selected_objects=[obj],
                 selected_editable_objects=[obj]
             ):
                 bake_result = bpy.ops.object.bake(type='DIFFUSE')
             obj['qss_last_bake_attempt_operator_result'] = ','.join(sorted(bake_result))
+            _bake_progress(4, 'Cycles bake returned; validating sampled luxels and atlas coverage')
             if 'FINISHED' not in bake_result:
                 stats = _image_rgb_statistics(bake_target)
                 raise bsp.BSPError(
@@ -7551,6 +7576,9 @@ class QSS_OT_bake_scene_lights(Operator):
                     bpy.data.images.remove(old_previous_snapshot)
                 except Exception:
                     pass
+            _qss_log('INFO', 'bake', f"Completed: {updated_lights} lights, {len(material_states)} materials, "
+                     f"{raw_face_coverage['lit_faces']}/{raw_face_coverage['total_faces']} faces lit; "
+                     f"mean={obj['qss_last_bake_luxel_mean']:.5g}, atlas_scale={post_scale:.5g}")
             self.report({'INFO'},
                         f"Bake complete: {updated_lights} lights, {len(material_states)} materials, "
                         f"{raw_face_coverage['lit_faces']}/{raw_face_coverage['total_faces']} faces lit, "
@@ -7572,6 +7600,7 @@ class QSS_OT_bake_scene_lights(Operator):
                 light_obj['qss_energy_calibration'] = old_light_calibrations.get(
                     light_obj.name, old_object_calibration)
             _apply_quake_light_energy_scale(scene)
+            _qss_log('ERROR', 'bake', f"Failed; atlas and light calibration restored: {exc}")
             self.report({'ERROR'}, f"Cycles bake failed; atlas and light calibration restored: {exc}")
             return {'CANCELLED'}
         finally:
@@ -7653,6 +7682,16 @@ class QSS_OT_bake_scene_lights(Operator):
                 # lamps again if the user started in Live Lights.
                 try:
                     _set_lighting_preview(context, obj, old_preview_mode)
+                except Exception:
+                    pass
+            if progress_started:
+                try:
+                    progress_wm.progress_end()
+                except Exception:
+                    pass
+            if progress_workspace is not None and hasattr(progress_workspace, 'status_text_set'):
+                try:
+                    progress_workspace.status_text_set(None)
                 except Exception:
                     pass
 
