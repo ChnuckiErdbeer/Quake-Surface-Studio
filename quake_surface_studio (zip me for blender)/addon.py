@@ -8230,17 +8230,17 @@ class QSS_PT_navigation(Panel):
     def draw(self, context):
         obj = context.object
         row = self.layout.row(align=True)
-        row.operator(QSS_OT_fps_walk.bl_idname, text="", icon="VIEW_PAN")
+        row.operator(QSS_OT_fps_walk.bl_idname, text="WASD", icon="VIEW_PAN")
         player = row.row(align=True)
         player.enabled = bool(obj.get("qss_has_player_start"))
-        player.operator(QSS_OT_player_start.bl_idname, text="", icon="EMPTY_AXIS")
+        player.operator(QSS_OT_player_start.bl_idname, text="Start", icon="EMPTY_AXIS")
         isolate = row.row(align=True)
         isolate.enabled = (context.mode == "EDIT_MESH" or _qss_is_texture_paint_context(context))
-        isolate.operator(QSS_OT_isolate_faces.bl_idname, text="", icon="HIDE_OFF",
+        isolate.operator(QSS_OT_isolate_faces.bl_idname, text="Isolate", icon="HIDE_OFF",
                          depress=bool(obj.get("qss_face_visibility_snapshot", "")))
         focus = row.row(align=True)
         focus.enabled = (context.mode == "EDIT_MESH" or _qss_is_texture_paint_context(context))
-        focus.operator(QSS_OT_frame_selection.bl_idname, text="", icon="VIEWZOOM")
+        focus.operator(QSS_OT_frame_selection.bl_idname, text="Focus", icon="VIEWZOOM")
 
 
 class QSS_PT_project(Panel):
