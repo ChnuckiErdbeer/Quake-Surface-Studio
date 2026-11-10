@@ -1349,6 +1349,12 @@ def _set_viewport_lighting_mode(context, mode):
             except Exception:
                 pass
 
+    try:
+        _qss_apply_viewport_fov(
+            context, _qss_config_settings().get("viewport_fov_degrees", 90.0)
+        )
+    except Exception:
+        pass
 
 def _qss_apply_base_texture_visibility(obj):
     """Apply the per-map diffuse-texture toggle without disturbing lightmap nodes."""
@@ -3020,7 +3026,15 @@ class QSS_OT_edit_face_overlay_watch(Operator):
         if self._finished:
             return {"FINISHED"}
         if event.type == "TIMER":
-            if getattr(self._object, "name", None) is None or not _qss_is_map_object(self._object):
+            try:
+                object_is_valid = (
+                    self._object is not None
+                    and bool(self._object.name)
+                    and _qss_is_map_object(self._object)
+                )
+            except (ReferenceError, RuntimeError):
+                object_is_valid = False
+            if not object_is_valid:
                 self._finish_restore()
                 return {"FINISHED"}
             try:
