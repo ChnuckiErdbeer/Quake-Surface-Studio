@@ -71,8 +71,8 @@ def face_focus_distance(half_width, half_height, aspect, radius, unit_scale,
         raise ValueError("Face-focus extents and radius cannot be negative.")
     if aspect <= 0.0 or unit_scale <= 0.0:
         raise ValueError("Viewport aspect and Quake unit scale must be positive.")
-    if not 10.0 <= fov_degrees <= 100.0 or margin < 1.0:
-        raise ValueError("Face-focus FOV must be 10–100 degrees and margin at least 1.")
+    if not 10.0 <= fov_degrees <= 150.0 or margin < 1.0:
+        raise ValueError("Face-focus FOV must be 10–150 degrees and margin at least 1.")
     tangent = math.tan(math.radians(fov_degrees) * 0.5)
     fit_height = half_height / tangent
     fit_width = half_width / (tangent * aspect)
