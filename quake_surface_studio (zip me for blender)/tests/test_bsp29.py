@@ -213,5 +213,29 @@ class BSP29Tests(unittest.TestCase):
 
 
 
+class FaceWindingTests(unittest.TestCase):
+    def test_face_winding_respects_bsp_plane_and_side(self):
+        vertices = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        self.assertFalse(bsp.face_winding_needs_reversal(vertices, (0, 0, 1), side=0))
+        self.assertTrue(bsp.face_winding_needs_reversal(vertices, (0, 0, 1), side=1))
+        reversed_vertices = list(reversed(vertices))
+        self.assertTrue(bsp.face_winding_needs_reversal(reversed_vertices, (0, 0, 1), side=0))
+        self.assertFalse(bsp.face_winding_needs_reversal(reversed_vertices, (0, 0, 1), side=1))
+
+    def test_face_winding_accounts_for_z_reflection(self):
+        vertices = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        self.assertTrue(bsp.face_winding_needs_reversal(vertices, (0, 0, 1), side=0, flip_z=True))
+        self.assertFalse(bsp.face_winding_needs_reversal(vertices, (0, 0, 1), side=1, flip_z=True))
+        reversed_vertices = list(reversed(vertices))
+        self.assertFalse(bsp.face_winding_needs_reversal(
+            reversed_vertices, (0, 0, 1), side=0, flip_z=True
+        ))
+
+    def test_degenerate_face_does_not_request_arbitrary_reversal(self):
+        self.assertFalse(bsp.face_winding_needs_reversal(
+            [(0, 0, 0), (1, 0, 0), (2, 0, 0)], (0, 0, 1)
+        ))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
