@@ -69,6 +69,33 @@ def _qss_abspath(path):
     return bpy.path.abspath(path) if path else ''
 
 
+def _qss_map_artifact_dir(obj, create=False):
+    """Return the per-map generated-artifact directory without creating it on import."""
+    if not _qss_is_map_object(obj):
+        raise bsp.BSPError("Select an imported Slipgate map before generating map artifacts.")
+    source = _qss_abspath(obj.get("qss_source_path", ""))
+    if not source:
+        raise bsp.BSPError("The active map has no source BSP path.")
+    map_directory = os.path.dirname(os.path.abspath(source))
+    if not os.path.isdir(map_directory):
+        raise bsp.BSPError(f"The source map directory does not exist: {map_directory}")
+    stem = os.path.splitext(os.path.basename(source))[0] or "Map"
+    clean_stem = bpy.path.clean_name(stem) or "Map"
+    folder = os.path.join(map_directory, "##slipgate", clean_stem)
+    if create:
+        os.makedirs(folder, exist_ok=True)
+        if not os.path.isdir(folder):
+            raise OSError(f"Generated-artifact path is not a directory: {folder}")
+        obj["qss_slipgate_folder"] = folder
+        _qss_log("INFO", "artifacts", f"Map artifact directory ready: {folder}")
+    return folder
+
+
+def _qss_map_artifact_path(obj, filename, create=True):
+    folder = _qss_map_artifact_dir(obj, create=create)
+    return os.path.join(folder, os.path.basename(str(filename)))
+
+
 
 def _qss_load_config():
     return quake_paths.load_config(_qss_config_path())
@@ -2789,9 +2816,32 @@ def _apply_quake_light_energy_scale(scene):
         manual_calibration = max(
             0.0, float(light_obj.get('qss_manual_energy_calibration', 1.0))
         )
-        light_obj.data.energy = lighting_utils.scaled_quake_light_energy(
-            raw_value, scale * manual_calibration
-        )
+        if role == 'quake_entity_light':
+            delay = int(light_obj.get('qss_quake_light_delay', 0))
+            preview = lighting_utils.blender_live_light_preview_parameters(
+                raw_value,
+                light_obj.get('qss_quake_raw_light_value', raw_value),
+                delay,
+                wait=light_obj.get('qss_quake_wait', 1.0),
+                world_dist=light_obj.get('qss_quake_world_dist', 1.0),
+                falloff=light_obj.get('qss_quake_falloff', 0.0),
+                unit_scale=light_obj.get('qss_quake_unit_scale', DEFAULT_QUAKE_UNIT_SCALE),
+            )
+            light_obj.data.energy = lighting_utils.scaled_quake_light_energy(
+                preview['energy'], scale * manual_calibration
+            )
+            if hasattr(light_obj.data, 'use_custom_distance'):
+                light_obj.data.use_custom_distance = True
+            if hasattr(light_obj.data, 'cutoff_distance'):
+                light_obj.data.cutoff_distance = preview['cutoff_distance']
+            if hasattr(light_obj.data, 'shadow_soft_size'):
+                light_obj.data.shadow_soft_size = preview['shadow_soft_size']
+            light_obj['qss_quake_live_preview_profile'] = preview['profile']
+            light_obj['qss_quake_live_preview_reference_distance'] = preview['reference_distance']
+        else:
+            light_obj.data.energy = lighting_utils.scaled_quake_light_energy(
+                raw_value, scale * manual_calibration
+            )
         if range_scale <= 0.0:
             light_obj.data.energy = 0.0
         light_obj['qss_applied_energy_scale'] = scale
@@ -2905,6 +2955,7 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
         light_obj['qss_quake_classname'] = classname
         light_obj['qss_quake_light_value'] = float(effective_intensity)
         light_obj['qss_quake_raw_light_value'] = float(intensity)
+        light_obj['qss_quake_unit_scale'] = float(unit_scale)
         light_obj['qss_quake_world_range'] = float(world_range)
         light_obj['qss_quake_world_dist'] = float(world_dist)
         light_obj['qss_quake_anglescale'] = float(anglescale)
@@ -3899,19 +3950,6 @@ class QSS_OT_create_slipgate_folder(Operator):
         if not os.path.isdir(map_directory):
             self.report({"ERROR"}, f"The current map directory does not exist: {map_directory}")
             return {"CANCELLED"}
-        folder = os.path.join(map_directory, "##slipgate")
-        try:
-            os.makedirs(folder, exist_ok=True)
-            if not os.path.isdir(folder):
-                raise OSError("The requested path exists but is not a directory.")
-            obj["qss_slipgate_folder"] = folder
-            self.report({"INFO"}, f"Slipgate folder ready: {folder}")
-            return {"FINISHED"}
-        except OSError as exc:
-            self.report({"ERROR"}, f"Could not create ##slipgate folder: {exc}")
-            return {"CANCELLED"}
-
-
 class QSS_OT_confirm_import(Operator):
     bl_idname = "qss.confirm_import"
     bl_label = "Import BSP into Project"
@@ -5265,7 +5303,7 @@ class QSS_OT_generate_decoupled_lightmaps(Operator, ImportHelper):
             layout.label(text="Balanced density for many maps.", icon="INFO")
         else:
             layout.label(text="Coarser lighting: faster and smaller, with less spatial detail.", icon="INFO")
-        layout.label(text="A new *_decoupled.bsp copy will be created beside the source.", icon="INFO")
+        layout.label(text="A new *_decoupled.bsp copy will be created in this map's ##slipgate folder.", icon="INFO")
         layout.label(text="The source BSP is never modified; lighting is recalculated.", icon="INFO")
 
     def execute(self, context):
@@ -5289,10 +5327,12 @@ class QSS_OT_generate_decoupled_lightmaps(Operator, ImportHelper):
                 )
 
             source_root, extension = os.path.splitext(source_path)
-            candidate = source_root + "_decoupled" + extension
+            artifact_dir = _qss_map_artifact_dir(context.object, create=True) if _qss_is_map_object(context.object) and os.path.abspath(source_path) == os.path.abspath(_qss_abspath(context.object.get('qss_source_path', ''))) else os.path.join(os.path.dirname(source_path), "##slipgate", os.path.splitext(os.path.basename(source_path))[0])
+            os.makedirs(artifact_dir, exist_ok=True)
+            candidate = os.path.join(artifact_dir, os.path.basename(source_root) + "_decoupled" + extension)
             suffix = 1
             while os.path.exists(candidate):
-                candidate = f"{source_root}_decoupled_{suffix:03d}{extension}"
+                candidate = os.path.join(artifact_dir, f"{os.path.basename(source_root)}_decoupled_{suffix:03d}{extension}")
                 suffix += 1
             output_path = candidate
             output_lit = os.path.splitext(output_path)[0] + ".lit"
@@ -7406,7 +7446,17 @@ class QSS_OT_bake_scene_lights(Operator):
                 # erase pixels baked for earlier material slots; target starts blank.
                 scene.render.bake.use_clear = False
             if hasattr(scene.render.bake, 'margin'):
-                scene.render.bake.margin = 0
+                # Each packed face island has a reserved gutter. Extend the
+                # baked edge pixels into that gutter so rasterization/texture
+                # filtering cannot expose the black unbaked bake target.
+                bake_margin = lighting_utils.lightmap_bake_margin_pixels(
+                    int(obj.get('qss_lightmap_gutter', 2)),
+                    _qss_lightmap_pixel_scale(obj, image),
+                )
+                scene.render.bake.margin = bake_margin
+                if hasattr(scene.render.bake, 'margin_type'):
+                    scene.render.bake.margin_type = 'EXTEND'
+                obj['qss_last_bake_margin'] = int(bake_margin)
             scene.cycles.samples = max(96, old_cycles['samples'])
             bake_bounces = max(0, int(getattr(scene, 'qss_bake_bounces', 2)))
             scene.cycles.diffuse_bounces = bake_bounces
@@ -8570,14 +8620,13 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
         mode = str(_qss_config_settings().get("export_mode", "AUTO")).upper()
         self.lightmap_export_mode = mode if mode in {"AUTO", "CLASSIC", "ENHANCED", "BOTH"} else "AUTO"
         if source:
-            virtual_path = str(obj.get("qss_game_map_path", "") or "")
-            game_dir = _qss_abspath(obj.get("qss_game_dir", "") or getattr(context.scene, "qss_game_dir", "") or "")
-            if virtual_path and game_dir:
-                relative_root, ext = os.path.splitext(virtual_path.replace("/", os.sep))
-                self.filepath = os.path.join(game_dir, relative_root + "_surface_studio" + (ext or ".bsp"))
-            else:
+            stem = os.path.splitext(os.path.basename(source))[0] or "map"
+            try:
+                self.filepath = _qss_map_artifact_path(obj, stem + "_surface_studio.bsp", create=True)
+            except Exception as exc:
+                self.report({'WARNING'}, f"Could not prepare per-map artifact folder; using source directory: {exc}")
                 root, ext = os.path.splitext(source)
-                self.filepath = root + "_surface_studio" + ext
+                self.filepath = root + "_surface_studio" + (ext or ".bsp")
         return ExportHelper.invoke(self, context, event)
 
     def draw(self, context):
@@ -8596,6 +8645,9 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
                     or "DECOUPLED_LM" in str(obj.get("qss_bspx_lump_names", ""))
                 ) else "CLASSIC"
             output = bpy.path.abspath(self.filepath)
+            if not output:
+                raise OSError("Choose an output BSP filename.")
+            os.makedirs(os.path.dirname(output) or os.getcwd(), exist_ok=True)
             if mode == "BOTH":
                 root, ext = os.path.splitext(output)
                 ext = ext or ".bsp"
@@ -8872,6 +8924,7 @@ class QSS_OT_write_diagnostics(Operator, ExportHelper):
             text_block.clear()
             text_block.write(report)
             context.window_manager.clipboard = report
+            _qss_log('INFO', 'diagnostics', f"Saved report to {path}")
             print('\n' + report)
             self.report({'INFO'}, f'Saved {path}; report also stored as Blender Text "{text_name}" and copied to clipboard')
             return {'FINISHED'}
@@ -8904,7 +8957,7 @@ class QSS_OT_run_blender_selftest(Operator):
                 '__package__': '',
             }
             exec(compile(source, script_path, 'exec'), namespace, namespace)
-            output = os.path.expanduser('~/Desktop/QSS_Blender_SelfTest.txt')
+            output = _qss_map_artifact_path(context.object, 'Blender_SelfTest.txt', create=True) if _qss_is_map_object(context.object) else os.path.expanduser('~/Desktop/QSS_Blender_SelfTest.txt')
             if not os.path.isfile(output):
                 output = os.path.expanduser('~/QSS_Blender_SelfTest.txt')
             self.report({'INFO'}, f'Self-test complete. Report: {output}')
@@ -9675,7 +9728,10 @@ class QSS_OT_convert_quake_palette(Operator):
         stem = bpy.path.clean_name(
             "render" if image.name == "Render Result" else image.name
         ) or "texture"
-        self.output_filepath = bpy.path.abspath(f"//{stem}_quake.png")
+        try:
+            self.output_filepath = _qss_map_artifact_path(context.object, stem + "_quake.png", create=True)
+        except Exception:
+            self.output_filepath = bpy.path.abspath(f"//{stem}_quake.png")
         context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
 
@@ -10026,24 +10082,6 @@ class QSS_PT_quick_actions(Panel):
         row.operator(QSS_OT_isolate_faces.bl_idname, text="Isolate", icon="HIDE_OFF")
         row.operator(QSS_OT_frame_selection.bl_idname, text="Focus", icon="VIEWZOOM")
 
-        layout.separator(factor=0.5)
-        folder_row = layout.row(align=True)
-        folder_row.operator(
-            QSS_OT_create_slipgate_folder.bl_idname,
-            text="Create ##slipgate Folder",
-            icon="NEWFOLDER",
-        )
-        folder = str(obj.get("qss_slipgate_folder", "") or "")
-        if folder and os.path.isdir(folder):
-            layout.label(text=folder, icon="CHECKMARK")
-        else:
-            source = _qss_abspath(obj.get("qss_source_path", ""))
-            if source:
-                layout.label(
-                    text=os.path.join(os.path.dirname(source), "##slipgate"),
-                    icon="FILE_FOLDER",
-                )
-
 
 class QSS_PT_project(Panel):
     bl_label = "MAIN"
@@ -10371,7 +10409,6 @@ CLASSES = (
     QSS_OT_apply_light_energy_scale, QSS_OT_calibrate_lights_to_source,
     QSS_OT_write_diagnostics, QSS_OT_run_blender_selftest, QSS_OT_export_bsp,
     QSS_PT_main, QSS_PT_quick_actions, QSS_PT_project, QSS_PT_lighting, QSS_PT_stats,
-    QSS_OT_create_slipgate_folder,
 )
 
 def _remove_qss_keymaps():
