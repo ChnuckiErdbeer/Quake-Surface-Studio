@@ -676,7 +676,7 @@ A ray will hit that wall regardless of which part of the texture it appears to h
 with { ).
 ```
 
-They can visually contain holes, but those holes are a rendering feature, not automatically holes in the collision geometry. QuakeBook So a monster might see the player through a fence visually, while traceline() still reports that a wall blocks its view.
+They can visually contain holes, but those holes are a rendering feature, not automatically holes in the collision geometry. So a monster might see the player through a fence visually, while traceline() still reports that a wall blocks its view.
 
 What can you do instead?
 
@@ -8026,7 +8026,7 @@ InputAction Mouse movementLook around W/SForward / backward A/DStrafe Q/EDown / 
 
 QSS converts its Quake-units-per-second speed setting into Blender's native Walk speed using the imported map's unit scale. The important deactivation fix: FPS navigation is no longer a persistent left-toolbar tool. It starts from the sidebar and exits through Blender's normal Walk controls. Once exited, the previously selected viewport tool works normally again. No MMB capture or custom timerdriven navigation loop remains.
 
-TrenchBroom's default 3D controls are split between RMB mouse-look, MMB camera translation, scroll-wheel movement and keyboard movement. The new QSS mode instead follows Blender's native first-person Walk model, which is closer to the Quake noclip behaviour you mentioned. trenchbroo... +1 Build and status CI passed 161 tests passed, including compilation and package assembly. The new Blender interaction still needs your graphical test; CI does not run Blender's GUI.
+TrenchBroom's default 3D controls are split between RMB mouse-look, MMB camera translation, scroll-wheel movement and keyboard movement. The new QSS mode instead follows Blender's native first-person Walk model, which is closer to the Quake noclip behaviour you mentioned.  Build and status CI passed 161 tests passed, including compilation and package assembly. The new Blender interaction still needs your graphical test; CI does not run Blender's GUI.
 
 Download QSS v0.17.7 SHA-256: 5f465658ac01426ca359548841a9c8a7f5d41383930dadfc0f98411d32dde68d Draft PR #1 is updated. It remains unmerged, and main is unchanged. The key thing to test is whether mouse-look and WASD now feel natural, and whether a single LMB cleanly returns you to normal selection.
 
