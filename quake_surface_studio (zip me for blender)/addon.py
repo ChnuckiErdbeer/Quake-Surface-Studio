@@ -28,7 +28,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils
 
 
-ADDON_VERSION = (0, 20, 2)
+ADDON_VERSION = (0, 20, 3)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -3845,6 +3845,40 @@ class QSS_OT_player_start(Operator):
 
 
 
+class QSS_OT_create_slipgate_folder(Operator):
+    bl_idname = "qss.create_slipgate_folder"
+    bl_label = "Create ##slipgate Folder"
+    bl_description = "Create a ##slipgate working folder beside the currently loaded BSP"
+
+    @classmethod
+    def poll(cls, context):
+        obj = getattr(context, "object", None)
+        source = _qss_abspath(obj.get("qss_source_path", "")) if _qss_is_map_object(obj) else ""
+        return bool(source and os.path.isdir(os.path.dirname(source)))
+
+    def execute(self, context):
+        obj = context.object
+        source = _qss_abspath(obj.get("qss_source_path", ""))
+        if not source:
+            self.report({"ERROR"}, "The active map has no source BSP path.")
+            return {"CANCELLED"}
+        map_directory = os.path.dirname(os.path.abspath(source))
+        if not os.path.isdir(map_directory):
+            self.report({"ERROR"}, f"The current map directory does not exist: {map_directory}")
+            return {"CANCELLED"}
+        folder = os.path.join(map_directory, "##slipgate")
+        try:
+            os.makedirs(folder, exist_ok=True)
+            if not os.path.isdir(folder):
+                raise OSError("The requested path exists but is not a directory.")
+            obj["qss_slipgate_folder"] = folder
+            self.report({"INFO"}, f"Slipgate folder ready: {folder}")
+            return {"FINISHED"}
+        except OSError as exc:
+            self.report({"ERROR"}, f"Could not create ##slipgate folder: {exc}")
+            return {"CANCELLED"}
+
+
 class QSS_OT_confirm_import(Operator):
     bl_idname = "qss.confirm_import"
     bl_label = "Import BSP into Project"
@@ -5728,20 +5762,15 @@ def _qss_image_pixels_to_rgba8(image):
     image.update()
     pixels = array.array("f", [0.0]) * (width * height * 4)
     image.pixels.foreach_get(pixels)
-    color_space = str(getattr(image.colorspace_settings, "name", "") or "").lower()
-    encode_srgb = "srgb" in color_space
+    # Blender byte buffers already contain values encoded in their image
+    # colour space (sRGB for QSS albedo); float buffers are scene-linear.
+    # Encoding every sRGB-tagged image here applies the transfer curve twice
+    # to byte textures and makes BSP exports visibly too bright in Quake.
+    is_float_buffer = bool(getattr(image, "is_float", False))
     output = bytearray(width * height * 4)
 
     def byte(value):
         return max(0, min(255, int(round(float(value) * 255.0))))
-
-    def encode(value):
-        value = max(0.0, float(value))
-        if not encode_srgb:
-            return min(1.0, value)
-        if value <= 0.0031308:
-            return 12.92 * value
-        return 1.055 * (value ** (1.0 / 2.4)) - 0.055
 
     for y in range(height):
         source_row = (height - 1 - y) * width
@@ -5749,9 +5778,9 @@ def _qss_image_pixels_to_rgba8(image):
         for x in range(width):
             source = (source_row + x) * 4
             target = (target_row + x) * 4
-            output[target] = byte(encode(pixels[source]))
-            output[target + 1] = byte(encode(pixels[source + 1]))
-            output[target + 2] = byte(encode(pixels[source + 2]))
+            output[target] = byte(color.blender_pixel_to_quake_code(pixels[source], is_float_buffer))
+            output[target + 1] = byte(color.blender_pixel_to_quake_code(pixels[source + 1], is_float_buffer))
+            output[target + 2] = byte(color.blender_pixel_to_quake_code(pixels[source + 2], is_float_buffer))
             output[target + 3] = byte(pixels[source + 3])
     return width, height, bytes(output)
 
@@ -9777,6 +9806,47 @@ class QSS_PT_main(Panel):
         self.layout.label(text="Quake BSP editing and export", icon="WORLD")
 
 
+class QSS_PT_quick_actions(Panel):
+    bl_label = "QUICK ACTIONS"
+    bl_idname = "QSS_PT_quick_actions"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Slipgate"
+    bl_parent_id = "QSS_PT_main"
+    bl_order = 20
+
+    @classmethod
+    def poll(cls, context):
+        return _qss_is_map_object(context.object)
+
+    def draw(self, context):
+        obj = context.object
+        layout = self.layout
+        row = layout.row(align=True)
+        row.operator(QSS_OT_fps_walk.bl_idname, text="WASD", icon="WALK")
+        row.operator(QSS_OT_player_start.bl_idname, text="Start", icon="EMPTY_AXIS")
+        row.operator(QSS_OT_isolate_faces.bl_idname, text="Isolate", icon="HIDE_OFF")
+        row.operator(QSS_OT_frame_selection.bl_idname, text="Focus", icon="VIEWZOOM")
+
+        layout.separator(factor=0.5)
+        folder_row = layout.row(align=True)
+        folder_row.operator(
+            QSS_OT_create_slipgate_folder.bl_idname,
+            text="Create ##slipgate Folder",
+            icon="NEWFOLDER",
+        )
+        folder = str(obj.get("qss_slipgate_folder", "") or "")
+        if folder and os.path.isdir(folder):
+            layout.label(text=folder, icon="CHECKMARK")
+        else:
+            source = _qss_abspath(obj.get("qss_source_path", ""))
+            if source:
+                layout.label(
+                    text=os.path.join(os.path.dirname(source), "##slipgate"),
+                    icon="FILE_FOLDER",
+                )
+
+
 class QSS_PT_project(Panel):
     bl_label = "MAIN"
     bl_idname = "QSS_PT_project"
@@ -9784,7 +9854,7 @@ class QSS_PT_project(Panel):
     bl_region_type = "UI"
     bl_category = "Slipgate"
     bl_parent_id = "QSS_PT_main"
-    bl_order = 20
+    bl_order = 30
 
     def draw(self, context):
         layout = self.layout
@@ -9853,7 +9923,7 @@ class QSS_PT_lighting(Panel):
     bl_region_type = "UI"
     bl_category = "Slipgate"
     bl_parent_id = "QSS_PT_main"
-    bl_order = 30
+    bl_order = 40
 
     @classmethod
     def poll(cls, context):
@@ -10007,7 +10077,7 @@ class QSS_PT_stats(Panel):
     bl_region_type = "UI"
     bl_category = "Slipgate"
     bl_parent_id = "QSS_PT_main"
-    bl_order = 40
+    bl_order = 50
     bl_options = {"DEFAULT_CLOSED"}
 
     @classmethod
@@ -10102,7 +10172,8 @@ CLASSES = (
     QSS_OT_restore_original_lightmap, QSS_OT_refresh_lightmap_preview,
     QSS_OT_apply_light_energy_scale, QSS_OT_calibrate_lights_to_source,
     QSS_OT_write_diagnostics, QSS_OT_run_blender_selftest, QSS_OT_export_bsp,
-    QSS_PT_main, QSS_PT_project, QSS_PT_lighting, QSS_PT_stats,
+    QSS_PT_main, QSS_PT_quick_actions, QSS_PT_project, QSS_PT_lighting, QSS_PT_stats,
+    QSS_OT_create_slipgate_folder,
 )
 
 def _remove_qss_keymaps():
