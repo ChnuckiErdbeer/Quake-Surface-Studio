@@ -1,18 +1,21 @@
-# Slipgate 0.20.6
+# Slipgate 0.20.7
 
-## 0.20.6 — Multi-map viewport overlays and Edit Mode lighting controls
+## 0.20.7 — Faster BSP import entry and cursor palette
 
-- Fixes the per-3D-View overlay watcher lifecycle: when another BSP is imported or activated, the existing watcher now retargets to that map instead of remaining bound to the first map. This prevents Blender's face-fill overlay from reappearing on subsequent maps.
-- While a QSS map is active, the watcher hides the viewport floor grid; when the active object is no longer a QSS map, the original face-fill and floor-grid settings are restored.
-- Lighting preview modes (Original, Eevee, Cycles, Baked) can now be switched in Object and Edit Mode. They remain unavailable in Texture Paint mode. Baked remains disabled until a baked lightmap exists.
-- No existing controls, panels or workflows have been removed.
+- The Import BSP file selector now starts in the active game's `maps` directory, falling back to the game directory when no `maps` folder exists.
+- Removed the Browse Game Maps button from the sidebar to avoid the slow archive-scanning workflow in the main UI. The existing archive-aware operator remains registered and available through Blender's operator search for compatibility.
+- The Quake palette operator now opens as a cursor-positioned popup when invoked from the paint-mode context menu.
+- Retains Blender's native `template_palette` widget, which adapts its columns to the available layout width and uses square swatches. No custom button colors or custom swatch grid have been introduced.
+- No other controls, panels or workflows are removed.
 
 ### Validation notes
 
-- The overlay watcher and lighting-mode changes require interactive testing in Blender 5.2, especially importing a second BSP in the same 3D View, switching to a non-QSS object, and entering/exiting Edit and Texture Paint modes.
-- Lighting calibration against the user's planned delay test map remains a separate follow-up. Do not tune energy constants without the reference BSP/lightmap and corresponding source map.
+- QSS Python CI run 627 is pending at the time of this note.
+- Import dialog initial-directory behavior and cursor-positioned palette popup require interactive Blender 5.2 verification.
+- Blender's standard theme UI does not expose arbitrary per-button background colors through ordinary `UILayout.operator` controls; semantic states (enabled/depressed/alert) and native theme colors remain available.
 
 ---
+
 
 
 
