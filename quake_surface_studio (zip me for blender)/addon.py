@@ -831,15 +831,18 @@ def _bake_face_local_texture(source_image, uv_layer, poly, image_name):
     source_image.update()
     source_image.pixels.foreach_get(source_pixels)
     output_pixels = array.array('f')
+    scale_s = texture_export.face_local_projection_scale(span_s, width_out)
+    scale_t = texture_export.face_local_projection_scale(span_t, height_out)
 
-    # Blender image pixel buffers are bottom-up. Sample at texel centres and
-    # wrap source coordinates exactly as the Quake material repeats.
+    # Blender image pixels are bottom-up. Keep the original texel pitch when
+    # the valid Quake dimension is padded to a multiple of eight. Only spans
+    # beyond 512 px are resampled to fit the classic miptexture limit.
     for y in range(height_out):
-        t = min_t + (1.0 - (y + 0.5) / height_out) * span_t
+        t = min_t + (height_out - (y + 0.5)) / scale_t
         v_src = (1.0 - (t / height_src)) % 1.0
         sy = min(height_src - 1, int(v_src * height_src))
         for x in range(width_out):
-            s = min_s + ((x + 0.5) / width_out) * span_s
+            s = min_s + (x + 0.5) / scale_s
             u_src = (s / width_src) % 1.0
             sx = min(width_src - 1, int(u_src * width_src))
             offset = (sy * width_src + sx) * 4
@@ -863,24 +866,16 @@ def _bake_face_local_texture(source_image, uv_layer, poly, image_name):
     image['qss_face_local_baked'] = True
 
     normalized_uvs = [
-        ((s - min_s) / span_s, 1.0 - ((t - min_t) / span_t))
+        ((s - min_s) * scale_s / width_out,
+         1.0 - ((t - min_t) * scale_t / height_out))
         for s, t in zip(s_values, t_values)
     ]
     return image, normalized_uvs, (min_s, min_t, span_s, span_t), (width_out, height_out)
 
 
 def _face_local_texinfo_projection(source_texinfo, bounds, output_size):
-    """Return a texinfo projection matching the baked, face-local texture."""
-    min_s, min_t, span_s, span_t = bounds
-    width, height = output_size
-    scale_s = width / span_s
-    scale_t = height / span_t
-    s = source_texinfo[0:4]
-    t = source_texinfo[4:8]
-    return (
-        s[0] * scale_s, s[1] * scale_s, s[2] * scale_s, (s[3] - min_s) * scale_s,
-        t[0] * scale_t, t[1] * scale_t, t[2] * scale_t, (t[3] - min_t) * scale_t,
-    )
+    """Return a texinfo projection matching the padded face-local texture."""
+    return texture_export.face_local_texinfo_projection(source_texinfo, bounds, output_size)
 
 
 def _qss_create_detached_face_atlas(plans, atlas_size=512):
