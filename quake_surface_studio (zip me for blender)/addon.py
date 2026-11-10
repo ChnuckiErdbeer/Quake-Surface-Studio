@@ -7108,9 +7108,18 @@ def _qss_toggle_face_isolation_in_edit(obj):
     payload = obj.get(snapshot_key, "")
 
     if visibility_utils.snapshot_is_active(payload):
-        hidden_faces, selected_faces = visibility_utils.decode_face_visibility_snapshot(
-            payload, vertex_count, edge_count, face_count
-        )
+        try:
+            hidden_faces, selected_faces = visibility_utils.decode_face_visibility_snapshot(
+                payload, vertex_count, edge_count, face_count
+            )
+        except ValueError:
+            # Topology changed since isolation. Discard the stale indices and
+            # ask the user to Reveal Hidden before creating a fresh snapshot.
+            try:
+                del obj[snapshot_key]
+            except Exception:
+                pass
+            raise
         for face in bm.faces:
             face.hide_set(False)
         for face_index in sorted(hidden_faces):
