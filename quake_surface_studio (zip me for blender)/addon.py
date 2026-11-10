@@ -17,7 +17,7 @@ import time
 import traceback
 
 import bpy
-from bpy.props import StringProperty, FloatProperty, BoolProperty, IntProperty, EnumProperty
+from bpy.props import StringProperty, FloatProperty, FloatVectorProperty, BoolProperty, IntProperty, EnumProperty
 from bpy.types import Operator, Panel, Menu
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
@@ -25,7 +25,8 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils
 
 
-ADDON_VERSION = (0, 18, 3)
+ADDON_VERSION = (0, 18, 4)
+QSS_MAX_PAINT_FACES = 64
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -36,6 +37,7 @@ _addon_keymaps = []
 _qss_focus_clip_sessions = {}
 _qss_focus_cycle_state = {}
 _qss_focus_transition_sessions = {}
+_qss_camera_transition_sessions = {}
 
 
 def _report(op, level, message):
@@ -2903,8 +2905,132 @@ def _qss_enter_face_edit_mode(context, obj):
         return False
 
 
+class QSS_OT_camera_transition(Operator):
+    bl_idname = "qss.camera_transition"
+    bl_label = "Smooth View Transition"
+    bl_description = "Ease the active 3D View to a target location, rotation and distance"
+
+    target_location: FloatVectorProperty(size=3, subtype="TRANSLATION")
+    target_rotation: FloatVectorProperty(
+        size=4, subtype="QUATERNION", default=(1.0, 0.0, 0.0, 0.0)
+    )
+    target_distance: FloatProperty(default=1.0, min=0.001)
+    duration: FloatProperty(default=0.5, min=0.05, max=5.0)
+
+    def _finish(self):
+        if getattr(self, "_finished", False):
+            return
+        self._finished = True
+        timer = getattr(self, "_timer", None)
+        if timer is not None:
+            try:
+                self._window_manager.event_timer_remove(timer)
+            except Exception:
+                pass
+            self._timer = None
+        try:
+            key = self._area.as_pointer()
+            if _qss_camera_transition_sessions.get(key) is self:
+                _qss_camera_transition_sessions.pop(key, None)
+            self._area.tag_redraw()
+        except Exception:
+            pass
+
+    def invoke(self, context, event):
+        from mathutils import Quaternion, Vector
+        area = context.area if context.area and context.area.type == "VIEW_3D" else None
+        if area is None:
+            self.report({"WARNING"}, "Smooth camera movement needs a 3D View.")
+            return {"CANCELLED"}
+        space = area.spaces.active
+        if space is None or space.type != "VIEW_3D" or space.region_3d is None:
+            return {"CANCELLED"}
+        previous = _qss_camera_transition_sessions.get(area.as_pointer())
+        if previous is not None:
+            previous._finish()
+        region = space.region_3d
+        self._area = area
+        self._space = space
+        self._window_manager = context.window_manager
+        self._start_location = region.view_location.copy()
+        self._start_rotation = region.view_rotation.copy()
+        self._start_distance = float(region.view_distance)
+        self._target_location = Vector(self.target_location)
+        self._target_rotation = Quaternion(self.target_rotation).normalized()
+        self._target_distance = float(self.target_distance)
+        self._started_at = time.perf_counter()
+        self._duration = float(self.duration)
+        self._finished = False
+        self._timer = None
+        try:
+            self._timer = self._window_manager.event_timer_add(0.02, window=context.window)
+            self._window_manager.modal_handler_add(self)
+            _qss_camera_transition_sessions[area.as_pointer()] = self
+            return {"RUNNING_MODAL"}
+        except Exception as exc:
+            self._finish()
+            self.report({"WARNING"}, f"Could not animate the viewport: {exc}")
+            return {"CANCELLED"}
+
+    def execute(self, context):
+        from mathutils import Quaternion, Vector
+        area = context.area if context.area and context.area.type == "VIEW_3D" else None
+        if area is None:
+            self.report({"WARNING"}, "Smooth camera movement needs a 3D View.")
+            return {"CANCELLED"}
+        region = area.spaces.active.region_3d
+        region.view_location = Vector(self.target_location)
+        region.view_rotation = Quaternion(self.target_rotation).normalized()
+        region.view_distance = float(self.target_distance)
+        area.tag_redraw()
+        return {"FINISHED"}
+
+    def modal(self, context, event):
+        if self._finished:
+            return {"FINISHED"}
+        if event.type == "TIMER":
+            progress = min(1.0, max(
+                0.0, (time.perf_counter() - self._started_at) / self._duration
+            ))
+            eased = progress * progress * (3.0 - 2.0 * progress)
+            region = self._space.region_3d
+            region.view_location = self._start_location.lerp(self._target_location, eased)
+            region.view_rotation = self._start_rotation.slerp(self._target_rotation, eased)
+            region.view_distance = (
+                self._start_distance + (self._target_distance - self._start_distance) * eased
+            )
+            self._area.tag_redraw()
+            if progress >= 1.0:
+                self._finish()
+                return {"FINISHED"}
+        return {"PASS_THROUGH"}
+
+    def cancel(self, context):
+        self._finish()
+
+
+def _qss_start_camera_transition(context, window, area, location, rotation, distance, duration=0.5):
+    """Start the shared eased camera movement inside one 3D View area."""
+    region = next((item for item in area.regions if item.type == "WINDOW"), None)
+    if region is None:
+        return False
+    try:
+        with context.temp_override(window=window, area=area, region=region):
+            result = bpy.ops.qss.camera_transition(
+                "INVOKE_DEFAULT",
+                target_location=tuple(location),
+                target_rotation=tuple(rotation),
+                target_distance=float(distance),
+                duration=float(duration),
+            )
+        return "CANCELLED" not in result
+    except Exception as exc:
+        print(f"QSS: could not start shared camera transition: {exc}")
+        return False
+
+
 def _frame_player_start(context, obj):
-    """Place every open 3D View at info_player_start and face its Quake yaw."""
+    """Ease every open 3D View to info_player_start using the shared camera transition."""
     if not obj or not obj.get('qss_has_player_start'):
         return False
     from mathutils import Vector
@@ -2912,28 +3038,33 @@ def _frame_player_start(context, obj):
     yaw = math.radians(float(obj.get('qss_player_yaw', 0.0)))
     forward = Vector((math.cos(yaw), math.sin(yaw), 0.0))
     rotation = forward.to_track_quat('-Z', 'Y')
-    screens = set()
-    screen = getattr(context, 'screen', None)
-    if screen is not None:
-        screens.add(screen)
+    distance = max(0.001, float(obj.get('qss_unit_scale', DEFAULT_QUAKE_UNIT_SCALE)) * 0.5)
     window_manager = getattr(context, "window_manager", None)
-    if window_manager is not None:
-        for window in window_manager.windows:
-            if window.screen is not None:
-                screens.add(window.screen)
+    windows = list(window_manager.windows) if window_manager is not None else []
+    if context.window is not None and all(window != context.window for window in windows):
+        windows.append(context.window)
     changed = False
-    for target_screen in screens:
-        for area in target_screen.areas:
-            if area.type != 'VIEW_3D':
+    seen_areas = set()
+    for window in windows:
+        screen = getattr(window, "screen", None)
+        if screen is None:
+            continue
+        for area in screen.areas:
+            if area.type != "VIEW_3D" or area.as_pointer() in seen_areas:
                 continue
+            seen_areas.add(area.as_pointer())
             space = area.spaces.active
-            if space is None or space.type != 'VIEW_3D':
+            if space is None or space.type != "VIEW_3D":
                 continue
             region_3d = space.region_3d
-            region_3d.view_perspective = 'PERSP'
-            region_3d.view_rotation = rotation
-            region_3d.view_location = position
-            region_3d.view_distance = max(0.001, float(obj.get('qss_unit_scale', DEFAULT_QUAKE_UNIT_SCALE)) * 0.5)
+            region_3d.view_perspective = "PERSP"
+            started = _qss_start_camera_transition(
+                context, window, area, position, rotation, distance, duration=0.5
+            )
+            if not started:
+                region_3d.view_rotation = rotation
+                region_3d.view_location = position
+                region_3d.view_distance = distance
             try:
                 area.tag_redraw()
             except Exception:
@@ -5311,6 +5442,30 @@ def _qss_current_paint_image(context):
     return image
 
 
+def _qss_selected_paint_face_count(context, obj):
+    """Count visible selected faces in Edit, Object, or Texture Paint mask mode."""
+    if obj is None or getattr(obj, "type", "") != "MESH":
+        return 0
+    if getattr(context, "mode", "") == "EDIT_MESH":
+        import bmesh
+        bm = bmesh.from_edit_mesh(obj.data)
+        return sum(1 for face in bm.faces if face.select and not face.hide)
+    return sum(1 for poly in obj.data.polygons if poly.select)
+
+
+def _qss_check_paint_face_limit(operator, context, obj):
+    count = _qss_selected_paint_face_count(context, obj)
+    if count > QSS_MAX_PAINT_FACES:
+        _report(
+            operator, "WARNING",
+            f"Painting stopped: {count} faces are selected. QSS limits one paint operation "
+            f"to {QSS_MAX_PAINT_FACES} faces to avoid Blender memory spikes or crashes. "
+            "Split the selection into smaller batches.",
+        )
+        return False
+    return True
+
+
 def _qss_is_texture_paint_context(context):
     """Recognise Blender's context and object-mode spellings across supported versions."""
     mode = str(getattr(context, "mode", ""))
@@ -5377,6 +5532,12 @@ class QSS_OT_activate_paint(Operator):
 
     def execute(self, context):
         obj = context.object
+        currently_painting_texture = (
+            _qss_is_texture_paint_context(context)
+            and str(obj.get("qss_active_paint_kind", "texture")) == "texture"
+        )
+        if not currently_painting_texture and not _qss_check_paint_face_limit(self, context, obj):
+            return {"CANCELLED"}
         if _qss_is_texture_paint_context(context):
             current_kind = str(obj.get("qss_active_paint_kind", ""))
             if not current_kind:
@@ -5519,6 +5680,12 @@ class QSS_OT_activate_lightmap_paint(Operator):
 
     def execute(self, context):
         obj = context.object
+        currently_painting_lightmap = (
+            _qss_is_texture_paint_context(context)
+            and str(obj.get("qss_active_paint_kind", "")) == "lightmap"
+        )
+        if not currently_painting_lightmap and not _qss_check_paint_face_limit(self, context, obj):
+            return {"CANCELLED"}
         if _qss_is_texture_paint_context(context):
             current_kind = str(obj.get("qss_active_paint_kind", ""))
             if not current_kind:
@@ -7105,6 +7272,8 @@ class QSS_OT_frame_selection(Operator):
         if region_3d.view_perspective == "CAMERA":
             region_3d.view_perspective = "PERSP"
 
+        camera_side = region_3d.view_rotation @ Vector((0.0, 0.0, 1.0))
+        normal = Vector(viewport_utils.face_normal_toward_view(normal, camera_side))
         target_rotation = normal.to_track_quat("Z", "Y")
         right = target_rotation @ Vector((1.0, 0.0, 0.0))
         up = target_rotation @ Vector((0.0, 1.0, 0.0))
@@ -7121,7 +7290,7 @@ class QSS_OT_frame_selection(Operator):
         )
         distance = viewport_utils.face_focus_distance(
             half_width, half_height, aspect, radius, unit_scale,
-            fov_degrees=45.0, margin=1.4,
+            fov_degrees=45.0, margin=1.65,
         )
 
         self._start_location = region_3d.view_location.copy()
@@ -8067,7 +8236,7 @@ class QSS_OT_toggle_textures(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _qss_is_map_object(context.object) and context.mode == "OBJECT"
+        return _qss_is_map_object(context.object) and context.mode in {"OBJECT", "EDIT_MESH"}
 
     def execute(self, context):
         obj = context.object
@@ -8090,7 +8259,7 @@ class QSS_OT_toggle_source_lightmaps(Operator):
     @classmethod
     def poll(cls, context):
         obj = context.object
-        return bool(_qss_is_map_object(obj) and context.mode == "OBJECT"
+        return bool(_qss_is_map_object(obj) and context.mode in {"OBJECT", "EDIT_MESH"}
                     and obj.get("qss_preview_mode", "source") in {"source", "baked"})
 
     def execute(self, context):
@@ -8193,46 +8362,60 @@ class QSS_OT_toggle_painted_textures(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _qss_is_map_object(context.object) and context.mode == "OBJECT" and _qss_has_painted_texture_faces(context.object)
+        return (
+            _qss_is_map_object(context.object)
+            and context.mode in {"OBJECT", "EDIT_MESH"}
+            and _qss_has_painted_texture_faces(context.object)
+        )
 
     def execute(self, context):
         obj = context.object
-        mesh = obj.data
-        original = mesh.attributes.get("qss_original_material_index")
-        painted = mesh.attributes.get("qss_painted_material_index")
-        marker = mesh.attributes.get("qss_painted_face")
-        if not all((original, painted, marker)):
-            self.report({"WARNING"}, "This map has no detached painted textures.")
-            return {"CANCELLED"}
-        enabled = not bool(obj.get("qss_painted_textures_enabled", True))
-        original_uv = mesh.uv_layers.get("Quake_Texture_UV_Original")
-        painted_uv = mesh.uv_layers.get("Quake_Texture_UV_Painted")
-        active_uv = mesh.uv_layers.get("Quake_Texture_UV")
-        if active_uv is None or original_uv is None or painted_uv is None:
-            self.report({"ERROR"}, "The original/painted UV backups are missing. Re-import this BSP before toggling painted textures.")
-            return {"CANCELLED"}
-        if not enabled:
-            _qss_rebuild_original_quake_texture_uvs(obj, original_uv, active_uv, original, marker)
-        for poly in mesh.polygons:
-            index = poly.index
-            if marker.data[index].value:
-                target = int(painted.data[index].value) if enabled else int(original.data[index].value)
-                if 0 <= target < len(mesh.materials):
-                    poly.material_index = target
-                # On disable, rebuild the canonical Quake projection from BSP texinfo
-                # above; use that repaired active layer rather than the stale first-detach snapshot.
-                source_uv = painted_uv if enabled else active_uv
-                for loop_index in poly.loop_indices:
-                    active_uv.data[loop_index].uv = source_uv.data[loop_index].uv
-        obj["qss_painted_textures_enabled"] = enabled
+        was_edit_mode = context.mode == "EDIT_MESH"
         try:
+            if was_edit_mode:
+                bpy.ops.object.mode_set(mode="OBJECT")
+            mesh = obj.data
+            original = mesh.attributes.get("qss_original_material_index")
+            painted = mesh.attributes.get("qss_painted_material_index")
+            marker = mesh.attributes.get("qss_painted_face")
+            if not all((original, painted, marker)):
+                raise bsp.BSPError("This map has no detached painted textures.")
+            enabled = not bool(obj.get("qss_painted_textures_enabled", True))
+            original_uv = mesh.uv_layers.get("Quake_Texture_UV_Original")
+            painted_uv = mesh.uv_layers.get("Quake_Texture_UV_Painted")
+            active_uv = mesh.uv_layers.get("Quake_Texture_UV")
+            if active_uv is None or original_uv is None or painted_uv is None:
+                raise bsp.BSPError(
+                    "The original/painted UV backups are missing. Re-import this BSP before toggling painted textures."
+                )
+            if not enabled:
+                _qss_rebuild_original_quake_texture_uvs(
+                    obj, original_uv, active_uv, original, marker
+                )
+            for poly in mesh.polygons:
+                index = poly.index
+                if marker.data[index].value:
+                    target = int(painted.data[index].value) if enabled else int(original.data[index].value)
+                    if 0 <= target < len(mesh.materials):
+                        poly.material_index = target
+                    source_uv = painted_uv if enabled else active_uv
+                    for loop_index in poly.loop_indices:
+                        active_uv.data[loop_index].uv = source_uv.data[loop_index].uv
+            obj["qss_painted_textures_enabled"] = enabled
             active_uv.active_render = True
             mesh.uv_layers.active = active_uv
-        except Exception:
-            pass
-        for material in mesh.materials:
-            _qss_bind_original_texture_uv(material)
-        mesh.update()
+            for material in mesh.materials:
+                _qss_bind_original_texture_uv(material)
+            mesh.update()
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not switch painted textures: {exc}")
+            return {"CANCELLED"}
+        finally:
+            if was_edit_mode and getattr(obj, "mode", "") == "OBJECT":
+                try:
+                    bpy.ops.object.mode_set(mode="EDIT")
+                except Exception as exc:
+                    self.report({"WARNING"}, f"Painted textures changed, but Edit Mode could not be restored: {exc}")
         self.report({"INFO"}, f"Painted textures {'enabled' if enabled else 'disabled'}.")
         return {"FINISHED"}
 
@@ -8245,7 +8428,7 @@ class QSS_OT_toggle_painted_lightmaps(Operator):
     @classmethod
     def poll(cls, context):
         obj = context.object
-        return bool(_qss_is_map_object(obj) and context.mode == "OBJECT"
+        return bool(_qss_is_map_object(obj) and context.mode in {"OBJECT", "EDIT_MESH"}
                     and obj.get("qss_preview_mode", "source") in {"source", "baked"}
                     and (obj.get("qss_preview_mode", "source") != "baked" or _qss_has_baked_lightmap(obj)))
 
@@ -8429,6 +8612,121 @@ class QSS_OT_open_last_export(Operator):
             return {"CANCELLED"}
 
 
+class QSS_OT_test_in_ironwail(Operator):
+    bl_idname = "qss.test_in_ironwail"
+    bl_label = "Test in Ironwail"
+    bl_description = "Export a temporary copy of the current map and launch it in Ironwail without changing the saved export"
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        executable = _qss_abspath(getattr(context.scene, "qss_ironwail_executable", "") or "")
+        quake_root = _qss_abspath(getattr(context.scene, "qss_quake_root", "") or "")
+        game_dir = _qss_abspath(
+            (obj.get("qss_game_dir", "") if obj else "")
+            or getattr(context.scene, "qss_game_dir", "") or ""
+        )
+        return bool(
+            _qss_is_map_object(obj)
+            and context.mode in {"OBJECT", "EDIT_MESH"}
+            and executable and os.path.isfile(executable)
+            and quake_root and os.path.isdir(quake_root)
+            and game_dir and os.path.isdir(game_dir)
+        )
+
+    def execute(self, context):
+        obj = context.object
+        scene = context.scene
+        executable = _qss_abspath(scene.qss_ironwail_executable)
+        quake_root = _qss_abspath(scene.qss_quake_root)
+        game_dir = _qss_abspath(obj.get("qss_game_dir", "") or scene.qss_game_dir)
+        original_mode = context.mode
+        output_path = ""
+        lit_path = ""
+        process = None
+        try:
+            if original_mode == "EDIT_MESH":
+                bpy.ops.object.mode_set(mode="OBJECT")
+
+            mode = str(_qss_config_settings().get("export_mode", "AUTO")).upper()
+            if mode not in {"AUTO", "CLASSIC", "ENHANCED", "BOTH"}:
+                mode = "AUTO"
+            if mode == "AUTO":
+                mode = "ENHANCED" if (
+                    int(obj.get("qss_lightmap_resolution", 1)) > 1
+                    or float(getattr(scene, "qss_decoupled_world_units_per_luxel", 16.0)) < 16.0
+                    or "DECOUPLED_LM" in str(obj.get("qss_bspx_lump_names", ""))
+                ) else "CLASSIC"
+            elif mode == "BOTH":
+                mode = "ENHANCED" if bool(
+                    _qss_config_settings().get("prefer_enhanced_last_export", True)
+                ) else "CLASSIC"
+
+            test_dir = os.path.join(game_dir, "maps", "qss_preview")
+            os.makedirs(test_dir, exist_ok=True)
+            stem = f"qss_test_{time.time_ns()}"
+            output_path = os.path.join(test_dir, stem + ".bsp")
+            export_result = _export_object(obj, output_path, mode)
+            output_path = export_result[0]
+            lit_path = export_result[5]
+
+            relative = os.path.relpath(output_path, game_dir).replace(os.sep, "/")
+            command = external_tools.build_ironwail_command(
+                executable, quake_root, game_dir, map_path=relative, developer_mode=True
+            )
+            log_root = bpy.utils.user_resource(
+                "DATAFILES", path=os.path.join("qss", "ironwail_logs"), create=True
+            )
+            log_dir = os.path.join(log_root, f"Ironwail_Test_{time.strftime('%Y%m%d_%H%M%S')}")
+            os.makedirs(log_dir, exist_ok=True)
+            log_path = os.path.join(log_dir, "process_output.log")
+            process = external_tools.launch_process_handle(
+                command, cwd=log_dir, log_path=log_path
+            )
+
+            cleanup_paths = tuple(path for path in (output_path, lit_path) if path)
+            cleanup_dir = test_dir
+
+            def cleanup_test_export():
+                if process.poll() is None:
+                    return 3.0
+                for path in cleanup_paths:
+                    try:
+                        if os.path.isfile(path):
+                            os.remove(path)
+                    except OSError:
+                        pass
+                try:
+                    os.rmdir(cleanup_dir)
+                except OSError:
+                    pass
+                return None
+
+            bpy.app.timers.register(cleanup_test_export, first_interval=3.0)
+            self.report(
+                {"INFO"},
+                f"Temporary {mode} test map launched in Ironwail (PID {process.pid}); "
+                "the BSP and optional .lit are removed when Ironwail exits.",
+            )
+            return {"FINISHED"}
+        except Exception as exc:
+            for path in (output_path, lit_path):
+                try:
+                    if path and os.path.isfile(path):
+                        os.remove(path)
+                except OSError:
+                    pass
+            self.report({"ERROR"}, f"Could not test map in Ironwail: {exc}")
+            return {"CANCELLED"}
+        finally:
+            if original_mode == "EDIT_MESH" and getattr(obj, "mode", "") == "OBJECT":
+                try:
+                    bpy.ops.object.mode_set(mode="EDIT")
+                except Exception as exc:
+                    self.report({"WARNING"}, f"Map was exported, but Edit Mode could not be restored: {exc}")
+
+
+
 
 class QSS_PT_main(Panel):
     bl_label = "Quake Surface Studio"
@@ -8511,7 +8809,19 @@ class QSS_PT_project(Panel):
         export_row = row.row(align=True)
         export_row.enabled = _qss_is_map_object(obj) and context.mode == "OBJECT"
         export_row.operator(QSS_OT_export_bsp.bl_idname, text="Export BSP", icon="EXPORT")
-        launch = layout.row()
+        launch = layout.row(align=True)
+        test_button = launch.row(align=True)
+        test_button.enabled = bool(
+            _qss_is_map_object(obj)
+            and context.mode in {"OBJECT", "EDIT_MESH"}
+            and scene.qss_quake_root and os.path.isdir(_qss_abspath(scene.qss_quake_root))
+            and scene.qss_ironwail_executable
+            and os.path.isfile(_qss_abspath(scene.qss_ironwail_executable))
+            and scene.qss_game_dir and os.path.isdir(_qss_abspath(scene.qss_game_dir))
+        )
+        test_button.operator(
+            QSS_OT_test_in_ironwail.bl_idname, text="Test in Ironwail", icon="PLAY"
+        )
         last_path = _qss_last_export_path(obj)
         launch_game_dir = _qss_abspath(obj.get("qss_game_dir", "") or scene.qss_game_dir or "") if _qss_is_map_object(obj) else ""
         launch_inside_game = False
@@ -8521,12 +8831,17 @@ class QSS_PT_project(Panel):
                 launch_inside_game = relative_export != os.pardir and not relative_export.startswith(os.pardir + os.sep)
             except ValueError:
                 launch_inside_game = False
-        launch.enabled = bool(_qss_is_map_object(obj) and last_path and os.path.isfile(last_path)
-                               and launch_inside_game and scene.qss_quake_root
-                               and os.path.isdir(_qss_abspath(scene.qss_quake_root))
-                               and scene.qss_ironwail_executable
-                               and os.path.isfile(_qss_abspath(scene.qss_ironwail_executable)))
-        launch.operator(QSS_OT_open_last_export.bl_idname, text="Open Last Export in Ironwail", icon="PLAY")
+        last_export_button = launch.row(align=True)
+        last_export_button.enabled = bool(
+            _qss_is_map_object(obj) and last_path and os.path.isfile(last_path)
+            and launch_inside_game and scene.qss_quake_root
+            and os.path.isdir(_qss_abspath(scene.qss_quake_root))
+            and scene.qss_ironwail_executable
+            and os.path.isfile(_qss_abspath(scene.qss_ironwail_executable))
+        )
+        last_export_button.operator(
+            QSS_OT_open_last_export.bl_idname, text="Last Export", icon="FILE_FOLDER"
+        )
         maps = _qss_scene_map_collections(scene)
         if maps:
             layout.separator()
@@ -8601,25 +8916,33 @@ class QSS_PT_lighting(Panel):
             depress=(_qss_is_texture_paint_context(context) and is_lightmap_paint),
         )
 
-        # A small source/paint matrix keeps all four display layers together.
+        # Three explicit fixed-width columns keep labels and checkboxes aligned.
         table = layout.box()
         header = table.row(align=True)
-        header.label(text="")
-        header.label(text="Painted")
-        header.label(text="Source")
+        header_split = header.split(factor=0.50, align=True)
+        header_split.label(text="")
+        header_columns = header_split.row(align=True)
+        header_columns.alignment = "CENTER"
+        header_columns.label(text="Painted")
+        header_columns.label(text="Source")
 
+        can_toggle_layers = context.mode in {"OBJECT", "EDIT_MESH"}
         texture_row = table.row(align=True)
-        texture_row.label(text="Textures")
-        painted_texture = texture_row.row(align=True)
-        painted_texture.enabled = context.mode == "OBJECT" and _qss_has_painted_texture_faces(obj)
+        texture_split = texture_row.split(factor=0.50, align=True)
+        texture_split.label(text="Textures")
+        texture_columns = texture_split.row(align=True)
+        painted_texture = texture_columns.row(align=True)
+        painted_texture.alignment = "CENTER"
+        painted_texture.enabled = can_toggle_layers and _qss_has_painted_texture_faces(obj)
         painted_texture.operator(
             QSS_OT_toggle_painted_textures.bl_idname,
             text="",
             icon="CHECKBOX_HLT" if bool(obj.get("qss_painted_textures_enabled", True)) else "CHECKBOX_DEHLT",
             depress=bool(obj.get("qss_painted_textures_enabled", True)),
         )
-        source_texture = texture_row.row(align=True)
-        source_texture.enabled = context.mode == "OBJECT"
+        source_texture = texture_columns.row(align=True)
+        source_texture.alignment = "CENTER"
+        source_texture.enabled = can_toggle_layers
         source_texture.operator(
             QSS_OT_toggle_textures.bl_idname,
             text="",
@@ -8628,15 +8951,18 @@ class QSS_PT_lighting(Panel):
         )
 
         lightmap_row = table.row(align=True)
-        lightmap_row.label(text="Lightmaps")
-        painted_lightmap = lightmap_row.row(align=True)
+        lightmap_split = lightmap_row.split(factor=0.50, align=True)
+        lightmap_split.label(text="Lightmaps")
+        lightmap_columns = lightmap_split.row(align=True)
         mode_has_paint = (
             bool(obj.get("qss_painted_original_lightmap", "")) if mode == "source"
             else bool(obj.get("qss_painted_baked_lightmap", "")) if mode == "baked"
             else False
         )
+        painted_lightmap = lightmap_columns.row(align=True)
+        painted_lightmap.alignment = "CENTER"
         painted_lightmap.enabled = (
-            context.mode == "OBJECT" and mode in {"source", "baked"} and mode_has_paint
+            can_toggle_layers and mode in {"source", "baked"} and mode_has_paint
         )
         painted_lightmap.operator(
             QSS_OT_toggle_painted_lightmaps.bl_idname,
@@ -8644,8 +8970,9 @@ class QSS_PT_lighting(Panel):
             icon="CHECKBOX_HLT" if bool(obj.get("qss_painted_lightmaps_enabled", True)) else "CHECKBOX_DEHLT",
             depress=bool(obj.get("qss_painted_lightmaps_enabled", True)),
         )
-        source_lightmap = lightmap_row.row(align=True)
-        source_lightmap.enabled = context.mode == "OBJECT" and mode in {"source", "baked"}
+        source_lightmap = lightmap_columns.row(align=True)
+        source_lightmap.alignment = "CENTER"
+        source_lightmap.enabled = can_toggle_layers and mode in {"source", "baked"}
         source_lightmap.operator(
             QSS_OT_toggle_source_lightmaps.bl_idname,
             text="",
@@ -8740,13 +9067,13 @@ class QSS_PT_stats(Panel):
 CLASSES = (
     QSS_OT_confirm_import, QSS_OT_import_bsp, QSS_OT_browse_game_maps, QSS_OT_validate_bsp_export,
     QSS_OT_scan_game_maps, QSS_OT_run_python_tests, QSS_OT_run_map_audit,
-    QSS_OT_launch_ironwail, QSS_OT_open_last_export, QSS_OT_open_config_text,
+    QSS_OT_launch_ironwail, QSS_OT_open_last_export, QSS_OT_test_in_ironwail, QSS_OT_open_config_text,
     QSS_OT_settings, QSS_OT_change_lightmap_resolution, QSS_OT_set_lighting_mode,
     QSS_OT_toggle_textures, QSS_OT_toggle_source_lightmaps,
     QSS_OT_toggle_painted_textures, QSS_OT_toggle_painted_lightmaps,
     QSS_OT_generate_decoupled_lightmaps, QSS_OT_detach_faces,
     QSS_OT_activate_paint, QSS_OT_activate_lightmap_paint,
-    QSS_OT_frame_selection, QSS_OT_focus_clip_watch, QSS_OT_isolate_faces, QSS_OT_reveal_faces,
+    QSS_OT_camera_transition, QSS_OT_frame_selection, QSS_OT_focus_clip_watch, QSS_OT_isolate_faces, QSS_OT_reveal_faces,
     QSS_OT_optimize_clipping, QSS_OT_player_start, QSS_OT_fps_walk,
     QSS_OT_preview_imported_lights, QSS_OT_preview_source_lightmaps,
     QSS_OT_preview_bsp_lightmaps, QSS_OT_quake_direct_bake,
@@ -8848,6 +9175,12 @@ def _unregister_qss_classes():
 
 def _cleanup_previous_registration():
     _qss_restore_focus_clip_session()
+    for session in tuple(_qss_camera_transition_sessions.values()):
+        try:
+            session._finish()
+        except Exception:
+            pass
+    _qss_camera_transition_sessions.clear()
     for session in tuple(_qss_focus_transition_sessions.values()):
         try:
             session._finish_modal(bpy.context, restore_clip=True)
