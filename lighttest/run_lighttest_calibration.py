@@ -479,7 +479,7 @@ def sample_compiled_bsp(bsp_path: Path, lights: list[dict[str, Any]], variant: s
                         "radius": radius,
                         "direction": direction_name,
                         "distance": f"{distance:.6f}",
-                        "x": f"{x:.3f}", "y": f"{y:.3f}", "z": f"{floor_z:.3f}",
+                        "x": f"{x:.3f}", "y": f"{y:.3f}", "z": f"{actual_z:.3f}",
                         "sample_z": "" if not meta else f"{meta.get('sample_z', '')}",
                         "luxel": "" if value is None else f"{value:.4f}",
                         "ericw_attenuation": "" if predicted == "" else f"{predicted:.6f}",
