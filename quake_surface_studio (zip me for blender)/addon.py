@@ -5327,12 +5327,10 @@ class QSS_OT_generate_decoupled_lightmaps(Operator, ImportHelper):
                 )
 
             source_root, extension = os.path.splitext(source_path)
-            artifact_dir = _qss_map_artifact_dir(context.object, create=True) if _qss_is_map_object(context.object) and os.path.abspath(source_path) == os.path.abspath(_qss_abspath(context.object.get('qss_source_path', ''))) else os.path.join(os.path.dirname(source_path), "##slipgate", os.path.splitext(os.path.basename(source_path))[0])
-            os.makedirs(artifact_dir, exist_ok=True)
-            candidate = os.path.join(artifact_dir, os.path.basename(source_root) + "_decoupled" + extension)
+            candidate = source_root + "_decoupled" + extension
             suffix = 1
             while os.path.exists(candidate):
-                candidate = os.path.join(artifact_dir, f"{os.path.basename(source_root)}_decoupled_{suffix:03d}{extension}")
+                candidate = f"{source_root}_decoupled_{suffix:03d}{extension}"
                 suffix += 1
             output_path = candidate
             output_lit = os.path.splitext(output_path)[0] + ".lit"
@@ -8620,13 +8618,8 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
         mode = str(_qss_config_settings().get("export_mode", "AUTO")).upper()
         self.lightmap_export_mode = mode if mode in {"AUTO", "CLASSIC", "ENHANCED", "BOTH"} else "AUTO"
         if source:
-            stem = os.path.splitext(os.path.basename(source))[0] or "map"
-            try:
-                self.filepath = _qss_map_artifact_path(obj, stem + "_surface_studio.bsp", create=True)
-            except Exception as exc:
-                self.report({'WARNING'}, f"Could not prepare per-map artifact folder; using source directory: {exc}")
-                root, ext = os.path.splitext(source)
-                self.filepath = root + "_surface_studio" + (ext or ".bsp")
+            root, ext = os.path.splitext(source)
+            self.filepath = root + "_surface_studio" + (ext or ".bsp")
         return ExportHelper.invoke(self, context, event)
 
     def draw(self, context):
@@ -9729,7 +9722,7 @@ class QSS_OT_convert_quake_palette(Operator):
             "render" if image.name == "Render Result" else image.name
         ) or "texture"
         try:
-            self.output_filepath = _qss_map_artifact_path(context.object, stem + "_quake.png", create=True)
+            self.output_filepath = _qss_map_artifact_path(context.object, stem + "_quake.png", create=False)
         except Exception:
             self.output_filepath = bpy.path.abspath(f"//{stem}_quake.png")
         context.window_manager.fileselect_add(self)
@@ -9773,6 +9766,7 @@ class QSS_OT_convert_quake_palette(Operator):
         render_temp_dir = ""
         mask_image = None
         try:
+            os.makedirs(os.path.dirname(output_path) or os.getcwd(), exist_ok=True)
             palette_bytes, palette_origin = bsp.find_quake_palette(
                 str(obj.get("qss_game_dir", "") or ""),
                 str(obj.get("qss_palette_file", "") or ""),
