@@ -39,6 +39,7 @@
 - Main implementation: `quake_surface_studio (zip me for blender)/addon.py`; Quake lighting helpers: `lighting.py`; tests: `tests/`.
 - Latest UI/import implementation commit: `7da60b98f1fc2596ae6db60b82131b0f617c97c5`. Displayed version constant commit: `ef50f5f37f07d3a2b1b152a7ad42e17426c09891`. Version metadata commit: `ef332c0e071de9d74875a6915e425057fa381be1`. README commit: `41c7837aa4f386c773e678256b6f533d7ef2d17f`.
 - Slipgate 0.20.6 install artifact: `Quake-Surface-Studio-v0.20.6-Blender-Install`, artifact ID `13761780232`, SHA-256 `a8aae3a77a5bd505a0a0297927809de585099dce64852c720a797395461a4bc7`; GitHub Actions run 621.
+- Slipgate 0.20.7 install artifact: `Quake-Surface-Studio-v0.20.7-Blender-Install`, artifact ID `13765434151`, SHA-256 `ad43ea1a31f66e4448efb4fff69c1415315500e7ee58f43922bf329f177fb749`; GitHub Actions run 633.
 - Blender install artifact: `Quake-Surface-Studio-v0.20.5-Blender-Install`, artifact ID `13757062978`, SHA-256 `1b8298070a36322f2c304b81d76d9bd122b74b0468adbb7f364e0d5bccc4f0b7`. GitHub Actions run 616. Artifact expires 2027-02-08.
 - Package folder and internal identifiers remain `quake_surface_studio` / QSS for compatibility; visible branding is Slipgate.
 - Target interactive environment: Blender 5.2. Target engine includes Ironwail.
@@ -15300,7 +15301,7 @@ The 0.20.5 ZIP was downloaded from GitHub Actions and its contents and SHA-256 v
 - Kept Blender's native layout.template_palette widget. It calculates swatch columns from available UI width and draws square swatches, so it is the robust option for responsive sidebar resizing. No custom swatch grid or arbitrary button background colors were introduced.
 - ADDON_VERSION and bl_info both bumped to 0.20.7.
 - Implementation commit 7da60b98f1fc2596ae6db60b82131b0f617c97c5; metadata commit ef332c0e071de9d74875a6915e425057fa381be1; display version commit ef50f5f37f07d3a2b1b152a7ad42e17426c09891.
-- QSS Python CI run 631 and converter GUI run 79 pending at time of note.
+- QSS Python CI run 633 passed; converter GUI run 80 passed. Install artifact `Quake-Surface-Studio-v0.20.7-Blender-Install`, artifact ID `13765434151`, SHA-256 `ad43ea1a31f66e4448efb4fff69c1415315500e7ee58f43922bf329f177fb749` (GitHub Actions run 633; expires 2027-02-08). Downloaded ZIP verified with `zipfile.testzip()` and all Python files passed `compileall`.
 
 ### Blender UI color limitations
 - Blender's ordinary UILayout.operator controls do not expose arbitrary per-button background colors. UI colors come from the user's Blender theme. Buttons can still use icons, depressed/active state, enabled state, alert state, and layout grouping. Custom icons can be supplied via preview collections but do not recolor the button background.
