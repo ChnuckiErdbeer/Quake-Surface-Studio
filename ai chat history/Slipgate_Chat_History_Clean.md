@@ -15373,3 +15373,45 @@ The user said the six-delay/three-intensity calibration map was already built an
 - XR Mesh Tools is an existing Blender extension with controller mesh/material/UV editing, useful as a reference but not the requested Quake face-local texture spray workflow.
 - Proposed Slipgate prototype: controller pose tracking, raycast to BSP face, hit-to-face-local-UV mapping, spray/noise stamps while trigger is held; off-hand controller for palette/size/flow/undo. Reuse QSS face-local paint images, UVs, Quake palette and export pipeline. No VR code implemented.
 
+
+
+## 2026-11-10 — Calibration results received and archive continuity checkpoint
+
+### User-run calibration and repository upload
+- User ran the calibration runner directly from `~/Quake-Surface-Studio/lighttest/` with:
+  `python3 run_lighttest_calibration.py --compile --tools-dir "/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-alpha11-Linux"`.
+- Both variants compiled successfully through QBSP, VIS and LIGHT:
+  - `attenuation_only` (`_anglescale 0`)
+  - `angle_default` (`_anglescale 0.5`)
+- Results directory: `lighttest/results_20261110_155139/`.
+- Each CSV has 594 sample rows plus header. Uploaded-results CSV blob SHAs at this checkpoint:
+  - attenuation_only: `653342925c7c45f9b33339b52b1cf07f7a483a7b`
+  - angle_default: `21b80026c1a94840678cc300d2cf0cd38e97c6d5`
+- Reported missing samples: 27/594 attenuation_only; 30/594 angle_default. Both variants report zero switchable styles. The original source MAP/BSP were not modified by the runner. The direct terminal run did not itself commit or push; user subsequently uploaded the results folder to the branch.
+- The corrected sampler finds upward-facing floor faces, checks projected face coverage, applies BSP face-side plane sign correctly, derives receiver floor Z, then samples the corresponding lightmap luxels. This was a code correction after the first run had reported all 594 samples missing due to sampler logic, not a compiler failure.
+- Sampler/README/CSV reporting fixes were committed as `e652ccf`, `b698e2a` and `df47957` respectively. These patches were not independently run by the assistant against the user's actual BSP; the user's subsequent successful result CSVs are the available real-run evidence.
+- Blender Text Editor launcher `lighttest/run_calibration_in_blender.py` was added in commit `7dd50d1154f73a41890ef294ea587ac97bb9857d`; README launcher instructions were committed as `4aea70de6a4f54ac44879db2aa23a44f6b0b86b4`. User reported that running it in Blender appeared to do nothing. A later direct Terminal run succeeded. Do not claim the launcher was verified in Blender; it has not been.
+
+### Results analysis from uploaded CSVs
+- Values below are raw BSP lightmap luxel bytes at the centre sample, listed as `attenuation_only / angle_default`:
+  - delay 0: light 50 = 13/13; 300 = 138/138; 900 = 255/255.
+  - delay 1: light 50 = 139/139; 300 = 255/255; 900 = 255/255.
+  - delay 2: light 50 = 255/255; 300 = 255/255; 900 = 254/254.
+  - delay 3: light 50 = 25/25; 300 = 150/150; 900 = 254/254.
+  - delay 4: light 50 = 25/25; 300 = 150/150; 900 = 255/255.
+  - delay 5: light 50 = 17/17; 300 = 107/107; 900 = 255/255.
+- In the attenuation-only variant, delay 3 is constant across distance at the tested receiver points; delay 4 is also constant where luxels exist, consistent with local minlight behavior. Delays 0, 1, 2 and 5 show distance-dependent attenuation.
+- In angle_default, the incidence-angle factor changes off-centre samples for delays 0, 1, 2, 3 and 5. Delay 4 samples are unchanged by the angle setting, consistent with the local-minimum-light path.
+- ericw-tools alpha11 source inspection established a default `rangescale=0.5`, even if worldspawn does not explicitly set `_range`. Therefore compare formula output to BSP byte luxels after the default half-scale and output clamp; do not compare the unscaled formula directly to the byte values.
+- Missing rows: delay 0 / light 50 accounts for 19 missing samples in both variants; delay 0 / light 300 accounts for 3; delay 4 / light 300 accounts for 5 north-side samples in both variants; angle_default additionally has 3 missing delay 5 / light 50 samples. The dark delay-0/delay-5 cases may legitimately have no allocated lightmap at fully dark receiver faces. The delay-4/light-300 north-side faces are an unresolved allocation/geometry anomaly: faces 3930 and 3935 have valid 15x15 dimensions but `lightofs=-1` and no active styles, so no lightmap was allocated there.
+- User specifically reported that the receiver surfaces around delay-4 lights 300 and 900 look completely white in Ironwail. The sampled bytes are 150 for delay4/light300 and 255 (clamped) for delay4/light900. Do not claim this fully explains the rendered white appearance: byte-to-display conversion, engine lightmap handling, gamma/overbright, texture color and final shading still need to be separated.
+- The uploaded measurements are useful for fitting attenuation and surface-angle behavior, but missing samples and saturation limit what can be inferred at the high-light end. The assistant has read the two uploaded CSVs; it has not run QBSP, Blender or Ironwail locally.
+
+### Archive continuity request
+- User explicitly asked the next session to read this chatlog before continuing and noted that the log has gaps. This entry records the calibration work that followed the earlier harness-preparation entry, so future sessions do not mistake the old end-of-file for the latest state.
+- User reiterates the importance of preserving project history and not allowing further gaps. Continue appending substantive project exchanges chronologically, preserve exact user reports/commands where available, and verify every GitHub archive write.
+
+### Current continuation point
+- The branch head at this checkpoint is `e1b19cd036d55c6147105fdf1779816ae8a660f0` (user upload commit, message: “uploaded new lighttest results”).
+- Latest add-on release remains Slipgate 0.20.7. No add-on source changes or lighting calibration coefficients have been made based on these results yet.
+- Next engineering step, when requested, is to use the measured delay curves to compare/fix Slipgate's Quake Direct CPU solver and then separately calibrate Blender Live Lights and Cycles bake. Preserve the existing solver and all add-on features unless the user approves a change. Treat the delay-4 white appearance and missing north-side luxels as open questions rather than settled diagnoses.
