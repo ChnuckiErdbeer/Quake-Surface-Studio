@@ -13,6 +13,22 @@ class TextureExportHelperTests(unittest.TestCase):
         self.assertEqual(texture_export.quake_texture_dimension(520), 512)
         self.assertEqual(texture_export.quake_texture_dimension(2), 8)
 
+    def test_face_local_padded_dimensions_do_not_stretch_source_texels(self):
+        # A 65-texel source span padded to 72 pixels keeps its original
+        # texinfo axis unchanged; only a span beyond 512 is resampled.
+        projection = (2, 0, 0, 16, 0, 4, 0, 8)
+        padded = texture_export.face_local_texinfo_projection(
+            projection, (10, 5, 65, 33), (72, 40)
+        )
+        self.assertEqual(padded, (2, 0, 0, 6, 0, 4, 0, 3))
+        scaled = texture_export.face_local_texinfo_projection(
+            projection, (10, 5, 600, 520), (512, 512)
+        )
+        self.assertAlmostEqual(scaled[0], 2 * 512 / 600)
+        self.assertAlmostEqual(scaled[3], 6 * 512 / 600)
+        self.assertAlmostEqual(scaled[5], 4 * 512 / 520)
+        self.assertAlmostEqual(scaled[7], 3 * 512 / 520)
+
     def test_allocates_contiguous_indices_for_multiple_images(self):
         entries = ["source-a", "source-b"]
         indices = {}
