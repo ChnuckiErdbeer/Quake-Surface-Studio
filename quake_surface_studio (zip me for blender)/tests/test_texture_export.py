@@ -29,6 +29,14 @@ class TextureExportHelperTests(unittest.TestCase):
         self.assertAlmostEqual(scaled[5], 4 * 512 / 520)
         self.assertAlmostEqual(scaled[7], 3 * 512 / 520)
 
+    def test_face_local_projection_accepts_full_bsp29_texinfo_record(self):
+        # dtexinfo_t has eight projection floats plus miptex and flags.
+        record = (2, 0, 0, 16, 0, 4, 0, 8, 12, 3)
+        result = texture_export.face_local_texinfo_projection(
+            record, (10, 5, 65, 33), (72, 40)
+        )
+        self.assertEqual(result, (2, 0, 0, 6, 0, 4, 0, 3))
+
     def test_allocates_contiguous_indices_for_multiple_images(self):
         entries = ["source-a", "source-b"]
         indices = {}
