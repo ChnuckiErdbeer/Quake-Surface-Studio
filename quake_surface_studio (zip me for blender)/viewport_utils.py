@@ -91,3 +91,14 @@ def face_normal_toward_view(normal, camera_side):
         raise ValueError("Face normal and camera side must be finite.")
     dot = sum(a * b for a, b in zip(normal, camera_side))
     return tuple(-value for value in normal) if dot < 0.0 else normal
+
+
+def viewport_lens_from_fov(fov_degrees, sensor_width=32.0):
+    """Convert horizontal viewport FOV to Blender's SpaceView3D focal length."""
+    fov = float(fov_degrees)
+    sensor = float(sensor_width)
+    if not math.isfinite(fov) or not 10.0 <= fov <= 150.0:
+        raise ValueError("Viewport FOV must be between 10 and 150 degrees.")
+    if not math.isfinite(sensor) or sensor <= 0.0:
+        raise ValueError("Viewport sensor width must be a positive finite number.")
+    return sensor / (2.0 * math.tan(math.radians(fov) * 0.5))
