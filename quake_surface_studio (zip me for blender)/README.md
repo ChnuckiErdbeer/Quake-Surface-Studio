@@ -1,11 +1,19 @@
-# Slipgate 0.20.5
+# Slipgate 0.20.6
 
-## 0.20.5 — Restore the compact header controls
+## 0.20.6 — Multi-map viewport overlays and Edit Mode lighting controls
 
-- Restores the original compact root-panel header: visible add-on version, cogwheel for the existing Settings dialog, and Text icon for opening the existing `config.json` in Blender's Text Editor in a separate window.
-- The settings and config editor operators were retained in 0.20.4; this release restores their visible entry points. No existing settings, tools, panels or workflows are removed.
+- Fixes the per-3D-View overlay watcher lifecycle: when another BSP is imported or activated, the existing watcher now retargets to that map instead of remaining bound to the first map. This prevents Blender's face-fill overlay from reappearing on subsequent maps.
+- While a QSS map is active, the watcher hides the viewport floor grid; when the active object is no longer a QSS map, the original face-fill and floor-grid settings are restored.
+- Lighting preview modes (Original, Eevee, Cycles, Baked) can now be switched in Object and Edit Mode. They remain unavailable in Texture Paint mode. Baked remains disabled until a baked lightmap exists.
+- No existing controls, panels or workflows have been removed.
+
+### Validation notes
+
+- The overlay watcher and lighting-mode changes require interactive testing in Blender 5.2, especially importing a second BSP in the same 3D View, switching to a non-QSS object, and entering/exiting Edit and Texture Paint modes.
+- Lighting calibration against the user's planned delay test map remains a separate follow-up. Do not tune energy constants without the reference BSP/lightmap and corresponding source map.
 
 ---
+
 
 
 ## 0.20.2 — Material-zone BSP texture export and lighting safeguards
