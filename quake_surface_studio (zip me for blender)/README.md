@@ -1,30 +1,29 @@
-# Slipgate 0.20.3
+# Slipgate 0.20.4
 
-## 0.20.3 — BSP export colour correctness, face normals and Quick Actions
+## 0.20.4 — Bake edge coverage, delay-aware live lights and per-map artifacts
 
-### BSP texture export
-- The export image reader now distinguishes Blender byte-backed images from float buffers. Byte-backed sRGB texels are preserved as encoded colour codes; float buffers are converted from scene-linear values to sRGB before Quake palette quantization.
-- This prevents a second sRGB encoding pass from brightening edited textures when the exported BSP is viewed in Ironwail.
+### Cycles bake edges
+- Cycles bake margin is now derived from the active map's packed atlas gutter and working resolution. Blender's `EXTEND` margin mode copies baked edge texels into the reserved gutter, reducing unbaked black seams at lightmap island boundaries.
+- The bake margin and margin type are restored with the rest of the user's bake settings after success or failure. The actual Blender 5.2 bake still needs in-scene verification.
 
-### Imported face normals and light baking
-- BSP import now compares each face's vertex winding with its oriented plane normal and the dface side flag, including the optional Z-axis reflection. Faces whose mesh winding disagrees are reversed consistently before mesh creation, preserving texture UV correspondence.
-- This targets a possible reason Cycles may illuminate only a subset of surfaces. It requires a fresh BSP re-import to affect existing Blender scenes and still needs the user's Blender 5.2 bake verification.
-- The Cycles bake report now includes how many faces and raw luxels received nonzero illumination. Lighting Diagnostics continues to include per-face atlas sample statistics.
+### Quake delay-aware Live Lights
+- Imported point/spot lights now receive delay-aware energy, cutoff and soft-source calibration instead of sharing one unqualified native inverse-square setup.
+- Delay 2 maps to Blender's inverse-square attenuation with a calibrated reference distance. Delay 0, 1 and 5 use explicitly labelled native-light approximations.
+- Delay 3 (constant) and delay 4 (local minlight clamp) remain native-light fallbacks: standard Blender point/spot lights cannot represent a constant field or Quake's per-surface minlight max operation. The Quake Direct CPU solver remains the path for the exact six static attenuation equations, including hard visibility rays.
+- This is a preview approximation, not a claim of full compiler parity. Native shadowing, animated styles, bounce and other compiler-only behavior remain separate limitations.
 
-### Lighting
-- Source-match normalization remains an atlas-only operation; it no longer raises imported live-light energy. The separate Auto-calibrate Live Lights to Source action still intentionally measures and stores a manual live-light multiplier.
-- Bake-success bookkeeping no longer references the removed lamp-calibration variable.
-- Eevee's faster apparent falloff is recorded as an outstanding engine-preview tuning issue; no unverified light-radius multiplier has been added.
+### Generated artifacts
+- Removed the manual **Create ##slipgate Folder** Quick Action. Importing a BSP does not create any output folders.
+- Non-BSP generated files such as palette-converted PNGs and saved lighting diagnostics use `<map directory>/##slipgate/<map name>/`; the folder is created only when the output is actually written.
+- BSP exports and decoupled BSP copies remain beside their source map, avoiding a change to the established game-map workflow.
 
-### Quick Actions and map folder
-- Restores the QUICK ACTIONS sidebar panel with one horizontal row for WASD, Player Start, Isolate and Focus.
-- Adds Create ##slipgate Folder, which creates a ##slipgate directory beside the currently loaded source BSP and records the resolved path on the map object.
-
-### Validation
-- Python unit tests, converter GUI tests, package assembly and Blender package installation artifact are covered by CI for this release.
-- CI does not run Blender's interactive GUI, a Cycles bake, QBSP or Ironwail. Those remain user-side validation steps.
+### Version and validation
+- Add-on version is now 0.20.4.
+- Standalone regression tests cover atlas bake-margin scaling and the delay-aware live-light calibration helper.
+- CI validates Python compilation, standalone tests and package assembly. It does not exercise Blender's interactive Cycles bake, live Eevee lighting, QBSP or Ironwail; those still need the user's Blender 5.2/engine testing.
 
 ---
+
 ## 0.20.2 — Material-zone BSP texture export and lighting safeguards
 
 ### BSP texture export
