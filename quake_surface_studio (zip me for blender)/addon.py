@@ -86,7 +86,7 @@ def _qss_map_artifact_dir(obj, create=False):
         os.makedirs(folder, exist_ok=True)
         if not os.path.isdir(folder):
             raise OSError(f"Generated-artifact path is not a directory: {folder}")
-        obj["qss_slopgate_folder"] = folder
+        obj["qss_slipgate_folder"] = folder
         _qss_log("INFO", "artifacts", f"Map artifact directory ready: {folder}")
     return folder
 
