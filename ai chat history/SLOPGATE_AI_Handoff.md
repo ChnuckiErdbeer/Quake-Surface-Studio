@@ -42,11 +42,11 @@ The archive filename and some historic headings contain the old spelling “Slip
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
 - Active branch: fix/v0.11.1-metadata-style-order-test
 - Current add-on version: **0.21.0**.
-- Exact source commit for the final 0.21.0 build: 1bd489a941996b1e6951e5e80bcb29ad55717738.
-- Successful final QSS Python workflow: run 43006423133; compileall, standalone suite, package assembly and artifact upload passed.
-- Install artifact: Quake-Surface-Studio-v0.21.0-Blender-Install, artifact ID 13847883510, 250,836 bytes, 41 ZIP entries.
-- SHA-256: 24949865ae5155702ed283ff4c8af970296bb88b225d432cf76ac050f655cf18. ZIP integrity and installable package root verified; expiry 2027-02-09.
-- GitHub artifact page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43006423133/artifacts/13847883510
+- Exact source commit for the final 0.21.0 package build: 87a1cee7dfc007b177c4b9923e7c2874777e773d (the code implementation commit is 1bd489a941996b1e6951e5e80bcb29ad55717738).
+- Successful final QSS Python workflow: run 43006568762; compileall, standalone suite, package assembly and artifact upload passed.
+- Install artifact: Quake-Surface-Studio-v0.21.0-Blender-Install, artifact ID 13847848551, 250,878 bytes, 41 ZIP entries.
+- SHA-256: 65e6bef6f391d2216ebb9c67fd8ace8e6920499161acce08c12b194b2b9f57c7. ZIP integrity and installable package root verified; expiry 2027-02-09.
+- GitHub artifact page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43006568762/artifacts/13847848551
 - Runtime validation outstanding: no Blender 5.2 GUI, actual QBSP/VIS, Cycles/Eevee render/bake, or Ironwail run.
 - Previous 0.20.9 artifact details are historical.
 - Main add-on source: quake_surface_studio (zip me for blender)/addon.py; MAP text-preserving parser/synchronizer: map_sync.py; focused tests: tests/test_map_sync.py. Direct MAP-via-QBSP import was superseded and removed in 0.21.0.
@@ -242,7 +242,7 @@ This keeps TrenchBroom authoritative for brush geometry, SLOPGATE authoritative 
 - Current supported MAP edits: linked light origin, RGB color, light magnitude, spotlight cone angle, and deletion of a linked imported light. Creating new light entities and spot direction/mangle synchronization are not yet implemented; original target and mangle keys are preserved. Painted texture pixels continue through the existing BSP texture export path. MAP WAD paths and texture references are not rewritten.
 - No geometry synchronization, QBSP rebuild, VIS, ericw light, WAD generation, or WAD search is performed. The source MAP remains unchanged.
 - The old direct Import MAP via QBSP operator and sidebar control were removed as explicitly superseded by the BSP-first companion workflow.
-- Version 0.21.0. Final QSS Python workflow 43006423133 passed compileall, standalone tests (including MAP preservation/byte-write tests), package assembly and artifact upload. The installable ZIP was downloaded and verified (41 entries, correct package root, no corrupt members; SHA-256 39bcff383f811a9f0e3906da0e8b3de2940fc04dd6b2f47e6d3da32a2ef8969e). Blender 5.2 GUI/runtime and Quake toolchain validation remain outstanding.
+- Version 0.21.0. Final QSS Python workflow 43006568762 passed compileall, standalone tests (including MAP preservation/byte-write and light-deletion tests), package assembly and artifact upload. The installable ZIP was downloaded and verified (41 entries, correct package root, no corrupt members; SHA-256 39bcff383f811a9f0e3906da0e8b3de2940fc04dd6b2f47e6d3da32a2ef8969e). Blender 5.2 GUI/runtime and Quake toolchain validation remain outstanding.
 
 ### Remaining MAP implementation boundary
 
