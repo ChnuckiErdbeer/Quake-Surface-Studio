@@ -10,7 +10,7 @@
 
 ---
 
-# Slipgate 0.20.7
+# SLOPGATE 0.20.7
 
 ## 0.20.7 — Faster BSP import entry and cursor palette
 
@@ -34,7 +34,7 @@
 ## 0.20.2 — Material-zone BSP texture export and lighting safeguards
 
 ### BSP texture export
-- Edited and newly detached textures are now quantized with Slipgate's integrated material-zone algorithm during BSP export, not the older per-pixel nearest-colour lookup.
+- Edited and newly detached textures are now quantized with SLOPGATE's integrated material-zone algorithm during BSP export, not the older per-pixel nearest-colour lookup.
 - The same five-candidate-ramp material-zone conversion is applied independently to all four mip levels.
 - `{` texture alpha is encoded as Quake index 255; ordinary textures do not become transparent because of incidental Blender alpha.
 - Fullbright masks are recovered from the original indexed miptex when the image dimensions match, or from a sibling `*_fullbrights.png` mask for loose source images.
@@ -562,8 +562,8 @@ The longer-term direction is a dedicated **Quake Studio** workspace with a large
 ## Install
 
 1. Install `quake_surface_studio_0.10.0.zip` through Blender **Edit → Preferences → Add-ons / Get Extensions → Install from Disk** (wording varies by Blender version).
-2. Enable **Slipgate**.
-3. In a 3D View, press `N` and open the **Slipgate** sidebar tab.
+2. Enable **SLOPGATE**.
+3. In a 3D View, press `N` and open the **SLOPGATE** sidebar tab.
 4. Set the Quake game directory (the folder containing `id1`, or `id1` itself) and import a `.bsp` file.
 5. For a normal Quake BSP leave **Invert Z axis** unchecked. The default scale is 0.0254 metres per Quake unit.
 
