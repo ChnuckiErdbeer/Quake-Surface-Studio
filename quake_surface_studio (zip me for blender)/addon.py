@@ -24,7 +24,7 @@ from bpy.props import StringProperty, FloatProperty, FloatVectorProperty, BoolPr
 from bpy.types import Operator, Panel, Menu
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
-from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils
+from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils, map_sync
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils
 
 
@@ -81,12 +81,12 @@ def _qss_map_artifact_dir(obj, create=False):
         raise bsp.BSPError(f"The source map directory does not exist: {map_directory}")
     stem = os.path.splitext(os.path.basename(source))[0] or "Map"
     clean_stem = bpy.path.clean_name(stem) or "Map"
-    folder = os.path.join(map_directory, "##slipgate", clean_stem)
+    folder = os.path.join(map_directory, "##SLOPGATE", clean_stem)
     if create:
         os.makedirs(folder, exist_ok=True)
         if not os.path.isdir(folder):
             raise OSError(f"Generated-artifact path is not a directory: {folder}")
-        obj["qss_slipgate_folder"] = folder
+        obj["qss_slopgate_folder"] = folder
         _qss_log("INFO", "artifacts", f"Map artifact directory ready: {folder}")
     return folder
 
@@ -3120,6 +3120,7 @@ def _apply_quake_light_energy_scale(scene):
             light_obj.data.energy = 0.0
         light_obj['qss_applied_energy_scale'] = scale
         light_obj['qss_applied_energy_calibration'] = manual_calibration
+        light_obj['qss_map_sync_energy_baseline'] = float(light_obj.data.energy)
         updated += 1
     return updated
 
@@ -3146,6 +3147,23 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
     else:
         context.scene.collection.children.link(collection)
     collection['qss_entity_collection'] = True
+
+    # Link a same-basename MAP companion without invoking QBSP or resolving WADs.
+    source_map_path = map_sync.find_companion_map(obj.get("qss_source_path", ""))
+    map_entity_indices = {}
+    if source_map_path:
+        try:
+            with open(source_map_path, "r", encoding="latin1", newline="") as map_handle:
+                map_source_text = map_handle.read()
+            map_entities = map_sync.parse_map_entities(map_source_text)
+            map_entity_indices = map_sync.match_bsp_entities_to_map_entities(entities, map_entities)
+            obj["qss_source_map_path"] = os.path.abspath(source_map_path)
+            obj["qss_source_map_sha256"] = map_sync.sha256_bytes(map_source_text.encode("latin1"))
+            obj["qss_map_sync_status"] = "LINKED"
+        except Exception as map_exc:
+            obj["qss_map_sync_status"] = "UNAVAILABLE"
+            obj["qss_map_sync_error"] = str(map_exc)
+            map_entity_indices = {}
 
     # Resolve targetname origins before creating spotlights.
     targets = {}
@@ -3243,6 +3261,11 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
             obj.get('qss_manual_light_energy_calibration', 1.0)
         )
         light_obj['qss_quake_origin'] = list(origin)
+        light_obj['qss_bsp_entity_index'] = int(index)
+        if index in map_entity_indices:
+            light_obj['qss_map_entity_index'] = int(map_entity_indices[index])
+            light_obj['qss_map_entity_linked'] = True
+        light_obj['qss_map_sync_energy_baseline'] = float(light_data.energy)
         light_obj['qss_quake_range'] = float(range_qu)
         light_obj['qss_quake_wait'] = float(wait)
         light_obj['qss_quake_falloff'] = float(falloff)
@@ -3277,6 +3300,10 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
         if hasattr(sun_data, 'angle'):
             sun_data.angle = math.radians(max(0.0, min(90.0, penumbra)))
         sun_obj['qss_light_role'] = 'quake_world_sunlight'
+        if 0 in map_entity_indices:
+            sun_obj['qss_map_entity_index'] = int(map_entity_indices[0])
+            sun_obj['qss_map_entity_linked'] = True
+        sun_obj['qss_map_sync_energy_baseline'] = float(sun_data.energy)
         sun_obj['qss_quake_light_value'] = float(sun_value)
         sun_obj['qss_manual_energy_calibration'] = float(
             obj.get('qss_manual_light_energy_calibration', 1.0)
@@ -4429,142 +4456,6 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
         except Exception as exc:
             _report(self, 'ERROR', str(exc))
             return {'CANCELLED'}
-
-
-class QSS_OT_import_map(Operator, ImportHelper):
-    bl_idname = "qss.import_map"
-    bl_label = "Import Quake MAP"
-    bl_description = "Compile a MAP file to a separate working BSP with ericw QBSP, then use the existing BSP importer"
-    filename_ext = ".map"
-    filter_glob: StringProperty(default="*.map", options={'HIDDEN'})
-    game_dir: StringProperty(name="Quake game directory", subtype='DIR_PATH', default="", options={'HIDDEN'})
-    unit_scale: FloatProperty(
-        name="Quake unit scale", description="Blender metres per Quake map unit",
-        default=DEFAULT_QUAKE_UNIT_SCALE, min=0.0001, max=10.0, precision=5, options={'HIDDEN'}
-    )
-    lightmap_resolution: EnumProperty(
-        name="Working lightmap resolution",
-        items=(('1', '1× · Original', 'Original packed atlas resolution'),
-               ('2', '2×', 'Twice the pixels per axis'),
-               ('4', '4×', 'Four times the pixels per axis'),
-               ('8', '8×', 'Eight times the pixels per axis')),
-        default='1', options={'HIDDEN'}
-    )
-
-    def invoke(self, context, event):
-        scene = context.scene
-        self.game_dir = _qss_abspath(getattr(scene, "qss_game_dir", "") or "")
-        self.unit_scale = float(getattr(scene, "qss_quake_unit_scale", DEFAULT_QUAKE_UNIT_SCALE))
-        self.lightmap_resolution = getattr(scene, "qss_import_lightmap_resolution", "1")
-        game_dir = self.game_dir
-        maps_dir = os.path.join(game_dir, "maps") if game_dir else ""
-        start_dir = maps_dir if maps_dir and os.path.isdir(maps_dir) else game_dir
-        if start_dir and os.path.isdir(start_dir):
-            self.filepath = os.path.join(start_dir, "")
-        return ImportHelper.invoke(self, context, event)
-
-    def draw(self, context):
-        layout = self.layout
-        layout.label(text="Requires the configured ericw-tools QBSP executable.")
-        layout.label(text="QBSP only: VIS and ericw light are not run for Blender import.")
-
-    def execute(self, context):
-        source_map = bpy.path.abspath(self.filepath)
-        if not source_map or not os.path.isfile(source_map):
-            self.report({"ERROR"}, "Choose an existing .map source file.")
-            return {"CANCELLED"}
-        if os.path.splitext(source_map)[1].lower() != ".map":
-            self.report({"ERROR"}, "The selected source must have a .map extension.")
-            return {"CANCELLED"}
-
-        scene = context.scene
-        tools_dir = _qss_abspath(getattr(scene, "qss_ericw_tools_dir", "") or "")
-        qbsp = external_tools.resolve_tool(tools_dir, "qbsp")
-        if not qbsp:
-            self.report({"ERROR"}, "Configure an ericw-tools folder containing qbsp before importing a MAP file.")
-            return {"CANCELLED"}
-
-        game_dir = _qss_abspath(self.game_dir or getattr(scene, "qss_game_dir", "") or "")
-        if not game_dir or not os.path.isdir(game_dir):
-            self.report({"ERROR"}, "Select a valid Quake game/mod directory before importing a MAP file.")
-            return {"CANCELLED"}
-        quake_root = _qss_abspath(getattr(scene, "qss_quake_root", "") or "")
-        source_directory = os.path.dirname(os.path.abspath(source_map))
-
-        try:
-            cache_root = bpy.utils.user_resource(
-                "DATAFILES", path=os.path.join("qss", "map_imports"), create=True
-            )
-            if not cache_root or not os.path.isdir(cache_root):
-                raise OSError("Blender could not create the SLOPGATE MAP import cache.")
-            clean_stem = bpy.path.clean_name(os.path.splitext(os.path.basename(source_map))[0]) or "QuakeMap"
-            work_directory = tempfile.mkdtemp(prefix=f"{clean_stem}_", dir=cache_root)
-            output_bsp = os.path.join(work_directory, f"{clean_stem}.bsp")
-            command = external_tools.build_qbsp_command(
-                qbsp,
-                source_map,
-                output_bsp,
-                quake_root=quake_root,
-                game_dir=game_dir,
-                wad_paths=(source_directory, game_dir, quake_root),
-                search_paths=(source_directory, game_dir),
-            )
-            result = external_tools.run_command(
-                command[0], command[1:], timeout=1800, cwd=work_directory
-            )
-            log_path = os.path.join(work_directory, "qbsp.log")
-            try:
-                with open(log_path, "w", encoding="utf-8", errors="replace") as log_handle:
-                    log_handle.write("Command:\n" + "\n".join(command) + "\n\n")
-                    log_handle.write(result.get("stdout", "") or "")
-                    if result.get("stderr"):
-                        log_handle.write("\n[stderr]\n" + result["stderr"])
-            except OSError as log_exc:
-                print(f"SLOPGATE: could not write QBSP log: {log_exc}")
-
-            if result.get("status") != "PASS":
-                detail = (result.get("stderr") or result.get("stdout") or "QBSP failed without diagnostic output.")
-                raise RuntimeError(
-                    f"QBSP did not complete successfully (status {result.get('status')}, "
-                    f"exit {result.get('returncode')}). Log: {log_path}\n{detail[-1800:]}"
-                )
-            if not os.path.isfile(output_bsp):
-                raise RuntimeError(f"QBSP reported success but did not create the expected BSP. Log: {log_path}")
-
-            # Validate the format before invoking Blender's full importer. This
-            # add-on currently accepts classic BSP29, not BSP2/2PSB.
-            bsp.BSP29.from_file(output_bsp)
-            game_map_path = ""
-            try:
-                relative_map = os.path.relpath(os.path.abspath(source_map), os.path.abspath(game_dir))
-                if relative_map != os.pardir and not relative_map.startswith(os.pardir + os.sep):
-                    game_map_path = os.path.splitext(relative_map)[0].replace(os.sep, "/") + ".bsp"
-            except ValueError:
-                pass
-
-            import_result = bpy.ops.qss.import_bsp(
-                "EXEC_DEFAULT",
-                filepath=output_bsp,
-                game_dir=game_dir,
-                game_map_path=game_map_path,
-                source_map_path=source_map,
-                unit_scale=self.unit_scale,
-                lightmap_resolution=self.lightmap_resolution,
-            )
-            if "CANCELLED" in import_result:
-                raise RuntimeError("QBSP succeeded, but the existing SLOPGATE BSP importer cancelled the import.")
-            message = (
-                f"QBSP compiled the MAP to a working BSP and passed BSP29 validation. "
-                f"VIS and ericw light were not run. Work files: {work_directory}"
-            )
-            if "RUNNING_MODAL" in import_result:
-                message = "QBSP compiled successfully; choose Add or Replace in the open import dialog. " + message
-            self.report({"INFO"}, message[:240])
-            return {"FINISHED"}
-        except Exception as exc:
-            self.report({"ERROR"}, str(exc)[:240])
-            return {"CANCELLED"}
-
 
 
 class QSS_OT_browse_game_maps(Operator):
@@ -9044,6 +8935,102 @@ class QSS_OT_reveal_faces(Operator):
             return {'CANCELLED'}
 
 
+def _qss_map_light_updates(context, obj, source_text):
+    """Build light-only MAP updates from linked Blender light objects."""
+    entities = map_sync.parse_map_entities(source_text)
+    updates = {}
+    linked = {}
+    unit_scale = max(1e-9, abs(float(obj.get("qss_quake_unit_scale", DEFAULT_QUAKE_UNIT_SCALE))))
+    flip_z = bool(obj.get("qss_flip_z", False))
+    for light_obj in _qss_collection_objects(bpy.data.collections.get(obj.get("qss_map_collection", ""))):
+        if light_obj.type != "LIGHT" or light_obj.get("qss_light_role") not in {"quake_entity_light", "quake_world_sunlight"}:
+            continue
+        if not bool(light_obj.get("qss_map_entity_linked", False)):
+            continue
+        entity_index = int(light_obj.get("qss_map_entity_index", -1))
+        if entity_index < 0 or entity_index >= len(entities):
+            raise map_sync.MapSyncError(f"Linked light '{light_obj.name}' points to missing MAP entity {entity_index}.")
+        if entity_index in linked:
+            raise map_sync.MapSyncError(f"Multiple Blender lights are linked to MAP entity {entity_index}; refusing ambiguous export.")
+        linked[entity_index] = light_obj
+        values = entities[entity_index]["values"]
+        if not str(values.get("classname", "")).lower().startswith("light") and light_obj.get("qss_light_role") != "quake_world_sunlight":
+            raise map_sync.MapSyncError(f"Linked MAP entity {entity_index} is no longer a light entity.")
+        changed = {}
+        original_origin = light_obj.get("qss_quake_origin")
+        if original_origin is not None:
+            original_blender = _quake_to_blender_position(original_origin, unit_scale, flip_z)
+            current = tuple(float(v) for v in light_obj.location)
+            if any(abs(current[i] - original_blender[i]) > 1e-5 for i in range(3)):
+                quake = [current[i] / unit_scale for i in range(3)]
+                if flip_z:
+                    quake[2] = -quake[2]
+                changed["origin"] = " ".join(f"{v:.6g}" for v in quake)
+        original_color = light_obj.get("qss_quake_color")
+        if original_color is not None:
+            original = tuple(float(v) for v in original_color[:3])
+            current = tuple(float(v) for v in light_obj.data.color[:3])
+            if any(abs(current[i] - original[i]) > 1e-5 for i in range(3)):
+                changed["_color"] = " ".join(f"{max(0.0, min(1.0, v)):.6g}" for v in current)
+        if light_obj.get("qss_light_role") == "quake_entity_light":
+            baseline = float(light_obj.get("qss_map_sync_energy_baseline", light_obj.data.energy))
+            current_energy = max(0.0, float(light_obj.data.energy))
+            if baseline > 1e-9 and abs(current_energy - baseline) > max(1e-5, baseline * 1e-5):
+                raw = max(0.0, float(light_obj.get("qss_quake_raw_light_value", 300.0)))
+                world_range = max(1e-9, float(light_obj.get("qss_quake_world_range", 1.0)))
+                changed["light"] = f"{raw * (current_energy / baseline) / world_range:.6g}"
+            if light_obj.data.type == "SPOT":
+                original_angle = float(light_obj.get("qss_quake_spot_angle", 40.0))
+                current_angle = math.degrees(float(light_obj.data.spot_size))
+                if abs(current_angle - original_angle) > 1e-4:
+                    changed["angle"] = f"{current_angle:.6g}"
+        if changed:
+            updates[entity_index] = changed
+    return updates
+
+
+def _qss_prepare_companion_map_export(context, obj, output_bsp):
+    """Prepare a separate companion MAP, refusing stale or unowned overwrites."""
+    source_map = os.path.abspath(str(obj.get("qss_source_map_path", "") or ""))
+    if not source_map:
+        return None
+    if not os.path.isfile(source_map):
+        raise map_sync.MapSyncError(f"Linked companion MAP is missing: {source_map}")
+    with open(source_map, "r", encoding="latin1", newline="") as handle:
+        source_text = handle.read()
+    source_hash = map_sync.sha256_bytes(source_text.encode("latin1"))
+    expected_hash = str(obj.get("qss_source_map_sha256", "") or "")
+    if expected_hash and source_hash != expected_hash:
+        raise map_sync.MapSyncError("The companion MAP changed outside SLOPGATE since import. Re-import or reconcile it before exporting.")
+    output_map = os.path.splitext(os.path.abspath(output_bsp))[0] + ".map"
+    if os.path.normcase(output_map) == os.path.normcase(source_map):
+        raise map_sync.MapSyncError("Choose a different BSP output filename; the source MAP must remain untouched.")
+    if os.path.exists(output_map):
+        previous_hash = str(obj.get("qss_last_export_map_sha256", "") or "")
+        with open(output_map, "r", encoding="latin1", newline="") as handle:
+            existing_hash = map_sync.sha256_bytes(handle.read().encode("latin1"))
+        if not previous_hash or existing_hash != previous_hash:
+            raise map_sync.MapSyncError(f"Output companion exists and is not a verified prior SLOPGATE export: {output_map}")
+    updates = _qss_map_light_updates(context, obj, source_text)
+    patched = map_sync.apply_entity_changes(source_text, updates)
+    map_sync.parse_map_entities(patched["text"])
+    return {
+        "path": output_map, "text": patched["text"],
+        "sha256": map_sync.sha256_bytes(patched["text"].encode("latin1")),
+        "updated_entities": len(updates), "entity_count": patched["entity_count"],
+    }
+
+
+def _qss_commit_companion_map_export(obj, prepared):
+    if prepared is None:
+        return ""
+    map_sync.write_text_atomic(prepared["path"], prepared["text"])
+    obj["qss_last_export_map_path"] = prepared["path"]
+    obj["qss_last_export_map_sha256"] = prepared["sha256"]
+    obj["qss_map_sync_status"] = "EXPORTED"
+    return prepared["path"]
+
+
 class QSS_OT_export_bsp(Operator, ExportHelper):
     bl_idname = "qss.export_bsp"
     bl_label = "Export Modified BSP"
@@ -9091,6 +9078,7 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
             if not output:
                 raise OSError("Choose an output BSP filename.")
             os.makedirs(os.path.dirname(output) or os.getcwd(), exist_ok=True)
+            prepared_map = _qss_prepare_companion_map_export(context, obj, output)
             if mode == "BOTH":
                 root, ext = os.path.splitext(output)
                 ext = ext or ".bsp"
@@ -9122,7 +9110,10 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
                 summary = f"Exported {os.path.basename(result[0])} ({mode})"
             obj["qss_last_export_path"] = chosen
             obj["qss_last_export_mode"] = mode
+            map_output_path = _qss_commit_companion_map_export(obj, prepared_map)
             detail = ""
+            if map_output_path:
+                detail += f" | companion MAP {os.path.basename(map_output_path)} ({prepared_map['updated_entities']} light entities synced)"
             for result in results:
                 lit_path = result[5]
                 if lit_path:
@@ -10585,15 +10576,6 @@ class QSS_PT_project(Panel):
         export_row = row.row(align=True)
         export_row.enabled = _qss_is_map_object(obj) and context.mode == "OBJECT"
         export_row.operator(QSS_OT_export_bsp.bl_idname, text="Export BSP", icon="EXPORT")
-        qbsp_available = bool(
-            scene.qss_ericw_tools_dir
-            and external_tools.resolve_tool(_qss_abspath(scene.qss_ericw_tools_dir), "qbsp")
-        )
-        map_import_row = layout.row(align=True)
-        map_import_row.enabled = game_ready and qbsp_available
-        map_import_row.operator(QSS_OT_import_map.bl_idname, text="Import MAP via QBSP", icon="FILE_FOLDER")
-        if not qbsp_available:
-            layout.label(text="Set the ericw-tools folder to enable MAP import.", icon="INFO")
         launch = layout.row(align=True)
         test_button = launch.row(align=True)
         test_button.enabled = bool(
@@ -10621,6 +10603,11 @@ class QSS_PT_project(Panel):
         else:
             layout.label(text="No imported maps yet.", icon="INFO")
         if _qss_is_map_object(obj):
+            map_status = str(obj.get("qss_map_sync_status", "NO_COMPANION"))
+            if map_status in {"LINKED", "EXPORTED"}:
+                layout.label(text=f"Companion MAP: {os.path.basename(obj.get('qss_source_map_path', ''))}", icon="FILE_TEXT")
+            elif map_status == "UNAVAILABLE":
+                layout.label(text="Companion MAP could not be read; BSP workflow remains available.", icon="INFO")
             box = layout.box()
             row = box.row(align=True)
             row.label(text=f"Lightmap Resolution: {int(obj.get('qss_lightmap_resolution', 1))}×")
@@ -10875,7 +10862,7 @@ class QSS_PT_stats(Panel):
 
 
 CLASSES = (
-    QSS_OT_confirm_import, QSS_OT_import_bsp, QSS_OT_import_map, QSS_OT_browse_game_maps, QSS_OT_validate_bsp_export,
+    QSS_OT_confirm_import, QSS_OT_import_bsp, QSS_OT_browse_game_maps, QSS_OT_validate_bsp_export,
     QSS_OT_scan_game_maps, QSS_OT_run_python_tests, QSS_OT_run_map_audit,
     QSS_OT_launch_ironwail, QSS_OT_open_last_export, QSS_OT_test_in_ironwail, QSS_OT_open_config_text,
     QSS_OT_close_active_map, QSS_OT_load_quake_palette, QSS_OT_open_quake_palette,
