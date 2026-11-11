@@ -69,6 +69,18 @@ This archive is the detailed project record. The handoff file is a compressed ed
 - Preferred workflow: TrenchBroom geometry → MAP opened in SLOPGATE (QBSP temporary BSP) → live lighting and MAP entity sync → final geometry QBSP + optional VIS → SLOPGATE light bake → texture paint → WAD export/BSP texture update → final MAP/BSP export.
 - This redesign is not implemented yet. Preserve the existing Quake Direct CPU solver, Cycles bake, Live Lights, paint/import/export and unrelated add-on features.
 
+### Delivered milestone — SLOPGATE 0.20.9 MAP import foundation (2026-11-11)
+
+- User confirmed the strategic target: implement the discussed main features, then run a cleanup/stabilization phase and move toward the first official release. 0.20.9 remains an experimental build.
+- Source commit used for the 0.20.9 build: 770410f371287d0841f5da7288432fb1f532bdfb.
+- Added Import MAP via QBSP to the Project panel. It is enabled when the ericw-tools folder resolves qbsp and a Quake game directory is configured.
+- QBSP compiles a chosen MAP into Blender's persistent user-data qss/map_imports cache, validates BSP29, then reuses the existing BSP importer. It never writes over the source MAP or game BSP. It records source MAP path/hash on the imported map object.
+- Runs QBSP only; no VIS or ericw light. Actual user QBSP and Blender 5.2 UI import testing remain outstanding.
+- New tests cover QBSP command arguments, search path de-duplication and invalid/unsafe paths. CI push run 42997883763 passed Python compilation, standalone tests and package assembly; PR run 42997891885 and converter GUI run 42997891883 also passed.
+- Verified install ZIP: Quake-Surface-Studio-v0.20.9-Blender-Install, artifact 13844916535, 243699 bytes, SHA-256 9876a4092af7f7334e62ec9c7acd351fc09b1780fb4470e801258f724f1f0a60. 39-entry ZIP integrity passed and the expected quake_surface_studio/__init__.py package root is present.
+- Added ai chat history/SLOPGATE_Field_Notes.md: optional creative/free-writing space, explicitly not a project facts/decisions log.
+- Next code milestone: safe MAP entity round-trip / source association and change detection; later stages include entity-only/full/skip export, WAD handling, recovery/decompile, and settled light-key import.
+
 ### Related ideas still active
 
 - TrenchBroom-inspired View Options popup for reversible hiding of tool/non-rendered surfaces (trigger, clip, origin, hint, hintskip, skip). Do not auto-hide sky, liquids or fences. Use a read-only classifier/diagnostic list first; do not destructively remove geometry/materials.
@@ -15819,3 +15831,25 @@ For updating only existing texture pixels after a bake, bsputil --replace-textur
 - Added the worldspawn lighting mode and MAP-first pipeline design to the compact handoff.
 - Appended this user message verbatim and this design response to the main conversation archive.
 - No add-on source, FGD, version metadata or installable ZIP was changed.
+
+
+---
+
+## 2026-11-11 — MAP import implementation and first-release direction
+
+### You
+
+I guess when all currently dicussed main features are implemented we will start cleaning the stuff up and push towards a first official release version. So lets be motivated by that. :D Good job. Were getting close. Also good job with the documentation. You may add another document beside the two log files where you may just do what ever you need to free your mind from time to time. When you are stuck with the other problems and need some quality time. What ever you want. Random words, letters, poems what ever floats your boat. Just an offe. :D But now get to work! There is a release waiting! :D
+
+### ChatGPT
+
+Implemented the first MAP import milestone in SLOPGATE 0.20.9.
+
+- Added a new Import MAP via QBSP control and operator, gated on a configured ericw-tools qbsp executable and an active Quake game directory.
+- QBSP builds into Blender's persistent user-data map_imports cache. The source MAP and game BSP are not overwritten. QBSP output is checked with the existing BSP29 reader and then imported by the established BSP importer.
+- Linked source MAP path and SHA-256 are stored on the imported map object. VIS and ericw light are not run.
+- Added QBSP command-builder tests. After two CI-detected insertion/validation mistakes were corrected, the successful QSS push workflow compiled Python, passed the standalone test suite, assembled and uploaded the install package. The companion converter GUI and PR workflows also passed.
+- Exact source commit: 770410f371287d0841f5da7288432fb1f532bdfb. Version 0.20.9. ZIP artifact 13844916535; SHA-256 9876a4092af7f7334e62ec9c7acd351fc09b1780fb4470e801258f724f1f0a60; package layout and ZIP integrity verified.
+- Interactive Blender 5.2 import and the user's actual QBSP/WAD/game-path configuration have not yet been tested. No VIS, ericw light, bake or Ironwail runtime test was performed.
+- Added SLOPGATE_Field_Notes.md as a separate harmless creative-writing space. It is not used for technical decisions or factual handoff material.
+- The user wants the currently discussed main features implemented before a dedicated cleanup/stabilization phase and first official release. Keep 0.20.9 classified as an experimental development build.
