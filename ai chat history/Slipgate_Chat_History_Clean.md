@@ -15881,3 +15881,11 @@ Implemented the first MAP import milestone in SLOPGATE 0.20.9.
 - Removed the superseded direct MAP-via-QBSP operator and sidebar control.
 - Preserves MAP brush blocks, comments, unknown keys, WAD references, and texture references; no geometry rebuilding, WAD hunting, QBSP, VIS, or ericw light.
 - CI, interactive Blender 5.2 verification, and installable ZIP are still pending. Do not claim a tested release until those checks pass.
+
+
+## 2026-11-11 — SLOPGATE 0.21.0 validation and install artifact
+
+- QSS Python workflow run 43005381450 (run number 710) completed successfully on source commit ffaf071f1d05f57d3b48d4bb9afb0b0d294cd377. Compileall, standalone tests, package assembly and artifact upload all passed.
+- Downloaded install artifact 13847329207: Quake-Surface-Studio-v0.21.0-Blender-Install, 250,296 bytes, 41 entries. SHA-256 4f21d1514f81e4c363f85f8472c983b772d5ba04c2928cfab6c669e29d6cb253. ZIP integrity passed; package root includes quake_surface_studio/__init__.py and map_sync.py.
+- The direct MAP-via-QBSP import prototype is removed. BSP import now discovers a sibling MAP; export writes a separate MAP companion with supported linked-light changes. Brush source and unrelated MAP content are preserved.
+- No interactive Blender 5.2 test, actual QBSP/VIS run, Cycles/Eevee render/bake, or Ironwail launch was performed. This remains an experimental development build.
