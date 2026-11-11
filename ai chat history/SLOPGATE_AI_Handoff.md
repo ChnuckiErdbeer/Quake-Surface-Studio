@@ -145,13 +145,9 @@ All MAP-related operations are gated behind a validated ericw-tools path. Do not
 - light: optional ericw lightmap compile only; do not run it in the SLOPGATE-native default export because it overwrites BSP lighting data.
 - bsputil: BSP decompile and optional texture/entity utilities, depending on the exact installed binary's supported options.
 
-#### Recommended MAP-first import
+#### Historical MAP-first import proposal — superseded by the BSP-first companion workflow
 
-1. User chooses a MAP file in SLOPGATE.
-2. SLOPGATE validates QBSP and the source MAP's WAD/texture search paths.
-3. Run QBSP to a temporary/working BSP, not over the user's existing final BSP. Reuse the existing BSP importer for geometry, materials and entity objects; do not build a second independent brush geometry importer for the first MAP workflow.
-4. Do not run vis merely to show geometry in Blender; PVS is a Quake engine visibility structure. Offer vis when preparing a game-testable BSP after full geometry compilation.
-5. Do not run ericw light by default; Blender/SLOPGATE handles preview and bake. An explicit ericw-light compile may be offered as a separate comparison/legacy path.
+Superseded: the user chose BSP import with silent same-basename MAP discovery instead. Do not invoke QBSP or search for WADs during MAP association. The companion MAP is only used for preserving brush source and synchronizing supported light properties.
 
 Use the source MAP's WAD references and configured search paths when invoking QBSP. Keep compiler working/output directories isolated from the original map.
 
