@@ -55,18 +55,19 @@ This archive is the detailed project record. The handoff file is a compressed ed
 - The Quake Direct CPU lightmap solver is a separate path and must not be confused with the native lamp preview or the recent Cycles node experiment. Keep it intact when simplifying the latter.
 - The native Cycles bake, Live Lights preview, Eevee approximation and unrelated paint/import/export workflows must be preserved.
 
-### Current lighting direction — plan only, not implemented
+### Current lighting and MAP direction — 2026-11-11; plan only, not implemented
 
-- Main priority: new maps authored with SLOPGATE in mind. Existing ericw-targeted maps are an edge case; import their lights as a practical approximation with nearby-wall illumination as the main initial target.
-- delay 2 means SLOPGATE-native Blender light settings. Proposed type key: _sl_type = point, sun, spot or area; default point.
-- delay 0, 1, 3, 4, 5 mean ordinary native Blender-light approximation, not exact ericw reproduction.
-- Reuse light for the default power input and _color for RGB. Reuse target/mangle/angle conventions for spot/sun direction and cone setup.
-- Proposed Blender override keys include _sl_temperature, _sl_tint, _sl_power, _sl_exposure, _sl_normalize, _sl_radius, _sl_soft_falloff, with type-specific fields to be agreed. Negative values are proposed as “unset” for fields where stated; _sl_exposure neutral is 0.
-- Recommend lowercase _sl_ (one leading underscore) rather than __; decide the namespace before populating maps. Do not create the FGD yet.
-- Reuse the existing scene conversion multiplier for light → Blender energy; likely add a separate area/surface multiplier. Verify by light type.
-- For Area lights, retain ericw _surface as the texture selector but avoid blindly copying its grid of point lights; choose a face-based Area-light/emitter strategy after a prototype.
-- For Sun, distinguish ericw sky-face sunlight from Blender's directional Sun object. Exclude sky faces from inappropriate lightmap receiving and decide separately about shadow casting; a world environment may complement but does not replace a shadow-casting Sun.
-- Once the schema is stable, create an FGD based on the official rerelease FGD, with descriptive fields and defaults.
+- No _sl_type key. Existing entity classnames and Quake/ericw conventions identify type: ordinary light = point; target/mangle = spot; _sun 1 = sun entity; _surface = texture-linked surface/area emitter. Reuse _color, light, angle, _softangle, targetname and existing sun/surface keys.
+- Worldspawn mode key is exactly _sl_SLOPGATE_lighting: 1 = native SLOPGATE lighting intended for Cycles; 2 = native SLOPGATE lighting intended for Eevee; missing/0/other = rough ericw approximation for every light. In modes 1/2, Blender properties and _sl_ keys control attenuation; legacy delay is not used as an ericw profile selector. Recommend treating 1/2 as preferred engine, not a hard lock.
+- SLOPGATE-specific per-light properties use the proposed _sl_ namespace. Initial keys: _sl_temperature, _sl_tint, _sl_power, _sl_exposure, _sl_normalize, _sl_radius, _sl_soft_falloff. Absent keys preserve Blender defaults; expand into a type-aware registry after checking the Blender 5.2 API. _sl_power explicit override bypasses automatic light energy scale. No FGD until schema settles.
+- Map operations are available only when a valid ericw-tools path is configured. Open MAP by running QBSP to a temporary BSP and reusing the existing BSP importer. VIS is optional for engine PVS, not needed just to import geometry in Blender. Do not run full ericw light by default because it overwrites BSP lighting data.
+- Keep MAP as the brush-geometry source of truth. In the first version, Blender exports changed/added/removed light entities and supported properties to MAP, preserving brushes, comments, unrelated entities and unknown keys. Do not promise Blender mesh-to-MAP brush geometry export.
+- Entity-only export uses qbsp -onlyents when geometry is unchanged. If switchable targetname lights are present, ericw documents a follow-up light -onlyents to assign style numbers. Re-bake SLOPGATE lightmaps after changes to lights. VIS is not needed if geometry/PVS is unchanged.
+- Importing an existing BSP should link a matching MAP if present; otherwise offer bsputil --decompile to create a separate recovered MAP. This reconstructs brushwork; it is not the original TrenchBroom project.
+- Export painted textures into a per-map WAD under a dedicated ##SLOPGATE output folder and update the MAP worldspawn wad reference, preserving existing WAD entries. QBSP embeds textures used by the map. bsputil --replace-textures may allow pixel-only updates without full QBSP, but detect the exact configured binary's support; if unavailable or textures are added/resized, rebuild as needed and reapply SLOPGATE lightmaps.
+- Export modes should be explicit: skip compiler; entities-only; full geometry QBSP; optional VIS after full geometry. Full QBSP invalidates the previous BSP lightmap and requires a new bake. A full ericw light compile stays opt-in.
+- Preferred workflow: TrenchBroom geometry → MAP opened in SLOPGATE (QBSP temporary BSP) → live lighting and MAP entity sync → final geometry QBSP + optional VIS → SLOPGATE light bake → texture paint → WAD export/BSP texture update → final MAP/BSP export.
+- This redesign is not implemented yet. Preserve the existing Quake Direct CPU solver, Cycles bake, Live Lights, paint/import/export and unrelated add-on features.
 
 ### Related ideas still active
 
@@ -15695,3 +15696,126 @@ Do not create the FGD now. Once the schema is stable, use the official rerelease
 - Updated the opening of the main archive to instruct future sessions to read that brief first.
 - Appended this exchange to the main archive with the user's original message preserved verbatim.
 - No add-on source code, FGD, build version or install artifact was changed in this documentation update.
+
+
+---
+
+## 2026-11-11 — Worldspawn lighting mode and MAP workflow planning
+
+### You
+
+I dont see why we need a _sl_type key. All four kind of lights have already 
+established ways of being used in trenchbroom. We should use those. Instead i 
+suggest adding a worldspawn key "_sl_SLOPGATE_lighting". If set to 1 slopgate 
+will know this map is intended for cycles render, 2 means intended for eevee, 
+erything else including absense of the key in worldspawn means: use the rough 
+aproximation of ericw lighting for every light.
+
+I think we also need to start implementing  .map related features. Those will 
+be only accesable if a proper ericw path is set.  If there is a fitting map 
+file exporting from SLOPGATE should then  also update the map file. For example 
+if light values are changed in blender that shold be updated in the exported 
+map file. Ericw has also features to decompile bsp files so a setting to 
+automatically generate a map file would be a good idea.  Importing map files 
+should also be possible. Either by fist running qbsp (and vis?) (and optionally 
+light) and then importing the bsp instead just updating the map along or by 
+directly importing from the map and using qbsp (and vis?) as part of the export 
+routine. I guess i prefer the latter but im not shure.
+
+This will also mean that we can change, remove or add additional lights to the 
+scene in blender and let SLOPGATE export them back into map format readble by 
+trenchbroom a well as baking them to the bsp. 
+
+Off course painted textures would get lost when working with an exported map. 
+There could be an option to export painted textures into a .wad in the 
+##SLOPGATE folder (ex ##slipgate) but idally one would map and test lighing 
+(realtime previews) in SLOPGATE and once the geometry is finished tweak the 
+lighthing, bake it, then do paint jobs and then do a final export. Also if the 
+user knows that geometry is final ther should be an option to skip or 
+entitiesonly  qbsp (and vis?) on export. 
+
+I guess we should also implement keys for all the other parmeters of blenders 
+lights. If they are not set blender just uses its default so no big danger 
+here.
+
+### ChatGPT
+
+This supersedes the previous suggestion of a per-light _sl_type key and the earlier proposal that delay 2 alone selected native SLOPGATE lights. No code was changed in this planning exchange.
+
+### Lighting selection
+
+Agreed: no _sl_type key. Use existing Quake/ericw conventions:
+- ordinary light entities are point lights;
+- target or mangle turns a light into a spotlight, with angle and _softangle for its cone;
+- _sun 1 identifies a sun entity, with mangle or target for direction; ericw also supports worldspawn _sunlight settings;
+- _surface identifies the texture whose faces emit light, using the light entity as a surface-light template.
+
+The map-wide worldspawn key is exactly _sl_SLOPGATE_lighting:
+- 1: native SLOPGATE lighting, intended for Cycles;
+- 2: native SLOPGATE lighting, intended for Eevee;
+- missing, 0 or any other value: rough ericw approximation for every light.
+
+In modes 1/2 the map's preferred engine can be selected on import, but it should not hard-lock the user out of switching. In those modes Blender light properties and _sl_ entity keys control the light; delay no longer chooses an ericw attenuation profile. In fallback mode established ericw keys guide the approximation. SLOPGATE-specific overrides should be ignored in fallback mode.
+
+### Blender keys
+
+Continue with a type-aware _sl_ namespace for properties worth exposing in MAP. Initial keys remain _sl_temperature, _sl_tint, _sl_power, _sl_exposure, _sl_normalize, _sl_radius and _sl_soft_falloff. Absent keys leave Blender defaults unchanged. _sl_power is an explicit energy override and should bypass automatic light conversion; _sl_exposure is independent EV. Radius and other properties must map according to the relevant Blender light subtype. Add the other useful Blender 5.2 settings in a systematic registry; do not create the FGD until names/defaults/choices are stable.
+
+### MAP-first workflow recommendation
+
+Recommended user-facing workflow: opening a MAP runs QBSP to a temporary BSP, then reuses SLOPGATE's existing BSP importer. This provides the direct MAP-import experience without building a second geometry importer. QBSP is needed to compile brush geometry. VIS is not required merely to import that geometry into Blender; it computes the engine's PVS and is offered when preparing a game-testable BSP. Do not run full ericw light by default: it recalculates and overwrites BSP light data, while SLOPGATE's own bake is intended to provide the lighting.
+
+Validate the configured ericw directory. Require only the executable for the requested action: QBSP for MAP import/geometry compile, VIS for PVS, bsputil for decompile/texture tools, and light only for explicit ericw-light operations. Do not disable existing BSP import or painting just because map tools are not configured.
+
+For an existing BSP, link a sibling matching MAP when available. Otherwise offer bsputil --decompile to create a separate recovered MAP. This is reconstructed brushwork, not a byte-identical recovery of the original TrenchBroom source.
+
+### Round-tripping Blender lights to MAP
+
+Treat MAP as authoritative for brush geometry. First implementation synchronizes supported light entities only:
+- preserve original entity blocks, brush geometry, comments, unrelated entities and unknown key/value pairs;
+- retain source associations for imported light objects;
+- export moved lights as updated origin/direction, changed light properties as updated keys, deleted lights as removed entities, and newly added Blender light objects as new valid Quake/ericw light entities;
+- detect source-MAP changes made externally in TrenchBroom and avoid silently overwriting them;
+- export a separate updated MAP by default or make in-place overwrite explicit with a backup.
+
+Do not claim that editing the imported BSP mesh can be reverse-exported as TrenchBroom brushes in this first implementation.
+
+### Compiler stages and export
+
+Keep three explicit choices:
+- Skip: do not run compiler stages; warn if MAP and BSP may be out of sync.
+- Entities only: when brush geometry is unchanged, run qbsp -onlyents to update entity data without full geometry rebuild. If switchable lights using targetname are present, follow with ericw light -onlyents to assign style numbers. Re-bake SLOPGATE lighting after light changes. VIS is unnecessary when geometry/PVS is unchanged.
+- Full geometry: run QBSP; optionally VIS for engine PVS. A full rebuild invalidates the previous BSP lightmap result, so SLOPGATE must bake again.
+
+A full ericw light compile is opt-in only because it overwrites BSP light data. It is not part of the normal SLOPGATE-native pipeline.
+
+### Painted textures / WAD
+
+Export painted Quake textures into a WAD in a dedicated per-map ##SLOPGATE output directory. Update the MAP worldspawn wad key while preserving existing WAD references. QBSP embeds textures referenced by the map in its output BSP.
+
+For updating only existing texture pixels after a bake, bsputil --replace-textures may avoid a full geometry rebuild. However, the exact configured ericw alpha11 executable/package must be capability-checked; documented options can differ between packaged builds. The command documentation warns about texture-size mismatches. New texture names or changed dimensions may require full QBSP and then reapplying the SLOPGATE lightmap. Never silently lose a completed bake as a side effect of texture export.
+
+### Suggested staged implementation
+
+1. Detect and validate ericw executables and their capabilities.
+2. MAP-first import: run QBSP into a temporary BSP and reuse existing import.
+3. Add a safe MAP parser/writer and entity-to-Blender associations.
+4. Add worldspawn lighting mode, existing entity-convention classification, and Blender key registry.
+5. Add entity-only/full/skip export modes and switchable-style handling.
+6. Add WAD export and safe BSP texture replacement where supported.
+7. Add optional BSP-to-MAP recovery.
+8. Once the key schema settles, update the official rerelease-based FGD.
+
+### Important source findings
+
+- ericw docs define light entities by classnames beginning with light; target/mangle makes a spotlight; _sun 1 makes a sun; _surface selects emitting face textures.
+- QBSP documents -onlyents as updating MAP entities only. VIS computes PVS. ericw light -onlyents assigns style numbers after QBSP -onlyents for switchable lights; a full ericw light pass overwrites the BSP lighting.
+- bsputil documents --decompile. Current documentation lists --replace-textures, but exact binary capability must be checked.
+- QBSP uses MAP worldspawn WAD references to locate/pack textures.
+
+### Documentation update
+
+- Removed the obsolete _sl_type and per-light delay-2 mode from the current handoff summary; the previous idea remains in the chronological archive.
+- Added the worldspawn lighting mode and MAP-first pipeline design to the compact handoff.
+- Appended this user message verbatim and this design response to the main conversation archive.
+- No add-on source, FGD, version metadata or installable ZIP was changed.
