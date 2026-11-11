@@ -14,6 +14,8 @@
 
 ### Required ongoing maintenance
 
+4. **Always provide an installable Blender add-on ZIP whenever a new version or installable build is produced.** Do not stop at a commit, source link, or test result. Build the ZIP from the exact branch commit being reported, verify that the artifact exists and contains the Blender-installable `quake_surface_studio/__init__.py` package layout, and give the user a direct download link in the response. If CI fails or no artifact is available, say so plainly and do not present an unverified source archive as an installable build. Include the version, commit, test status and artifact link together.
+
 1. **Update this file during ongoing project work.** For every project-related exchange, record the user's substantive request/report and the assistant's substantive response. Do not wait for the user to remind you. Append promptly after the exchange; when work spans several turns, keep the additions in order and include the final outcome.
 2. Preserve user-provided wording, typos, code, commands, console output and error messages faithfully. Format for readability, but do not silently rewrite the technical content.
 3. Keep the transcript append-only. Do not delete or rewrite historical messages. Put corrections, new findings and changed decisions in a clearly dated handoff/update note.
