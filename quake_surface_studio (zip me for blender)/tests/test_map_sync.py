@@ -78,6 +78,14 @@ class MapSyncTests(unittest.TestCase):
         with self.assertRaises(map_sync.MapSyncError):
             map_sync.parse_map_entities('{ "classname" "light" ')
 
+    def test_atomic_write_preserves_latin1_source_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "arena.map")
+            source = "// caf\xe9\n{\n    \"classname\" \"worldspawn\"\n}\n"
+            map_sync.write_text_atomic(path, source)
+            with open(path, "rb") as handle:
+                self.assertEqual(handle.read(), source.encode("latin1"))
+
     def test_companion_discovery_is_same_directory_and_basename_only(self):
         with tempfile.TemporaryDirectory() as directory:
             bsp_path = os.path.join(directory, "arena.bsp")
