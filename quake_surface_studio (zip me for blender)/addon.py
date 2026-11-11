@@ -8944,6 +8944,11 @@ def _qss_map_light_updates(context, obj, source_text):
     entities = map_sync.parse_map_entities(source_text)
     updates = {}
     linked = {}
+    original_indices = {
+        int(value) for value in str(obj.get("qss_map_linked_entity_indices", "")).split(",")
+        if value.strip().lstrip("-").isdigit()
+    }
+    current_linked_indices = set()
     unit_scale = max(1e-9, abs(float(obj.get("qss_unit_scale", DEFAULT_QUAKE_UNIT_SCALE))))
     flip_z = bool(obj.get("qss_flip_z", False))
     for light_obj in _qss_collection_objects(bpy.data.collections.get(obj.get("qss_map_collection", ""))):
@@ -8957,6 +8962,7 @@ def _qss_map_light_updates(context, obj, source_text):
         if entity_index in linked:
             raise map_sync.MapSyncError(f"Multiple Blender lights are linked to MAP entity {entity_index}; refusing ambiguous export.")
         linked[entity_index] = light_obj
+        current_linked_indices.add(entity_index)
         values = entities[entity_index]["values"]
         if not str(values.get("classname", "")).lower().startswith("light") and light_obj.get("qss_light_role") != "quake_world_sunlight":
             raise map_sync.MapSyncError(f"Linked MAP entity {entity_index} is no longer a light entity.")
@@ -8990,7 +8996,10 @@ def _qss_map_light_updates(context, obj, source_text):
                     changed["angle"] = f"{current_angle:.6g}"
         if changed:
             updates[entity_index] = changed
-    return updates
+    # A previously linked light object that no longer exists in the map's
+    # entity collection represents a deliberate light deletion in Blender.
+    removals = original_indices - current_linked_indices
+    return updates, removals
 
 
 def _qss_prepare_companion_map_export(context, obj, output_bsp):
@@ -9015,13 +9024,16 @@ def _qss_prepare_companion_map_export(context, obj, output_bsp):
             existing_hash = map_sync.sha256_bytes(handle.read().encode("latin1"))
         if not previous_hash or existing_hash != previous_hash:
             raise map_sync.MapSyncError(f"Output companion exists and is not a verified prior SLOPGATE export: {output_map}")
-    updates = _qss_map_light_updates(context, obj, source_text)
-    patched = map_sync.apply_entity_changes(source_text, updates)
+    updates, removals = _qss_map_light_updates(context, obj, source_text)
+    patched = map_sync.apply_entity_changes(
+        source_text, updates, remove_entities=removals
+    )
     map_sync.parse_map_entities(patched["text"])
     return {
         "path": output_map, "text": patched["text"],
         "sha256": map_sync.sha256_bytes(patched["text"].encode("latin1")),
-        "updated_entities": len(updates), "entity_count": patched["entity_count"],
+        "updated_entities": len(updates), "removed_entities": len(removals),
+        "old_to_new": patched["old_to_new"], "entity_count": patched["entity_count"],
     }
 
 
@@ -9032,6 +9044,18 @@ def _qss_commit_companion_map_export(obj, prepared):
     obj["qss_last_export_map_path"] = prepared["path"]
     obj["qss_last_export_map_sha256"] = prepared["sha256"]
     obj["qss_map_sync_status"] = "EXPORTED"
+    for light_obj in _qss_collection_objects(bpy.data.collections.get(obj.get("qss_light_collection", ""))):
+        if light_obj.type == "LIGHT" and light_obj.get("qss_map_entity_linked", False):
+            old_index = int(light_obj.get("qss_map_entity_index", -1))
+            if old_index in prepared["old_to_new"]:
+                light_obj["qss_map_entity_index"] = int(prepared["old_to_new"][old_index])
+    obj["qss_map_linked_entity_indices"] = ",".join(
+        str(int(light_obj.get("qss_map_entity_index", -1)))
+        for light_obj in _qss_collection_objects(bpy.data.collections.get(obj.get("qss_light_collection", "")))
+        if light_obj.type == "LIGHT"
+        and light_obj.get("qss_map_entity_linked", False)
+        and light_obj.get("qss_light_role") == "quake_entity_light"
+    )
     return prepared["path"]
 
 
@@ -9117,7 +9141,10 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
             map_output_path = _qss_commit_companion_map_export(obj, prepared_map)
             detail = ""
             if map_output_path:
-                detail += f" | companion MAP {os.path.basename(map_output_path)} ({prepared_map['updated_entities']} light entities synced)"
+                detail += (
+                    f" | companion MAP {os.path.basename(map_output_path)} "
+                    f"({prepared_map['updated_entities']} updated, {prepared_map['removed_entities']} removed lights)"
+                )
             for result in results:
                 lit_path = result[5]
                 if lit_path:
