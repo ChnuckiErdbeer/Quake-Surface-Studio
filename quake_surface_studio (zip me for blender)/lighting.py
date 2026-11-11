@@ -522,7 +522,7 @@ def blender_live_light_preview_parameters(
     min_cutoff = 32.0 * scale
 
     if mode == 0:
-        radius_qu = (falloff_value * dist_scale) if falloff_value > 0.0 else raw_intensity * attenuation
+        radius_qu = (falloff_value * dist_scale) if falloff_value > 0.0 else raw_intensity / attenuation
         radius_blender = max(min_cutoff, radius_qu * scale)
         # Match the linear Quake profile at half its radius: QSS receives half
         # the source intensity there, as does an inverse-square lamp at this
