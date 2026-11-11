@@ -37,23 +37,25 @@ The archive filename and some historic headings contain the old spelling “Slip
    - if CI fails or the artifact cannot be verified, state that plainly and do not offer an unverified archive.
 8. Do not promise background work or results later. Complete the task in the current session or state what could not be completed.
 
-## Current source/build baseline
+## Current source/build baseline — checked 2026-11-11
 
-Last inspected source commit before the current documentation-only handoff updates:
+- Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
+- Active branch: fix/v0.11.1-metadata-style-order-test
+- Current add-on version: **0.20.9**
+- Exact source commit used to build the 0.20.9 install artifact: 770410f371287d0841f5da7288432fb1f532bdfb
+- Main add-on source: quake_surface_studio (zip me for blender)/addon.py; external tool helpers: external_tools.py; focused tests: tests/test_external_tools.py.
+- Successful QSS Python workflow push run: 42997883763. Python compilation, the standalone unit suite, package assembly and artifact upload passed.
+- Successful PR-triggered QSS Python run: 42997891885.
+- Successful companion converter GUI workflow run: 42997891883.
+- Install artifact: Quake-Surface-Studio-v0.20.9-Blender-Install, artifact ID 13844916535, 243,699 bytes.
+- Artifact SHA-256: 9876a4092af7f7334e62ec9c7acd351fc09b1780fb4470e801258f724f1f0a60. Artifact expires 2027-02-09.
+- Downloaded ZIP was verified: 39 entries, no corrupt member, and the installable package root contains quake_surface_studio/__init__.py.
+- **Runtime validation outstanding:** no interactive Blender 5.2 import test, no actual run against the user's ericw QBSP installation, no Cycles/Eevee viewport or bake test, no VIS or Ironwail launch. 0.20.9 is an experimental implementation build, not an official release.
+- Version 0.20.8 and its artifact details are historical; 0.20.9 supersedes that baseline.
 
-- Commit: a5e5be55050ecce6532222aeb0d19eb017cb1254
-- Add-on version: **0.20.8**
-- Version fields: quake_surface_studio (zip me for blender)/__init__.py and addon.py
-- Latest recorded successful CI package run: 42958030442
-- Companion converter GUI CI run: 42958030452
-- Install artifact: Quake-Surface-Studio-v0.20.8-Blender-Install
-- Artifact ID: 13827248365
-- Artifact size: 241,052 bytes
-- SHA-256: 0798ac71cf207af5c985a94cb2dcf941d6b8907657d96b322a50f40b543df160
-- Recorded expiry: 2027-02-09.
-- Automated Python tests, converter GUI tests and Python compilation passed for that build.
+### Official-release direction
 
-**Important:** 0.20.8 is an experimental build, not a fully validated release. The assistant has not verified its actual behavior in Blender 5.2. No SLOPGATE Cycles bake, Eevee render, QBSP compile or Ironwail run was performed by the assistant for this baseline. Before more source edits, check the live branch head; documentation-only commits may have advanced it after the source commit above.
+The user wants the currently discussed main features implemented before a cleanup/polish phase and a first official SLOPGATE release. Build coherent features and preserve compatibility now; do not prematurely label experimental builds as official. Once the main features are in place, reserve a dedicated stabilization phase for cleanup, tests, UX/documentation, migration/backward compatibility, and target-environment validation.
 
 ## Existing add-on architecture and status
 
@@ -209,18 +211,37 @@ Skip compiler stages:
 
 This keeps TrenchBroom authoritative for brush geometry, SLOPGATE authoritative for Blender-authored lighting and paint, and MAP authoritative for entity data that must remain editable in TrenchBroom.
 
-### Current implementation boundary
+### Delivered implementation: version 0.20.9 — first MAP import milestone
 
-No MAP import/export, entity round-trip, WAD export or light-type expansion has been implemented by this planning update. The current source importer still creates POINT/SPOT lights. Future work should be split into small milestones:
-1. validate ericw path and identify exact tool capabilities;
-2. MAP-first import: QBSP to a temporary BSP and reuse the existing importer;
-3. lossless-enough MAP entity parser/writer and Blender entity associations;
-4. worldspawn mode and four light-convention classification;
-5. native light property key registry and scene-to-MAP synchronization;
-6. full/entities-only/skip export stages;
-7. WAD output and safe BSP texture update;
-8. optional BSP-to-MAP recovery;
-9. only after the property schema settles, update the official rerelease-based FGD.
+- Added QSS_OT_import_map and an **Import MAP via QBSP** control in the Project panel. The control is enabled only when a valid active game directory and configured ericw-tools qbsp executable are available.
+- MAP files are compiled with QBSP into a dedicated persistent Blender user-data cache under qss/map_imports. QBSP output never targets the source MAP or an existing game BSP.
+- The command builder uses explicit source and destination paths plus configured -basedir, -gamedir, -wadpath and -path search paths. It launches without a shell. The command and QBSP output are saved to a per-import log.
+- SLOPGATE validates that QBSP produced a file and parses it with the existing bsp.BSP29 reader before handing it to the existing BSP importer. This intentionally reuses the established BSP geometry/material/entity import pipeline; the initial importer remains BSP29-only.
+- The imported map object stores source MAP path and SHA-256 as qss_source_map_path and qss_source_map_sha256, and is tagged qss_map_imported_via_qbsp for later entity-sync work.
+- The normal Add/Replace import confirmation also forwards the source MAP association.
+- The operation runs QBSP only. It deliberately does **not** run VIS or ericw light: VIS is not necessary for Blender geometry import, and ericw light would produce/overwrite lighting outside the SLOPGATE bake workflow.
+- Existing Import BSP, Export BSP, painting, preview, Quake Direct and bake workflows remain in place.
+
+### Automated validation for version 0.20.9
+
+- Added three QBSP command-builder tests covering source/destination separation, repeated search paths, missing/invalid paths and expected output argument ordering.
+- Successful QSS workflow run 42997883763: compileall, the standalone test suite, package assembly and artifact upload passed.
+- Successful PR workflow run 42997891885 passed; converter GUI run 42997891883 also passed.
+- Install ZIP SHA-256 and package layout were verified after download (details above).
+- No actual QBSP executable was run against the user's Quake installation. No Blender 5.2 runtime/UI import was performed. The user still needs to test the new Import MAP button using their configured QBSP and game/WAD paths.
+
+### Remaining MAP implementation boundary
+
+Still not implemented:
+1. MAP parser/writer capable of preserving original entity blocks, brush geometry, comments and unknown keys.
+2. Blender-to-MAP synchronization for moved/edited/added/deleted lights.
+3. Worldspawn _sl_SLOPGATE_lighting mode and the full existing entity-convention classification for point/spot/sun/surface lights.
+4. Full / entities-only / skip export workflow and qbsp -onlyents handling.
+5. WAD export into a per-map ##SLOPGATE output directory and safe BSP texture update.
+6. Optional BSP-to-MAP recovery through bsputil --decompile.
+7. Blender light-property key registry and, after it stabilizes, the official rerelease-based FGD.
+
+Future MAP import/export work must preserve existing BSP import/export, Quake Direct, Cycles bake, Live Lights, texture painting, and user data. Do not regenerate MAP brushwork from the imported Blender mesh as part of the first entity-roundtrip milestone.
 
 ### Source references checked for this plan
 
