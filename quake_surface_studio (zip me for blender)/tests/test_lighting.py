@@ -131,6 +131,66 @@ class BlenderLivePreviewCalibrationTests(unittest.TestCase):
         self.assertAlmostEqual(soft['energy'], inverse['energy'] / 4.0)
         self.assertGreater(soft['shadow_soft_size'], inverse['shadow_soft_size'])
 
+    def test_cycles_delay_zero_correction_reconstructs_ericw_linear_curve(self):
+        raw = 300.0
+        world_range = 0.5
+        wait = 0.75
+        world_dist = 1.4
+        unit_scale = 0.0254
+
+        for falloff in (0.0, 150.0):
+            radius = (
+                falloff * world_dist
+                if falloff > 0.0
+                else raw * wait * world_dist
+            )
+            base_energy = raw * world_range * (radius * unit_scale) ** 2 / 8.0
+            distances = (8.0, 24.0, 64.0, 128.0, radius * 0.5, radius, radius * 1.2)
+            for distance in distances:
+                if distance <= 0.0:
+                    continue
+                native_inverse_square = base_energy / (distance * unit_scale) ** 2
+                correction = lighting.ericw_cycles_light_falloff_correction(
+                    0, distance, raw, wait, world_dist, falloff
+                )
+                reconstructed = native_inverse_square * correction
+                expected = (
+                    lighting.ericw_light_value( raw, 0, distance, wait, world_dist, falloff)
+                    * world_range
+                )
+                self.assertAlmostEqual(reconstructed, expected, places=7)
+
+    def test_cycles_delay_five_correction_reconstructs_ericw_soft_inverse_square(self):
+        raw = 300.0
+        world_range = 0.5
+        wait = 0.8
+        world_dist = 1.3
+        unit_scale = 0.0254
+        reference_quake = 128.0 / (wait * world_dist)
+        reference_blender = reference_quake * unit_scale
+        base_energy = raw * world_range * reference_blender ** 2 / 4.0
+
+        for distance in (1.0, 8.0, 24.0, 64.0, 128.0, 256.0, 512.0, 1024.0):
+            native_inverse_square = base_energy / (distance * unit_scale) ** 2
+            correction = lighting.ericw_cycles_light_falloff_correction(
+                5, distance, raw, wait, world_dist
+            )
+            reconstructed = native_inverse_square * correction
+            expected = (
+                lighting.ericw_light_value(raw, 5, distance, wait, world_dist)
+                * world_range
+            )
+            self.assertAlmostEqual(reconstructed, expected, places=7)
+
+    def test_cycles_falloff_correction_leaves_other_delays_unchanged(self):
+        for delay in (1, 2, 3, 4):
+            self.assertEqual(
+                lighting.ericw_cycles_light_falloff_correction(
+                    delay, 64.0, 300.0
+                ),
+                1.0,
+            )
+
     def test_delay_three_and_four_are_labelled_as_unmatched_fallbacks(self):
         constant = lighting.blender_live_light_preview_parameters(100, 100, 3)
         minlight = lighting.blender_live_light_preview_parameters(100, 100, 4)
