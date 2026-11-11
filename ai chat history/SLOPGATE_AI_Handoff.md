@@ -242,7 +242,7 @@ This keeps TrenchBroom authoritative for brush geometry, SLOPGATE authoritative 
 - Current supported MAP edits: linked light origin, RGB color, light magnitude, spotlight cone angle, and deletion of a linked imported light. Creating new light entities and spot direction/mangle synchronization are not yet implemented; original target and mangle keys are preserved. Painted texture pixels continue through the existing BSP texture export path. MAP WAD paths and texture references are not rewritten.
 - No geometry synchronization, QBSP rebuild, VIS, ericw light, WAD generation, or WAD search is performed. The source MAP remains unchanged.
 - The old direct Import MAP via QBSP operator and sidebar control were removed as explicitly superseded by the BSP-first companion workflow.
-- Version 0.21.0. Final QSS Python workflow 43006568762 passed compileall, standalone tests (including MAP preservation/byte-write and light-deletion tests), package assembly and artifact upload. The installable ZIP was downloaded and verified (41 entries, correct package root, no corrupt members; SHA-256 39bcff383f811a9f0e3906da0e8b3de2940fc04dd6b2f47e6d3da32a2ef8969e). Blender 5.2 GUI/runtime and Quake toolchain validation remain outstanding.
+- Version 0.21.0. Final QSS Python workflow 43006568762 passed compileall, standalone tests (including MAP preservation/byte-write and light-deletion tests), package assembly and artifact upload. The installable ZIP was downloaded and verified (41 entries, correct package root, no corrupt members; SHA-256 65e6bef6f391d2216ebb9c67fd8ace8e6920499161acce08c12b194b2b9f57c7). Blender 5.2 GUI/runtime and Quake toolchain validation remain outstanding.
 
 ### Remaining MAP implementation boundary
 
