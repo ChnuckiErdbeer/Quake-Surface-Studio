@@ -206,6 +206,71 @@ def ericw_light_value(light_value: float, delay: int, distance: float,
     return min(0.0, light + value)
 
 
+def ericw_cycles_light_falloff_correction(
+    delay: int,
+    distance: float,
+    raw_light_value: float,
+    wait: float = 1.0,
+    world_dist: float = 1.0,
+    falloff: float = 0.0,
+) -> float:
+    """Correct a calibrated inverse-square Cycles lamp to ericw delay 0 or 5.
+
+    The existing Blender lamp-energy calibration deliberately matches each
+    profile at one reference distance:
+      * delay 0: the midpoint of its finite linear radius (energy = I*R^2/8)
+      * delay 5: the ericw 128/(wait*world_dist) reference distance (energy = I*R^2/4)
+
+    Cycles' Light Falloff node exposes both 1/d and 1/d^2. Their ratio recovers
+    distance, allowing the light shader to multiply the native inverse-square
+    result by this correction. Distances and radius are in Quake map units.
+    The return value is a dimensionless multiplier; other delays are unchanged.
+    """
+    import math
+
+    try:
+        mode = int(delay)
+        dist = max(0.0, float(distance))
+        wait_value = max(1e-6, float(wait))
+        dist_scale = max(1e-6, float(world_dist))
+        raw_intensity = abs(float(raw_light_value))
+        falloff_radius = max(0.0, float(falloff))
+    except (TypeError, ValueError, OverflowError):
+        return 1.0
+
+    if not all(math.isfinite(value) for value in (
+        dist, wait_value, dist_scale, raw_intensity, falloff_radius
+    )):
+        return 1.0
+
+    if mode == 0:
+        radius = (
+            falloff_radius * dist_scale
+            if falloff_radius > 0.0
+            else raw_intensity * wait_value * dist_scale
+        )
+        if radius <= 1e-12:
+            return 0.0
+        normalized_distance = dist / radius
+        # Exact ratio between ericw's max(0, 1-d/R) and the existing
+        # inverse-square lamp whose energy is calibrated at d=R/2.
+        return 8.0 * normalized_distance * normalized_distance * max(
+            0.0, 1.0 - normalized_distance
+        )
+
+    if mode == 5:
+        scaled_distance = wait_value * dist_scale * dist
+        denominator = scaled_distance + ERICW_LIGHT_SCALE
+        if denominator <= 1e-12:
+            return 0.0
+        # Exact ratio between ericw's shifted inverse-square curve and the
+        # existing lamp calibrated to L/4 at d=128/(wait*world_dist).
+        ratio = scaled_distance / denominator
+        return 4.0 * ratio * ratio
+
+    return 1.0
+
+
 def ericw_surface_angle(normal_dot_to_light: float, anglescale: float = 0.5,
                         bleed: bool = False) -> float:
     """Lambert/incidence factor used by ericw-tools for a receiving surface."""
