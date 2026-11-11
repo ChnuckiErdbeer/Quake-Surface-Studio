@@ -15889,3 +15889,11 @@ Implemented the first MAP import milestone in SLOPGATE 0.20.9.
 - Downloaded install artifact 13847329207: Quake-Surface-Studio-v0.21.0-Blender-Install, 250,296 bytes, 41 entries. SHA-256 4f21d1514f81e4c363f85f8472c983b772d5ba04c2928cfab6c669e29d6cb253. ZIP integrity passed; package root includes quake_surface_studio/__init__.py and map_sync.py.
 - The direct MAP-via-QBSP import prototype is removed. BSP import now discovers a sibling MAP; export writes a separate MAP companion with supported linked-light changes. Brush source and unrelated MAP content are preserved.
 - No interactive Blender 5.2 test, actual QBSP/VIS run, Cycles/Eevee render/bake, or Ironwail launch was performed. This remains an experimental development build.
+
+
+## 2026-11-11 — Final SLOPGATE 0.21.0 package after compatibility cleanup
+
+- Preserved the legacy internal qss_slipgate_folder custom-property key so existing .blend metadata remains compatible; the generated artifact directory name and all visible add-on branding use SLOPGATE.
+- Final source commit: 65679967beefccf688d0ebf4e5a7ed98fcacdeaa. QSS Python workflow 43006066793 passed compileall, all standalone tests, package assembly and artifact upload.
+- Final install ZIP: artifact 13848052575, 250,398 bytes, 41 entries; SHA-256 248ac7e9c4f45f49e6211d09e3f152a1d1fbe171d4f220a5963a9bd26bc276e3. Downloaded archive passed unzip integrity and package-layout checks.
+- Blender 5.2 interactive validation and actual Quake toolchain/engine tests remain outstanding.
