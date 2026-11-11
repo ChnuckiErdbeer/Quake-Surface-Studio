@@ -1,12 +1,16 @@
-# SLOPGATE 0.20.9
+# SLOPGATE 0.21.0
 
-## 0.20.9 — MAP-to-BSP import foundation
+## 0.21.0 — Companion MAP synchronization
 
-- Adds **Import MAP via QBSP** when a valid ericw-tools `qbsp` executable is configured.
-- Compiles the selected `.map` into a dedicated Blender user-cache working directory, validates classic BSP29, then reuses the existing BSP importer.
-- Records the linked source MAP path and SHA-256 on the imported map object for future entity synchronization work.
-- Does not overwrite the source MAP or a game BSP. Does not run VIS or ericw `light`; existing BSP import/export and all lighting/painting workflows remain available.
-- Automated command-builder tests cover explicit output paths, optional search paths and overwrite protection. Interactive Blender 5.2 import still requires user verification.
+- BSP import quietly discovers a same-basename `.map` beside the selected `.bsp`. No direct MAP import, QBSP invocation, WAD search, or texture-path resolution is involved.
+- The companion MAP is associated with imported BSP light entities using classname and origin matching. The original MAP path and SHA-256 are retained.
+- BSP export creates a separate companion `.map` beside the exported BSP. It never overwrites the source MAP. Existing output companions are overwritten only when their contents match the hash of the previous SLOPGATE export.
+- MAP synchronization updates supported existing light properties: origin, RGB color, light magnitude, and spotlight cone angle. Existing target-controlled direction remains unchanged.
+- The MAP parser edits only top-level entity key/value spans. Brush blocks, plane geometry, texture axes, comments, WAD references, unknown keys, and unrelated source text are preserved rather than regenerated.
+- Painted texture pixels continue through the existing BSP texture export path. This feature does not create WAD files, search for WADs, change MAP texture references, rebuild BSP geometry, run QBSP, VIS, or ericw light.
+- If the source MAP changed externally since import, or an unrelated file already occupies the companion output path, export stops rather than overwriting it.
+- The former Import MAP via QBSP workflow is removed; BSP is the import entry point and the adjacent MAP is an optional companion source.
+- Added focused tests for MAP tokenization, brush/comment preservation, entity matching, safe patching, and same-directory companion discovery. CI and Blender 5.2 runtime validation are pending.
 
 ---
 
