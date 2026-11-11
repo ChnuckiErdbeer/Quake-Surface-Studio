@@ -63,11 +63,12 @@ def build_qbsp_command(
     The caller owns the output directory and working directory. The function
     never invokes a shell and never derives an output path beside the source MAP.
     """
-    exe = os.path.abspath(os.path.expandvars(os.path.expanduser(executable or "")))
+    raw_executable = str(executable or "").strip()
+    if not raw_executable:
+        raise ValueError("No ericw-tools qbsp executable was configured.")
+    exe = os.path.abspath(os.path.expandvars(os.path.expanduser(raw_executable)))
     source = os.path.abspath(os.path.expandvars(os.path.expanduser(map_path or "")))
     destination = os.path.abspath(os.path.expandvars(os.path.expanduser(output_bsp or "")))
-    if not exe:
-        raise ValueError("No ericw-tools qbsp executable was configured.")
     if not source or not source.lower().endswith(".map"):
         raise ValueError("Select a source .map file.")
     if not os.path.isfile(source):
