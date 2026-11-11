@@ -2807,7 +2807,19 @@ def _qss_make_cycles_math_node(nodes, name, operation, location):
     node.label = name.removeprefix("QSS_")
     node.operation = operation
     node.location = location
+    node["qss_cycles_falloff_node"] = True
     return node
+
+
+def _qss_cycles_falloff_tree_is_owned(light_data):
+    """True only when every node in this light tree belongs to QSS."""
+    if int(light_data.get("qss_cycles_delay_falloff_version", 0)) != 1:
+        return False
+    node_tree = getattr(light_data, "node_tree", None)
+    if node_tree is None or not node_tree.nodes:
+        return False
+    return all(bool(node.get("qss_cycles_falloff_node", False))
+               for node in node_tree.nodes)
 
 
 def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
@@ -2821,6 +2833,15 @@ def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
     and ericw delay 0 or delay 5. Eevee ignores this light node tree and retains
     the ordinary lamp-energy approximation.
     """
+    # Never clear a node graph that did not originate from this helper.
+    # Fresh imported QSS lights have nodes disabled; an existing enabled tree
+    # that is not fully QSS-owned belongs to the user.
+    existing_tree = getattr(light_data, "node_tree", None)
+    if (bool(light_data.use_nodes) and existing_tree is not None
+            and len(existing_tree.nodes) > 0
+            and not _qss_cycles_falloff_tree_is_owned(light_data)):
+        raise RuntimeError("Existing user-authored light nodes were preserved; QSS Cycles falloff was not installed")
+
     light_data.use_nodes = True
     node_tree = getattr(light_data, "node_tree", None)
     if node_tree is None:
@@ -2833,6 +2854,7 @@ def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
     falloff = nodes.new("ShaderNodeLightFalloff")
     falloff.name = "QSS_Ericw_LightFalloff"
     falloff.label = "ericw distance probe"
+    falloff["qss_cycles_falloff_node"] = True
     falloff.location = (-900, 120)
     falloff.inputs["Strength"].default_value = 1.0
     falloff.inputs["Smooth"].default_value = 0.0
@@ -2918,6 +2940,7 @@ def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
     emission = nodes.new("ShaderNodeEmission")
     emission.name = "QSS_Ericw_Emission"
     emission.label = "inverse-square × ericw correction"
+    emission["qss_cycles_falloff_node"] = True
     emission.location = (1120, 100)
     # The Light datablock retains the Quake _color and calibrated energy.
     emission.inputs["Color"].default_value = (1.0, 1.0, 1.0, 1.0)
@@ -2926,6 +2949,7 @@ def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
     output = nodes.new("ShaderNodeOutputLight")
     output.name = "QSS_Ericw_LightOutput"
     output.label = "Cycles light output"
+    output["qss_cycles_falloff_node"] = True
     output.location = (1360, 100)
     if hasattr(output, "target"):
         output.target = "CYCLES"
@@ -2943,8 +2967,8 @@ def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
 
     if int(delay) not in {0, 5}:
         # Do not disturb unrelated or user-authored light node trees. Only
-        # disable node trees installed and tagged by this SLOPGATE helper.
-        if marker:
+        # disable a complete node tree installed by this SLOPGATE helper.
+        if _qss_cycles_falloff_tree_is_owned(light_data):
             light_data.use_nodes = False
         light_obj["qss_cycles_falloff_active"] = False
         light_obj["qss_cycles_falloff_profile"] = "native_fallback"
@@ -2953,6 +2977,17 @@ def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
     if not hasattr(light_data, "use_nodes"):
         light_obj["qss_cycles_falloff_active"] = False
         light_obj["qss_cycles_falloff_error"] = "Light shader nodes are unavailable in this Blender build"
+        return False
+
+    existing_tree = getattr(light_data, "node_tree", None)
+    if (bool(light_data.use_nodes) and existing_tree is not None
+            and len(existing_tree.nodes) > 0
+            and not _qss_cycles_falloff_tree_is_owned(light_data)):
+        light_obj["qss_cycles_falloff_active"] = False
+        light_obj["qss_cycles_falloff_profile"] = "user_nodes_preserved_native_fallback"
+        light_obj["qss_cycles_falloff_error"] = (
+            "Existing user-authored light nodes were left untouched; this light uses native falloff"
+        )
         return False
 
     world_dist = max(1e-6, float(light_obj.get("qss_quake_world_dist", 1.0)))
@@ -3011,7 +3046,8 @@ def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
         # Keep the existing native lamp usable if this Blender build cannot
         # construct the Cycles-specific node graph.
         try:
-            light_data.use_nodes = False
+            if _qss_cycles_falloff_tree_is_owned(light_data):
+                light_data.use_nodes = False
         except Exception:
             pass
         light_obj["qss_cycles_falloff_active"] = False
@@ -3051,25 +3087,29 @@ def _apply_quake_light_energy_scale(scene):
             light_obj.data.energy = lighting_utils.scaled_quake_light_energy(
                 preview['energy'], scale * manual_calibration
             )
+            cycles_falloff_active = _qss_update_cycles_delay_falloff(
+                light_obj, delay, light_obj.get('qss_quake_raw_light_value', raw_value)
+            )
+            cycles_exact_falloff = (
+                str(getattr(scene.render, 'engine', '')) == 'CYCLES'
+                and cycles_falloff_active
+                and delay in {0, 5}
+            )
             if hasattr(light_obj.data, 'use_custom_distance'):
-                light_obj.data.use_custom_distance = True
+                # Delay 5 has an infinite tail. Do not truncate it in Cycles;
+                # Eevee retains its finite native-lamp range approximation.
+                light_obj.data.use_custom_distance = not (
+                    cycles_exact_falloff and delay == 5
+                )
             if hasattr(light_obj.data, 'cutoff_distance'):
                 light_obj.data.cutoff_distance = preview['cutoff_distance']
             if hasattr(light_obj.data, 'shadow_soft_size'):
                 # A finite emitter radius changes the inverse-square base curve.
-                # Keep the Cycles source effectively point-sized so the custom
-                # delay 0/5 correction remains mathematically valid. Eevee keeps
-                # the established soft-radius approximation.
-                cycles_exact_falloff = (
-                    str(getattr(scene.render, 'engine', '')) == 'CYCLES'
-                    and delay in {0, 5}
-                )
+                # Keep exact Cycles sources point-sized; Eevee retains the
+                # established soft-radius native-lamp approximation.
                 light_obj.data.shadow_soft_size = (
                     0.0 if cycles_exact_falloff else preview['shadow_soft_size']
                 )
-            _qss_update_cycles_delay_falloff(
-                light_obj, delay, light_obj.get('qss_quake_raw_light_value', raw_value)
-            )
             light_obj['qss_quake_live_preview_profile'] = preview['profile']
             light_obj['qss_quake_live_preview_reference_distance'] = preview['reference_distance']
         else:
