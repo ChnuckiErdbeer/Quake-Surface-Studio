@@ -3159,6 +3159,10 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
             map_entity_indices = map_sync.match_bsp_entities_to_map_entities(entities, map_entities)
             obj["qss_source_map_path"] = os.path.abspath(source_map_path)
             obj["qss_source_map_sha256"] = map_sync.sha256_bytes(map_source_text.encode("latin1"))
+            obj["qss_map_linked_entity_indices"] = ",".join(
+                str(map_index) for bsp_index, map_index in map_entity_indices.items()
+                if str(entities[bsp_index].get("classname", "")).lower().startswith("light")
+            )
             obj["qss_map_sync_status"] = "LINKED"
         except Exception as map_exc:
             obj["qss_map_sync_status"] = "UNAVAILABLE"
@@ -8940,7 +8944,7 @@ def _qss_map_light_updates(context, obj, source_text):
     entities = map_sync.parse_map_entities(source_text)
     updates = {}
     linked = {}
-    unit_scale = max(1e-9, abs(float(obj.get("qss_quake_unit_scale", DEFAULT_QUAKE_UNIT_SCALE))))
+    unit_scale = max(1e-9, abs(float(obj.get("qss_unit_scale", DEFAULT_QUAKE_UNIT_SCALE))))
     flip_z = bool(obj.get("qss_flip_z", False))
     for light_obj in _qss_collection_objects(bpy.data.collections.get(obj.get("qss_map_collection", ""))):
         if light_obj.type != "LIGHT" or light_obj.get("qss_light_role") not in {"quake_entity_light", "quake_world_sunlight"}:
@@ -8978,7 +8982,7 @@ def _qss_map_light_updates(context, obj, source_text):
             if baseline > 1e-9 and abs(current_energy - baseline) > max(1e-5, baseline * 1e-5):
                 raw = max(0.0, float(light_obj.get("qss_quake_raw_light_value", 300.0)))
                 world_range = max(1e-9, float(light_obj.get("qss_quake_world_range", 1.0)))
-                changed["light"] = f"{raw * (current_energy / baseline) / world_range:.6g}"
+                changed["light"] = f"{raw * (current_energy / baseline):.6g}"
             if light_obj.data.type == "SPOT":
                 original_angle = float(light_obj.get("qss_quake_spot_angle", 40.0))
                 current_angle = math.degrees(float(light_obj.data.spot_size))
