@@ -1,128 +1,90 @@
-# Slipgate — Quake Surface Center Conversation Archive
+# SLOPGATE — Quake Surface Studio Conversation Archive
 
+## Instructions for future assistant sessions
 
-## Instructions for future ChatGPT sessions
+**Read ai chat history/SLOPGATE_AI_Handoff.md first.** It is the concise, current reference for the project, the user's working preferences, the present source state and still-relevant design decisions. Then use this file when you need the original dialogue, deeper context, exact user wording, technical evidence or a fact-check of the summary.
 
-**This is the living project handoff and conversation record for Slipgate. Read this section and the latest relevant entries before doing project work.** Do not treat this file as passive historical material: the user expects it to be maintained as the project evolves.
+This archive is the detailed project record. The handoff file is a compressed editorial summary and may become stale. Always verify the current repository branch, source code and tests before coding. User decisions in the latest conversation take precedence over older plans.
 
-### How this document is organized
+### Archive structure
 
-- The historical conversation archive begins below with its original title, extraction metadata and conversation index. The index and post counts describe the original `fullhisory01.txt` extraction; they do not automatically include later live-chat additions.
-- Historical sessions are grouped by date/time and topic. Within a session, `### You` marks the user's messages and `### ChatGPT` marks assistant replies. Links to original conversations and source-page counts are retained where available.
-- New project conversations are appended after the historical transcript, in chronological order. Use a dated session heading (Europe/Berlin local time where known) and the same speaker headings.
-- The current handoff snapshot and reference list are maintained separately from the raw transcript so that a future assistant can quickly orient itself without mistaking notes for verbatim conversation.
+- This introduction contains current project orientation and source-state notes.
+- The conversation index and transcript below retain the original historical sessions.
+- New live-chat sessions are appended at the end in chronological order. Use dated headings and the speaker labels You and ChatGPT.
+- The historic filename still contains the old product spelling. Do not rename or rewrite historic transcript content simply to normalize it.
 
 ### Required ongoing maintenance
 
-4. **Always provide an installable Blender add-on ZIP whenever a new version or installable build is produced.** Do not stop at a commit, source link, or test result. Build the ZIP from the exact branch commit being reported, verify that the artifact exists and contains the Blender-installable `quake_surface_studio/__init__.py` package layout, and give the user a direct download link in the response. If CI fails or no artifact is available, say so plainly and do not present an unverified source archive as an installable build. Include the version, commit, test status and artifact link together.
+1. Append every substantive project-related exchange, preserving the user's original wording and recording the assistant's substantive response and actual outcome.
+2. Keep the historical transcript append-only. Corrections, new decisions and status changes belong in dated updates and the editable current handoff, not by rewriting old dialogue.
+3. Keep the separate SLOPGATE_AI_Handoff.md current. It should compress ideas from the archive that remain relevant to the project and to collaboration with the user.
+4. Always provide a verified installable Blender ZIP for every new add-on version/build. Build it from the exact source commit being reported, verify the quake_surface_studio/__init__.py package layout, and give the direct download link with version, commit and test status. If no verified artifact exists, say so.
+5. Preserve all existing add-on features and workflows unless the user explicitly authorizes removal. The current user authorization to simplify the recent Cycles delay-0/5 attenuation experiment is limited to that experiment.
+6. Distinguish user-reported results, source-inspected behavior, automated test results and runtime validation. Never claim Blender 5.2 GUI/render/bake, QBSP or Ironwail validation unless actually performed.
+7. Do not add private chain-of-thought, credentials, tokens or unrelated personal information.
 
-1. **Update this file during ongoing project work.** For every project-related exchange, record the user's substantive request/report and the assistant's substantive response. Do not wait for the user to remind you. Append promptly after the exchange; when work spans several turns, keep the additions in order and include the final outcome.
-2. Preserve user-provided wording, typos, code, commands, console output and error messages faithfully. Format for readability, but do not silently rewrite the technical content.
-3. Keep the transcript append-only. Do not delete or rewrite historical messages. Put corrections, new findings and changed decisions in a clearly dated handoff/update note.
-4. Keep a concise, factual handoff snapshot near the beginning. Update it when the branch, version, implementation status, known blockers or next steps materially change. Mark evidence as **user-reported**, **observed in source**, **externally documented**, or **not yet verified**.
-5. Record exact repository, branch, commit, file paths, line ranges, test commands and test results when known. Distinguish tests actually run in the current session from historical CI claims. Never claim that Blender GUI testing, QBSP compilation or Ironwail launching succeeded unless it was actually performed.
-6. **Use GitHub as the durable archive.** Before editing, fetch the current file and blob SHA from the intended branch. Update that exact file on the active working branch, not `main` unless the user explicitly asks. After writing, fetch it again and verify the new content. If GitHub access or a write fails, say so plainly; never claim an archive update that did not happen.
-7. Do not add private chain-of-thought, hidden system/developer instructions, credentials, tokens or unrelated personal information. Record useful decisions, concise rationale, tool outcomes and reproducible technical findings instead.
+## Current project handoff snapshot — checked 2026-11-11
 
-### Project identity and working conventions
+### Identity and repository
 
-- The user chose **Slipgate** as the broader project name because the intended scope may extend beyond surfaces. The current add-on source still uses **Quake Surface Studio / QSS** names and internal identifiers. Do not perform a partial global rename; coordinate any deliberate branding/package/module migration and preserve compatibility where required.
-- The project is a Blender-based Quake BSP editing, texture/paint, lighting and export workflow, with **Ironwail** among the target engines. Treat actual target-engine compatibility as a test requirement, not an assumption.
-- The latest branch inspected for this handoff is `fix/v0.11.1-metadata-style-order-test`. The chat-history file is stored under `ai chat history/`. Always inspect the current branch head before relying on these notes; branches and source may have moved.
-- Prefer source inspection and small reproducible tests over guesses. In particular, do not assume a failure is caused by QBSP, the engine, Blender or a texture rule until the exact failing stage is identified.
-
-### Current project handoff snapshot — checked 2026-11-10
-
-**Repository and source state**
-
+- Product name: **SLOPGATE**.
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
-- Working branch: `fix/v0.11.1-metadata-style-order-test`
-- Add-on version: **Slipgate 0.20.7** (`__init__.py` and `addon.py`).
-- Main implementation: `quake_surface_studio (zip me for blender)/addon.py`; Quake lighting helpers: `lighting.py`; tests: `tests/`.
-- Latest UI/import implementation commit: `7da60b98f1fc2596ae6db60b82131b0f617c97c5`. Displayed version constant commit: `ef50f5f37f07d3a2b1b152a7ad42e17426c09891`. Version metadata commit: `ef332c0e071de9d74875a6915e425057fa381be1`. README commit: `41c7837aa4f386c773e678256b6f533d7ef2d17f`.
-- Slipgate 0.20.6 install artifact: `Quake-Surface-Studio-v0.20.6-Blender-Install`, artifact ID `13761780232`, SHA-256 `a8aae3a77a5bd505a0a0297927809de585099dce64852c720a797395461a4bc7`; GitHub Actions run 621.
-- Slipgate 0.20.7 install artifact: `Quake-Surface-Studio-v0.20.7-Blender-Install`, artifact ID `13765434151`, SHA-256 `ad43ea1a31f66e4448efb4fff69c1415315500e7ee58f43922bf329f177fb749`; GitHub Actions run 633.
-- Blender install artifact: `Quake-Surface-Studio-v0.20.5-Blender-Install`, artifact ID `13757062978`, SHA-256 `1b8298070a36322f2c304b81d76d9bd122b74b0468adbb7f364e0d5bccc4f0b7`. GitHub Actions run 616. Artifact expires 2027-02-08.
-- Package folder and internal identifiers remain `quake_surface_studio` / QSS for compatibility; visible branding is Slipgate.
-- Target interactive environment: Blender 5.2. Target engine includes Ironwail.
+- Active branch: fix/v0.11.1-metadata-style-order-test
+- Last inspected add-on source commit: a5e5be55050ecce6532222aeb0d19eb017cb1254. Documentation-only commits may advance the branch; always re-check before code edits.
+- Add-on version: **0.20.8** in both __init__.py and addon.py.
+- Blender package/internal module remains quake_surface_studio / QSS for compatibility. Do not perform a partial global rename.
+- Target environment: Blender 5.2 on Linux, Quake 1 BSP29; target engine includes Ironwail 0.8.2.
 
-**Latest user-reported status through 0.20.6**
+### Latest recorded build
 
-- Bake works, the previous black-texture failure is gone, and the user confirmed version 0.20.6 produces no visible seams.
-- Texture painting works well; Quick Actions work.
-- User confirmed in Blender that loading a second map no longer brings back the grey/white tint, the viewport floor grid is gone, and lighting modes can be switched in Edit Mode but not Texture Paint.
-- User reports the live Blender lighting preview is still too bright while Cycles bake is close to the expected result. In Ironwail, Original and Baked are close and brighter than Blender's preview. Some light placements remain inaccurate.
-- User's 6-by-3 delay-calibration map is now present in the repository lighttest/ folder.
-- Version 0.20.4 introduced delay-aware Live Lights calibration with documented native-Blender limitations and per-map non-BSP artifact folders.
-- User now wants non-game-rendered/tool textures (examples: trigger, origin, clip) hidden through a dedicated View Options popup, not more controls in the narrow sidebar. They want a gradual TrenchBroom-inspired view-filtering system.
-- User explicitly requires: **never remove existing add-on features unless they explicitly ask for removal.** Preserve existing controls and workflows; ask before retiring or replacing anything.
+- Successful QSS Python and package run: 42958030442.
+- Successful converter GUI run: 42958030452.
+- Install artifact: Quake-Surface-Studio-v0.20.8-Blender-Install, artifact ID 13827248365, 241,052 bytes.
+- SHA-256: 0798ac71cf207af5c985a94cb2dcf941d6b8907657d96b322a50f40b543df160.
+- Artifact expiry recorded as 2027-02-09.
+- Automated Python tests, converter GUI tests and Python compilation passed.
+- **Not verified by the assistant:** Blender 5.2 runtime, Cycles bake, Eevee render, QBSP compile, Ironwail launch. Treat 0.20.8 as an experimental build, not a fully runtime-validated release.
 
-- User's latest 0.20.5 test notes: the pale grey/white face tint reappears on the second map; Cycles viewport preview looks too bright; Cycles bake is dark, while original and bake are brighter and close in Ironwail; some light placements still look wrong; user proposes a controlled delay calibration map with 6 groups × 3 lights, one active wall per test group, and three values per delay. User confirms bake works without seams and Quick Actions work well.
-- User also requests removing the viewport floor/grid override while working with Slipgate, and allowing lighting modes in Edit Mode while keeping them unavailable in Texture Paint.
+### Current implementation / important paths
 
-- Slipgate 0.20.7 changes: removed the Browse Game Maps sidebar button while retaining its operator for F3 compatibility; Import BSP starts in `<active-game>/maps` (fallback `<active-game>`); Quake palette opens with `invoke_popup` from paint-mode context menu; retained native `template_palette` responsive square swatches. No arbitrary per-button colors added.
+- Main add-on: quake_surface_studio (zip me for blender)/addon.py.
+- Quake light math and preview helpers: quake_surface_studio (zip me for blender)/lighting.py.
+- Imported BSP faces retain qss_bsp_miptex_id; materials retain qss_texture_name.
+- Imported Quake entity lights are spawned by _import_bsp_entities(). Current light types are POINT and SPOT. Direction parsing already considers target, mangle and angle; spot cone width uses angle / _cone and _softangle.
+- Current native preview uses lighting.blender_live_light_preview_parameters(). The recent delay-0/5 Cycles exact correction layer adds a custom Cycles Light Falloff node graph via _qss_update_cycles_delay_falloff() and related helpers.
+- The Quake Direct CPU lightmap solver is a separate path and must not be confused with the native lamp preview or the recent Cycles node experiment. Keep it intact when simplifying the latter.
+- The native Cycles bake, Live Lights preview, Eevee approximation and unrelated paint/import/export workflows must be preserved.
 
-**18-light calibration map findings and test harness**
+### Current lighting direction — plan only, not implemented
 
-- The correct map is lighttest/lighttest01-compile.map, not mapandbsp/test02_compile.map. Also present: compiled lighttest01-compile.bsp, compiler logs, and lighttest maps info.txt.
-- Map info: six groups for delays 0–5, three lights per group (values 50, 300, 900), all white _color 255 255 255, wait 1; each light is 8 Quake units above the centre of its floor. There are 20 entities total, including worldspawn and player start.
-- Exact ericw-tools folder recovered from the map's original compile log: /mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-alpha11-Linux. Tool commands recorded: qbsp -splitturb, vis, light.
-- Original light options: -extra4 -soft 2 -dirt 1 -bounce 1 -surflight_subdivide 64 -surflightscale 0.7 -phong. The log reports 18 initial lights, 15 switchable light styles, a warning that a face exceeded the four-style limit, 930152 lightmap bytes, and 9.849 s compile time.
-- Source map has targetname on 15 test lights, apparently used as labels such as d0_50 and d3_900. ericw-tools interprets targetname on a light as a switchable-light key, not a harmless label. The count of 15 switchable styles matches the 15 named lights. This contaminates a static-light calibration. Delay 5's three lights lack targetname. Use an inert key such as _qss_test_id for labels; do not use targetname for static-light test IDs.
-- A standalone test harness was prepared: run_lighttest_calibration.py, LIGHTTEST_CALIBRATION_README.md, and Slipgate_Lighttest_Calibration_Scripts.zip. Script SHA-256: 3f40dffb24312ed6cca49be947320ca1f8b40ffb71782f57e9e6bf4f25253fe4. README SHA-256: a6bbf3dcc5ace0645b68dd79a798c7658207d3058c47dfa1396b71b6ff23f0cc. ZIP SHA-256: a73058beae54e4688e807fd26775fca3c7f0bb902270b69ffc1c52923a4d6be2.
-- The script validates the six-by-three matrix; creates non-destructive MAP copies that replace light targetname fields with _qss_test_id; compiles two reference variants; and samples the BSP lightmap at the floor centre and multiple radii in four directions. Each variant targets 594 sample points (18 lights × 33 positions).
-- Variant A, attenuation_only: sets each light _anglescale 0, disables bounce/dirt, and omits extra samples, softening and phong to isolate radial attenuation.
-- Variant B, angle_default: same clean direct-light baseline but _anglescale 0.5, to measure the default surface-incidence contribution separately.
-- Both variants run qbsp -splitturb, vis, and light -verbose -nocolor -bounce 0 -dirt -1. They are test baselines, not production lighting settings. Source MAP/BSP and original logs are not overwritten.
-- Output includes separate BSPs, compiler logs, JSON reports and luxel_samples.csv files with raw luxels, ericw attenuation values, surface-angle factors and combined predictions. User command from lighttest/: python3 run_lighttest_calibration.py --compile. The default compiler path is the exact path above and can be overridden with --tools-dir.
-- Script syntax and entity/matrix parsing were checked against a synthetic 18-light fixture. It has not been run against the user's Linux compiler or real BSP; the compiler invocation and real BSP luxel sampler still require that run.
-- After execution, request the generated timestamped results folder ZIP, especially both CSVs, both run_report.json files and both *-light.log files. Then fit per-delay Live Light and Cycles calibration against compiler luxels. Do not tune preview energy by eye before this reference exists.
+- Main priority: new maps authored with SLOPGATE in mind. Existing ericw-targeted maps are an edge case; import their lights as a practical approximation with nearby-wall illumination as the main initial target.
+- delay 2 means SLOPGATE-native Blender light settings. Proposed type key: _sl_type = point, sun, spot or area; default point.
+- delay 0, 1, 3, 4, 5 mean ordinary native Blender-light approximation, not exact ericw reproduction.
+- Reuse light for the default power input and _color for RGB. Reuse target/mangle/angle conventions for spot/sun direction and cone setup.
+- Proposed Blender override keys include _sl_temperature, _sl_tint, _sl_power, _sl_exposure, _sl_normalize, _sl_radius, _sl_soft_falloff, with type-specific fields to be agreed. Negative values are proposed as “unset” for fields where stated; _sl_exposure neutral is 0.
+- Recommend lowercase _sl_ (one leading underscore) rather than __; decide the namespace before populating maps. Do not create the FGD yet.
+- Reuse the existing scene conversion multiplier for light → Blender energy; likely add a separate area/surface multiplier. Verify by light type.
+- For Area lights, retain ericw _surface as the texture selector but avoid blindly copying its grid of point lights; choose a face-based Area-light/emitter strategy after a prototype.
+- For Sun, distinguish ericw sky-face sunlight from Blender's directional Sun object. Exclude sky faces from inappropriate lightmap receiving and decide separately about shadow casting; a world environment may complement but does not replace a shadow-casting Sun.
+- Once the schema is stable, create an FGD based on the official rerelease FGD, with descriptive fields and defaults.
 
-**Implemented in Slipgate 0.20.5**
+### Related ideas still active
 
-- Restored the original compact root-panel header from the earlier v0.18.0 implementation: version label, cogwheel opening the existing Settings dialog, and Text icon opening the existing `config.json` in Blender's Text Editor in a separate window.
-- The settings and config-editor operators had remained in the 0.20.4 source; only the visible buttons had been lost. This release restores their entry points without removing or changing other panels, settings, or workflows.
-- CI: QSS Python tests passed (run 616); converter GUI tests passed (run 71). Package assembly produced the verified install ZIP above.
-- No Blender GUI test was performed for the restored header.
+- TrenchBroom-inspired View Options popup for reversible hiding of tool/non-rendered surfaces (trigger, clip, origin, hint, hintskip, skip). Do not auto-hide sky, liquids or fences. Use a read-only classifier/diagnostic list first; do not destructively remove geometry/materials.
+- Meta Quest 3 / Linux PCVR painting concept: controller raycast onto an imported face, then reuse the existing face-local UV/image painting pipeline. No VR implementation exists.
+- A separate Quake texture-converter workflow exists in the archive; keep its code/tests/build identity distinct from the SLOPGATE Blender add-on.
+- The lighttest/ calibration map has six delay groups × three brightness values (50, 300, 900). Do not use targetname as a static test label because ericw uses it for switchable lights; the test harness uses _qss_test_id. Its real compiler run and BSP sampling still require user-side execution.
 
-**Quest 3 / VR painting exploration**
+### Earlier user-reported checks
 
-- User owns a Meta Quest 3 and asked about spray-painting Quake map walls in VR.
-- Feasible direction: Blender runs on the Linux PC and Quest is the PCVR display/controllers; this is not a native Blender-on-Quest port.
-- WiVRn supports streaming Linux OpenXR applications to Quest 3. Blender's VR Scene Inspection uses OpenXR but is limited to scene inspection, not controller-driven texture painting. Blender's hardware manual still describes Monado Linux support as not recommended for general use yet.
-- XR Mesh Tools is an existing controller-oriented Blender extension with mesh, material and UV workflows, useful as reference, but it does not provide Slipgate's Quake face-local Texture Paint workflow.
-- Proposed Slipgate prototype: track controller pose, raycast to BSP face, convert hit to face-local UV image, stamp a spray/noise brush while trigger is held; off-hand palette, size, flow and undo. Reuse existing QSS paint images, UVs, palette and export path. No VR code has been implemented.
-**TrenchBroom-inspired View Options research — proposal, not implemented yet**
+On version 0.20.6 the user confirmed: bake works without visible seams; texture painting and Quick Actions work; the second-map grey/white tint issue was fixed; the viewport floor grid was hidden; lighting modes could be switched in Edit Mode but remained unavailable in Texture Paint. These are 0.20.6 user reports, not a blanket 0.20.8 validation. The 0.20.7 import-folder and popup changes had not yet been explicitly confirmed.
 
-- TrenchBroom's View Options is a dropdown/popup separate from its main editing viewport. It divides controls into Entities, Brushes (game-specific special brush/face types) and Renderer. It also supports per-entity-class visibility checkboxes and show/hide-all controls.
-- TrenchBroom classifies special brushes by entity classname patterns; special faces can be classified by material-name patterns, content flags, surface flags or surface parameters. This is more robust than relying only on a few literal texture names.
-- Quake texture names are meaningful but not all names have the same compiler/game behavior. Reference examples: `sky*` denotes sky; `*...` denotes liquids; `clip` is invisible collision; ericw-tools `skip`, `hint`, `hintskip` are compiler controls; `origin` is used to set brush-entity origin and is removed; `trigger` is a common trigger material, but triggers become invisible due to QuakeC entity behavior rather than the texture alone; `{...` indicates a fence texture and should remain visible.
-- Slipgate's imported mesh retains the source miptex index per face (`qss_bsp_miptex_id`) and each material stores its original name in `qss_texture_name`. This is a good basis for material-name classification and per-face filters.
-- Blender 5.2 exposes `MeshPolygon.hide`, which may provide a non-destructive per-face viewport hide mechanism. It must be tested carefully in Object Mode, Edit Mode, Texture Paint, Cycles bake and export before adopting it. Do not use destructive geometry deletion or alter source material/texture data just to hide editor-only faces.
-- Recommended first version: popup sections for **Tool / Non-rendered surfaces** (trigger, clip, origin, hint, hintskip, skip and a configurable custom-name list), **World rendering** (sky, liquids, fences as optional separate toggles, off by default), and **Entities** (later, when entity objects and class metadata are available). Provide Show All / Reset filters.
-- Default hide candidates should be limited to clear tool/non-game-rendered categories. Do not auto-hide sky, liquids or fences: those are actual game-visible surface types. Do not assume that every map contains these faces in its BSP render-face lump; some compilers remove them before BSP output.
-- UI recommendation: one compact **View Options** button in the existing Slipgate header opens a dedicated popup/popover/dialog. Keep all filter controls out of the narrow sidebar. Preserve the settings cogwheel and config Text Editor button beside the version.
-- Store filter preferences per map or per scene with a clear scope, and apply reversible face-visibility flags. Keep classification rules data-driven so mod-specific material prefixes can be added without changing the core code.
-- Next implementation stage, after agreeing on the proposal: add a read-only classifier and diagnostic list of detected special texture names first; then implement reversible visibility toggles and regression tests. This prevents guesses about the current map's actual texture set from silently hiding valid geometry.
+### Source and test discipline
 
-**Verification status and next user testing**
-
-- 0.20.7 CI passed: QSS Python run 633 and converter GUI run 80; artifact 13765434151 was downloaded and ZIP integrity/Python compilation verified.
-- User has interactively verified 0.20.6 in Blender: second-map tint regression fixed, floor grid hidden, Edit Mode lighting switching works, Texture Paint restriction works, Quick Actions work.
-- User has not yet reported whether 0.20.7's Import BSP initial directory, removal of the Browse Game Maps sidebar button, and cursor-positioned Quake palette popup behave correctly.
-- Calibration harness syntax and MAP entity/matrix parsing were checked synthetically. No actual QBSP/vis/light compile or BSP luxel sampling was run.
-- Do not claim Blender GUI, QBSP or Ironwail validation unless performed in the relevant session.
-
-**Historical issues still worth retaining**
-
-- The 0.20.3 bake report showed sparse face coverage; the user subsequently reported that the bake works and no longer produces black textures. Keep the earlier report as history, but use the newer user report as current status.
-- The 0.20.3 sRGB export change addressed Ironwail brightness concerns. Painting brightness is user-reported as good; a fresh export/engine comparison is still needed before marking Ironwail export fully verified.
-- Layer-toggle behavior outside Object Mode was previously reported and has not been explicitly closed out.
-- Never claim Blender GUI, QBSP or Ironwail validation unless performed in the relevant session.
-
-**Documentation maintenance note**
-
-The historical transcript below is append-only. Preserve user wording, console output, code and extraction evidence; do not rewrite genuine historical messages merely to remove typos or OCR-like line breaks. Standardize and clean the editorial handoff, index, references and new session notes. Obvious duplicated editorial checklist entries may be corrected in the handoff, but historical duplication should be annotated rather than silently deleted.
+- Prefer small isolated diffs, focused regression tests and inspection of all call sites.
+- Before changing light behavior, inspect the current importer and keep CPU Quake Direct, Cycles bake, preview, Eevee fallback and user-authored light nodes safe.
+- Do not implement the FGD until the key schema is settled.
+- See ai chat history/SLOPGATE_AI_Handoff.md for the fuller compressed brief and source references.
 
 ---
 
@@ -15539,3 +15501,197 @@ The user asked to analyze the uploaded `results_20261110_155139` measurements an
 
 ### Naming correction
 - The product and add-on name is **SLOPGATE**, not Slipgate. Older archive headings and the legacy archive filename may retain the historical spelling; do not perpetuate it in new project prose, code labels, UI text, or future log entries. Do not rewrite prior historical records merely to rename them.
+
+
+---
+
+## 2026-11-11 — SLOPGATE light-entity schema redesign
+
+### You
+
+Ok I made a decission. We wont try to perfecly imitate the ericw render for 
+now. You mayroll back to before we did this or change the current 
+implementation. Just dont make a mess. :D But let me first explain:
+
+The only reason someone would use SLOPGATE to (re-) render a bsp intended for 
+EricW would be if it was significantly faster while preserving the quality. 
+That would be an edge case. Lets focus more on new maps crafted with SLOPGATE 
+in mind. What that means: lets add new SLOPGATE related 
+keys to quakes light entities to communicate with blender. Blender has four 
+light types: point, sun, spot, and area. Those are all present in ericw too, so 
+lets reuse their way of setting them up in trenchbroom but adding keys to 
+directly control the imported equivalent in blender. For now i can type in the 
+new keys by hand in trenchbroom but when we setteled the system we will 
+implement them fgd style. 
+
+About the light variants:
+
+point:
+
+just a point light. Basically the same concept in ericw and blender.
+
+sun:
+
+Also pretty similar in concept. Parallel ligh coming from a fixed angle. Keep 
+in mind tho, that in order to make them work all sky textures need to be 
+ignored by them. Maybe they are better realized with world settings in blender.
+
+spot:
+pretty same concept here and in blender. exept for all the fallof stuff this 
+should be 100% transferable to blender.
+
+area:
+kind of exists in ericw as a hack in form of surface lights . A light has a 
+key pointing to a texture name and everytime this texture is encountered ericw 
+then places a grid of those lights on it. It kind of works but gets easily 
+spotty. I guess since quake 1 has no way of setting new parameters for faces as 
+it is possible with entities and their key system so pairing the both is a smart 
+thing to do. 
+
+So first the keys that we can reuse:
+
+"delay"
+
+If "delay" is 2 the light is recognized as a fully Blender compatible SLOPGATE 
+light. We can control all blender light parameters via SLOPGATE keys in 
+trenchbroom for this light.
+
+If "delay" is 0, 1, 3, 4 or 5 we'll  just do a  aproximation of what ericw 
+would do using blenders light settings. The main focus is not 
+to slow down blender in order to perfectly imitate ericw. Consider that the 
+distance to the  closest walls is the distance most important to get 
+right. This is a feature mostly for maps that wern't build with SLOPGATE in 
+mind and should be understood as a rough starting point for tweak ing the 
+lighting in blender. 
+
+"light"
+
+obviously maps to "Power". If the light is a SLOPGATE light (using "delay" 2) 
+with all SLOPGATE keys left default this should lead to a very close result in 
+ericw, cycles and eevee. Therfore we need to define a multiplier in the 
+SLOPGATE settings to match ericw light intesity values to blenders. Another 
+multiplier will probably be needed for surface / area lights.
+
+"color"
+can be reused as is i guess.
+
+All the angle mangle data of spotlights and suns can also be reused as we 
+already do i guess. 
+
+
+Additinal Keys:
+(we should look up the conventions of adding keys. Ive seen some use _ as 
+prefix also __. For now i will go with _SL for slopgate but i am open for 
+following conventions if they exist. Just a list of (i hope) all parameters of 
+a blender light:
+
+ "_SL_temperature" and "_SL_tint if the firmer is set to a value between 800 
+and 20000 (the blender extrema) SLOPGATE will set its ligh'ts  color this 
+alternative way. Good for realistic light sources but ericw will ignore this key 
+so keep in mind that you can set the exact same colors using the traditional 
+"_color" key and make them work in SLOPGATE and ericw. 
+
+If the next parameters are set and have non neutral values SLOPGATE directly 
+uses them for it's light. 
+
+"_SL_power" neutal values: all negaitve
+"_SL_exposure" neutral values: 0
+"_SL_normalize" neutral values: all negative
+"_SL_radius" neutral values: all negative
+"_SL_soft_falloff" neutral values: all negative
+
+There are other light setting and we will make those keys for all of them. I 
+guess you will be able to extrapolate them. In the end i want a fgd file 
+based on the official rerelease one so they show of well commented in 
+trenchbroom but dont make it right now. Lets first finish the plan. 
+
+Also i want you to (while still updating the chat log with the original 
+dialogue) start another file in the log folder especially for yourself where 
+you compress every idea in the logs that is still relevant today about the 
+project and also about how to work with me. In the introduction to the original 
+ask to read this first and then just use the main log when you need details or 
+fact check your own summary.
+
+### ChatGPT
+
+This is a planning decision, not a source-code change.
+
+### Direction agreed
+
+SLOPGATE's primary goal is now lighting authoring for new Quake maps designed around Blender. Re-rendering an existing ericw map is an edge case. Its imported lights should be a quick, useful approximation that can be adjusted in Blender; the most important initial quality target is sensible illumination at nearby walls and receivers. Do not spend runtime cost on pixel-perfect reproduction of ericw falloff.
+
+The mode split is:
+- delay 2: SLOPGATE-native Blender light. Read SLOPGATE-specific entity keys and create the selected Blender light type. If no type key is present, use POINT.
+- delay 0, 1, 3, 4 or 5: legacy import. Use native Blender lights and ordinary Blender properties for a practical approximation. This is not exact ericw parity.
+
+### Recommendation for the key schema
+
+Use a type key, provisionally _sl_type with values point, sun, spot, area. The user suggested _SL_*; I recommend lowercase _sl_ because Quake/ericw entity keys are conventionally lowercase and a single underscore is already widely used for compiler/tool-specific keys. There is no need for a double-underscore namespace. This is a recommendation, not yet a final schema decision.
+
+Keep and reuse the existing Quake keys:
+- delay selects native SLOPGATE mode when it is 2.
+- light supplies the base energy value when _sl_power is unset.
+- _color stays the shared RGB fallback so the same color works in SLOPGATE and ericw.
+- target and mangle continue to control direction; existing spotlight angle and _softangle remain the cone controls. The current importer already has target/mangle/angle handling for POINT/SPOT, which should be generalized rather than duplicated.
+- For ericw compatibility, _sun can identify an ericw sun entity and _surface remains its texture-name selector for surface lights.
+
+### Blender-specific properties
+
+Initial fields should map directly to Blender 5.2 properties, with explicit neutral/unset behavior:
+- _sl_temperature: 800–20000 K enables temperature-based color.
+- _sl_tint: optional RGB tint applied in temperature mode; default white. Test the combined temperature/tint behavior in Blender 5.2 before freezing the schema.
+- _sl_power: explicit Blender energy override; negative means unset, and zero remains a valid explicit value.
+- _sl_exposure: Blender exposure in EV; neutral/default 0.
+- _sl_normalize: 0/1 override; negative means inherit Blender's default.
+- _sl_radius: negative means inherit; map to a type-appropriate source-size property, not one generic property across all four types.
+- _sl_soft_falloff: 0/1 override where the Blender light type exposes it; negative means inherit.
+- Later shared candidates: shadow enable, diffuse/specular/transmission/volume factors, custom cutoff distance.
+- Area-only candidates: shape, size X, size Y and spread. Spotlight cone width and inner cone softness should initially reuse existing angle and _softangle.
+
+For light → Blender energy, first reuse the existing scene qss_light_energy_scale as the general conversion multiplier instead of creating a duplicate control. Add a separate area/surface multiplier for generated area emitters if calibration shows it is needed. When _sl_power is explicitly set, use it as a direct Blender-energy override rather than multiplying it again by the automatic Quake-light scale. Blender uses different energy units for different light types (for example, point energy is W and Sun energy is W/m²), so calibrate each type empirically.
+
+### The four light types
+
+- POINT: default type; direct mapping to Blender POINT with inverse-square native attenuation. This is the simplest mode to calibrate against ericw delay 2.
+- SPOT: Blender SPOT; reuse target/mangle direction and existing angle/_softangle cone controls. Do not implement a second independent cone convention.
+- SUN: one Blender directional Sun object, oriented by the existing mangle/target direction data. ericw's _sun/mangle behavior is useful for compatibility, but ericw sunlight is sourced from sky-content faces while a Blender Sun is a directional object. In Blender, keep the visible sky/background separate, exclude sky faces from inappropriate lightmap receiving, and decide separately whether they should cast shadows. A world background can complement the Sun but is not a substitute for a shadow-casting Sun.
+- AREA: support both a standalone Area light placed at origin and, as the likely SLOPGATE-specific use case, a surface-linked template using ericw's _surface texture selector. For a matched BSP face, avoid simply cloning ericw's roughly 128-unit grid of point lights. Prototype one face-sized Area light per face versus a face-derived emissive mesh/material or a subdivision strategy; choose based on quality, render cost and irregular-face behavior. The surface-linked emitter representation is not yet decided.
+
+### Important implementation boundary
+
+The current addon.py importer creates only POINT and SPOT. It already parses target, mangle, angle, _softangle, light, _color, delay, wait and _falloff. The recent Cycles-only correction graph is a separate layer:
+- remove only the exact native-light delay-0/5 node emulation and its dedicated tests/helpers once the plan is approved;
+- retain the native Blender approximation helper for legacy delays;
+- retain ericw_light_value() and all CPU Quake Direct solver functionality;
+- retain the existing Cycles bake, Live Lights preview, Eevee behavior and every unrelated workflow;
+- preserve user-authored light node trees and all other user data.
+
+Do not roll back the whole lighting subsystem. Make any later cleanup as a small, isolated diff after checking all call sites.
+
+### Naming and FGD
+
+Research found that ericw uses single-underscore keys such as _color, _sun and _surface; FGD references describe underscore-prefixed keys as common for compile-time properties. TrenchBroom treats entity properties as key/value strings and uses the FGD to define their type, default and help text. No established Quake convention requiring __ was found. The proposed lowercase _sl_ namespace is therefore the cleanest starting point, subject to final approval.
+
+Do not create the FGD now. Once the schema is stable, use the official rerelease FGD as the base, preserve its definitions and add well-commented SLOPGATE keys with correct types, defaults and choices.
+
+### Planned order
+
+1. Finalize _sl_type, the shared keys, per-type keys, sentinel/default behavior and the surface-linked Area-light strategy.
+2. Implement the small importer changes: SLOPGATE-native delay 2 and ordinary native-light approximation for legacy delays.
+3. Remove only the unneeded Cycles exact-falloff graph, after confirming the CPU Quake Direct solver and all bake/preview workflows remain untouched.
+4. Add parser/unit tests for all types, missing/default/invalid keys, key precedence and scale behavior.
+5. Test in Blender 5.2: import, Cycles, Eevee, bake, sun/sky behavior, spot cone and area emitters. Use a purpose-built SLOPGATE test map, plus the existing 18-light calibration map for legacy approximations.
+6. Only after the schema settles, create the official-rerelease-based FGD.
+
+### Source facts checked for this plan
+
+- ericw-tools documents delay values 0–5, _sun and mangle for directional sun entities, _surface as a texture-name template copied onto matching faces, and _suntexture as a filter on sky-texture emission.
+- Blender 5.2's Light API exposes type, color, temperature (800–20000 K), exposure, normalize, cutoff distance, shadow controls and other shared light settings. PointLight exposes energy and shadow soft size. Type-specific properties need to be checked against the relevant Blender 5.2 subclasses.
+- The current add-on source was inspected, but this plan has not been implemented or runtime-tested.
+
+### Documentation work performed
+
+- Added ai chat history/SLOPGATE_AI_Handoff.md as the compact project and collaboration brief.
+- Updated the opening of the main archive to instruct future sessions to read that brief first.
+- Appended this exchange to the main archive with the user's original message preserved verbatim.
+- No add-on source code, FGD, build version or install artifact was changed in this documentation update.
