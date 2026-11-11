@@ -15897,3 +15897,12 @@ Implemented the first MAP import milestone in SLOPGATE 0.20.9.
 - Final source commit: 65679967beefccf688d0ebf4e5a7ed98fcacdeaa. QSS Python workflow 43006066793 passed compileall, all standalone tests, package assembly and artifact upload.
 - Final install ZIP: artifact 13848052575, 250,398 bytes, 41 entries; SHA-256 248ac7e9c4f45f49e6211d09e3f152a1d1fbe171d4f220a5963a9bd26bc276e3. Downloaded archive passed unzip integrity and package-layout checks.
 - Blender 5.2 interactive validation and actual Quake toolchain/engine tests remain outstanding.
+
+
+## 2026-11-11 — Linked light deletion support and final build
+
+- Companion MAP synchronization now also removes an imported light entity when its linked Blender light object has been deleted from that map's entity collection. The association list is built only from light objects actually imported, so unsupported/unrepresented MAP entities are not removed accidentally.
+- Creating new light entities and editing spot mangle/target direction remain future work. Supported edits remain position, color, magnitude and spotlight cone.
+- Final source commit: 1bd489a941996b1e6951e5e80bcb29ad55717738. QSS Python workflow 43006423133 passed Python compilation, all standalone tests, package assembly and artifact upload.
+- Final verified install ZIP: artifact 13847883510, 250,836 bytes, 41 entries; SHA-256 24949865ae5155702ed283ff4c8af970296bb88b225d432cf76ac050f655cf18. Artifact page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43006423133/artifacts/13847883510.
+- No interactive Blender 5.2 or actual Quake toolchain/engine test was performed.
