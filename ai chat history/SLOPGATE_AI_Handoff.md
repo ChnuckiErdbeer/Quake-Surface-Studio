@@ -46,6 +46,7 @@ The archive filename and some historic headings contain the old spelling “Slip
 - Successful final QSS Python workflow: run 43006066793; compileall, standalone suite, package assembly and artifact upload passed.
 - Install artifact: Quake-Surface-Studio-v0.21.0-Blender-Install, artifact ID 13848052575, 250,398 bytes, 41 ZIP entries.
 - SHA-256: 248ac7e9c4f45f49e6211d09e3f152a1d1fbe171d4f220a5963a9bd26bc276e3. ZIP integrity and installable package root verified; expiry 2027-02-09.
+- GitHub artifact page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43006066793/artifacts/13848052575
 - Runtime validation outstanding: no Blender 5.2 GUI, actual QBSP/VIS, Cycles/Eevee render/bake, or Ironwail run.
 - Previous 0.20.9 artifact details are historical.
 - Main add-on source: quake_surface_studio (zip me for blender)/addon.py; MAP text-preserving parser/synchronizer: map_sync.py; focused tests: tests/test_map_sync.py. Direct MAP-via-QBSP import was superseded and removed in 0.21.0.
