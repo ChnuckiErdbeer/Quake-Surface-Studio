@@ -15904,5 +15904,13 @@ Implemented the first MAP import milestone in SLOPGATE 0.20.9.
 - Companion MAP synchronization now also removes an imported light entity when its linked Blender light object has been deleted from that map's entity collection. The association list is built only from light objects actually imported, so unsupported/unrepresented MAP entities are not removed accidentally.
 - Creating new light entities and editing spot mangle/target direction remain future work. Supported edits remain position, color, magnitude and spotlight cone.
 - Final source commit: 1bd489a941996b1e6951e5e80bcb29ad55717738. QSS Python workflow 43006423133 passed Python compilation, all standalone tests, package assembly and artifact upload.
-- Final verified install ZIP: artifact 13847883510, 250,836 bytes, 41 entries; SHA-256 24949865ae5155702ed283ff4c8af970296bb88b225d432cf76ac050f655cf18. Artifact page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43006423133/artifacts/13847883510.
+- Final verified install ZIP: artifact 13847883510, 250,836 bytes, 41 entries; SHA-256 24949865ae5155702ed283ff4c8af970296bb88b225d432cf76ac050f655cf18. Artifact page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43006568762/artifacts/13847848551.
 - No interactive Blender 5.2 or actual Quake toolchain/engine test was performed.
+
+
+## 2026-11-11 — Final SLOPGATE 0.21.0 package with linked-light deletion
+
+- Implementation commit: 1bd489a941996b1e6951e5e80bcb29ad55717738. Companion MAP export now detects deleted linked imported light objects and removes only those corresponding MAP light entities; the association list is limited to light objects actually imported.
+- Final package build commit: 87a1cee7dfc007b177c4b9923e7c2874777e773d. QSS Python workflow run 43006568762 passed compileall, the standalone test suite, package assembly and artifact upload.
+- Final ZIP: artifact 13847848551, 250,878 bytes, 41 entries; SHA-256 65e6bef6f391d2216ebb9c67fd8ace8e6920499161acce08c12b194b2b9f57c7. Downloaded ZIP integrity and package layout verified. Artifact page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43006568762/artifacts/13847848551.
+- New light creation and spot direction/mangle synchronization remain future work. No Blender 5.2 GUI or actual Quake toolchain/engine validation was performed.
