@@ -247,7 +247,7 @@ def ericw_cycles_light_falloff_correction(
         radius = (
             falloff_radius * dist_scale
             if falloff_radius > 0.0
-            else raw_intensity * wait_value * dist_scale
+            else raw_intensity / (wait_value * dist_scale)
         )
         if radius <= 1e-12:
             return 0.0
