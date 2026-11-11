@@ -15853,3 +15853,30 @@ Implemented the first MAP import milestone in SLOPGATE 0.20.9.
 - Interactive Blender 5.2 import and the user's actual QBSP/WAD/game-path configuration have not yet been tested. No VIS, ericw light, bake or Ironwail runtime test was performed.
 - Added SLOPGATE_Field_Notes.md as a separate harmless creative-writing space. It is not used for technical decisions or factual handoff material.
 - The user wants the currently discussed main features implemented before a dedicated cleanup/stabilization phase and first official release. Keep 0.20.9 classified as an experimental development build.
+
+
+## 2026-11-11 — Companion MAP workflow and scope clarification
+
+**User:**
+
+> I absolutely agree! Changing geometry in blender is not intended for now. The only changes for now are lights and textures. In later releases we may expand this to other point entities, and maybe the code part of brush entities but for now only lights and textures.
+>
+> So I think we got everything. Id suggest Phase 1 and 2 can go together. Its more a structure for yourself. Impress me! :D
+
+**Assistant — implementation direction:**
+
+- Keep BSP as the import source. Silently discover a same-basename MAP beside it; do not import MAP directly or invoke QBSP for discovery.
+- Treat the companion MAP as authoritative for brush geometry. Synchronize only supported light/entity fields; preserve brush source, texture axes, comments, unknown keys, and unrelated entity data.
+- Leave WAD discovery and WAD paths to TrenchBroom/QBSP. Do not run QBSP, VIS, or ericw light during ordinary SLOPGATE export.
+- Painted texture pixels continue through the existing BSP texture export/replacement path. Do not regenerate geometry for texture-only changes.
+- Write an updated MAP beside the exported BSP, keep the source MAP untouched, and reject stale-source or unsafe-output overwrites.
+- Future expansion to additional point entities and brush-entity code is explicitly deferred.
+
+**Implementation record (0.21.0, validation pending):**
+
+- Added the map_sync module and focused tests for loss-minimizing MAP entity parsing and patching.
+- Integrated same-basename companion discovery into BSP import and linked compiled BSP light entities to MAP entities by classname and origin.
+- Integrated companion MAP output with BSP export. Current supported synchronization covers linked light origin, color, magnitude, and spotlight cone angle. Target-controlled direction is left unchanged.
+- Removed the superseded direct MAP-via-QBSP operator and sidebar control.
+- Preserves MAP brush blocks, comments, unknown keys, WAD references, and texture references; no geometry rebuilding, WAD hunting, QBSP, VIS, or ericw light.
+- CI, interactive Blender 5.2 verification, and installable ZIP are still pending. Do not claim a tested release until those checks pass.
