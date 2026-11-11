@@ -3336,6 +3336,15 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
     else:
         obj['qss_has_player_start'] = False
     obj['qss_light_collection'] = collection.name
+    # Only track MAP lights that actually produced a Blender light object.
+    # Unrepresented or unsupported source entities must never be deleted.
+    obj['qss_map_linked_entity_indices'] = ",".join(
+        str(int(light_obj.get("qss_map_entity_index", -1)))
+        for light_obj in collection.objects
+        if light_obj.type == "LIGHT"
+        and light_obj.get("qss_map_entity_linked", False)
+        and light_obj.get("qss_light_role") == "quake_entity_light"
+    )
     obj['qss_light_entity_count'] = int(light_count)
     obj['qss_inferred_light_style_count'] = int(inferred_style_count)
     obj['qss_entity_count'] = len(entities)
