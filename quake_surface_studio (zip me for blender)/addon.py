@@ -2813,8 +2813,9 @@ def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
     """Build a Cycles-only multiplier that converts the base point falloff.
 
     The standard QSS lamp energy is already calibrated at one reference point.
-    The Light Falloff node's Linear/Quadratic outputs are respectively 1/d and
-    1/d² when Smooth=0, so Linear/Quadratic recovers the shading-point distance.
+    With Smooth=0, the Light Falloff node's Quadratic output is Strength and
+    Linear is Strength multiplied by ray length, so Linear/Quadratic recovers
+    the shading-point distance.
     The math nodes then apply the exact ratio between that inverse-square base
     and ericw delay 0 or delay 5. Eevee ignores this light node tree and retains
     the ordinary lamp-energy approximation.
