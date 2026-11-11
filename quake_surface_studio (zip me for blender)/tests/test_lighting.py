@@ -117,6 +117,14 @@ class BlenderLivePreviewCalibrationTests(unittest.TestCase):
         # At the ericw 128-unit reference distance, native E/r^2 is 300.
         self.assertAlmostEqual(result['energy'] / reference ** 2, 300)
 
+    def test_delay_zero_default_radius_uses_inverse_wait_and_world_dist(self):
+        result = lighting.blender_live_light_preview_parameters(
+            300, 300, 0, wait=2, world_dist=1.5, unit_scale=0.01
+        )
+        expected_radius = 300 / (2 * 1.5) * 0.01
+        self.assertAlmostEqual(result['cutoff_distance'], expected_radius)
+        self.assertAlmostEqual(result['energy'], 300 * expected_radius ** 2 / 8)
+
     def test_delay_zero_honours_explicit_falloff_radius(self):
         result = lighting.blender_live_light_preview_parameters(
             300, 300, 0, wait=9, world_dist=2, falloff=100, unit_scale=0.01
@@ -142,7 +150,7 @@ class BlenderLivePreviewCalibrationTests(unittest.TestCase):
             radius = (
                 falloff * world_dist
                 if falloff > 0.0
-                else raw * wait * world_dist
+                else raw / (wait * world_dist)
             )
             base_energy = raw * world_range * (radius * unit_scale) ** 2 / 8.0
             distances = (8.0, 24.0, 64.0, 128.0, radius * 0.5, radius, radius * 1.2)
