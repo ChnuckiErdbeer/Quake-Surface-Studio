@@ -50,9 +50,9 @@ def _report(op, level, message):
 
 
 def _qss_log(level, event, message):
-    """Write a consistently tagged Slipgate message to Blender's console."""
+    """Write a consistently tagged SLOPGATE message to Blender's console."""
     stamp = time.strftime('%H:%M:%S')
-    print(f"[{stamp}] [Slipgate] [{str(level).upper()}] [{event}] {message}", flush=True)
+    print(f"[{stamp}] [SLOPGATE] [{str(level).upper()}] [{event}] {message}", flush=True)
 
 
 # QSS per-user installation settings are kept outside .blend files in config.json.
@@ -72,7 +72,7 @@ def _qss_abspath(path):
 def _qss_map_artifact_dir(obj, create=False):
     """Return the per-map generated-artifact directory without creating it on import."""
     if not _qss_is_map_object(obj):
-        raise bsp.BSPError("Select an imported Slipgate map before generating map artifacts.")
+        raise bsp.BSPError("Select an imported SLOPGATE map before generating map artifacts.")
     source = _qss_abspath(obj.get("qss_source_path", ""))
     if not source:
         raise bsp.BSPError("The active map has no source BSP path.")
@@ -921,7 +921,7 @@ def _bake_face_local_texture(source_image, uv_layer, poly, image_name):
     span_s = max(max_s - min_s, 1.0)
     span_t = max(max_t - min_t, 1.0)
 
-    # Slipgate's indexed miptex exporter requires power-of-two dimensions.
+    # SLOPGATE's indexed miptex exporter requires power-of-two dimensions.
     # Pad each face-local image upward without stretching the face UV
     # footprint; only spans beyond 512 px are resampled.
     width_out = _next_quake_texture_dimension(span_s)
@@ -3861,7 +3861,7 @@ def _miptex_fullbright_mask(
 def _encode_image_to_miptex(
     image, palette, texture_name, *, fullbright_mask=None, settings=None
 ):
-    """Encode a Blender texture with Slipgate's material-zone converter at every mip level."""
+    """Encode a Blender texture with SLOPGATE's material-zone converter at every mip level."""
     width, height = int(image.size[0]), int(image.size[1])
     if width < 16 or height < 16 or width > 512 or height > 512:
         raise bsp.BSPError(
@@ -7805,7 +7805,7 @@ class QSS_OT_bake_scene_lights(Operator):
                 progress_wm.progress_update(step)
             if progress_workspace is not None and hasattr(progress_workspace, 'status_text_set'):
                 try:
-                    progress_workspace.status_text_set(f"Slipgate: {label}")
+                    progress_workspace.status_text_set(f"SLOPGATE: {label}")
                 except Exception:
                     pass
             _qss_log('INFO', 'bake', label)
@@ -10500,12 +10500,12 @@ class QSS_OT_close_active_map(Operator):
 
 
 class QSS_PT_main(Panel):
-    """Root container for the Slipgate sidebar workflow panels."""
-    bl_label = "SLIPGATE"
+    """Root container for the SLOPGATE sidebar workflow panels."""
+    bl_label = "SLOPGATE"
     bl_idname = "QSS_PT_main"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Slipgate"
+    bl_category = "SLOPGATE"
     bl_order = 10
 
     def draw(self, context):
@@ -10535,7 +10535,7 @@ class QSS_PT_quick_actions(Panel):
     bl_idname = "QSS_PT_quick_actions"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Slipgate"
+    bl_category = "SLOPGATE"
     bl_parent_id = "QSS_PT_main"
     bl_order = 20
 
@@ -10558,7 +10558,7 @@ class QSS_PT_project(Panel):
     bl_idname = "QSS_PT_project"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Slipgate"
+    bl_category = "SLOPGATE"
     bl_parent_id = "QSS_PT_main"
     bl_order = 30
 
@@ -10637,7 +10637,7 @@ class QSS_PT_lighting(Panel):
     bl_idname = "QSS_PT_lighting"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Slipgate"
+    bl_category = "SLOPGATE"
     bl_parent_id = "QSS_PT_main"
     bl_order = 40
 
@@ -10796,7 +10796,7 @@ class QSS_PT_stats(Panel):
     bl_idname = "QSS_PT_stats"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Slipgate"
+    bl_category = "SLOPGATE"
     bl_parent_id = "QSS_PT_main"
     bl_order = 50
     bl_options = {"DEFAULT_CLOSED"}
