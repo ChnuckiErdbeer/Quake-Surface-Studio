@@ -46,7 +46,6 @@ def discover_tools(tool_directory: str) -> dict[str, str]:
     return {name: resolve_tool(tool_directory, name) for name in ERICW_TOOL_NAMES}
 
 
-def build_decoupled_light_command(
 
 def build_qbsp_command(
     executable: str,

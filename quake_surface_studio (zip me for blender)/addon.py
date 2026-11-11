@@ -4431,8 +4431,6 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
             return {'CANCELLED'}
 
 
-class QSS_OT_browse_game_maps(Operator):
-
 class QSS_OT_import_map(Operator, ImportHelper):
     bl_idname = "qss.import_map"
     bl_label = "Import Quake MAP"
