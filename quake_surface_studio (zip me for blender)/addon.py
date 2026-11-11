@@ -28,7 +28,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils
 
 
-ADDON_VERSION = (0, 20, 9)
+ADDON_VERSION = (0, 21, 0)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -5644,7 +5644,7 @@ class QSS_OT_generate_decoupled_lightmaps(Operator, ImportHelper):
             layout.label(text="Balanced density for many maps.", icon="INFO")
         else:
             layout.label(text="Coarser lighting: faster and smaller, with less spatial detail.", icon="INFO")
-        layout.label(text="A new *_decoupled.bsp copy will be created in this map's ##slipgate folder.", icon="INFO")
+        layout.label(text="A new *_decoupled.bsp copy will be created in this map's ##SLOPGATE folder.", icon="INFO")
         layout.label(text="The source BSP is never modified; lighting is recalculated.", icon="INFO")
 
     def execute(self, context):
