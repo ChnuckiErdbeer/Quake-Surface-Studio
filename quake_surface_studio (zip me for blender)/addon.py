@@ -1501,6 +1501,7 @@ def _set_lighting_preview(context, obj, mode):
         # Avoid restoring state that this preview path never modified.
         _restore_preview_world(context.scene, obj)
         _restore_preview_engine(context.scene, obj)
+        _apply_quake_light_energy_scale(context.scene)
         image = _qss_lightmap_preview_image(obj, mode, for_paint=False)
         _rebuild_lightmap_preview(obj, image_override=image)
 
@@ -3055,7 +3056,17 @@ def _apply_quake_light_energy_scale(scene):
             if hasattr(light_obj.data, 'cutoff_distance'):
                 light_obj.data.cutoff_distance = preview['cutoff_distance']
             if hasattr(light_obj.data, 'shadow_soft_size'):
-                light_obj.data.shadow_soft_size = preview['shadow_soft_size']
+                # A finite emitter radius changes the inverse-square base curve.
+                # Keep the Cycles source effectively point-sized so the custom
+                # delay 0/5 correction remains mathematically valid. Eevee keeps
+                # the established soft-radius approximation.
+                cycles_exact_falloff = (
+                    str(getattr(scene.render, 'engine', '')) == 'CYCLES'
+                    and delay in {0, 5}
+                )
+                light_obj.data.shadow_soft_size = (
+                    0.0 if cycles_exact_falloff else preview['shadow_soft_size']
+                )
             _qss_update_cycles_delay_falloff(
                 light_obj, delay, light_obj.get('qss_quake_raw_light_value', raw_value)
             )
@@ -7623,6 +7634,9 @@ class QSS_OT_bake_scene_lights(Operator):
             _bake_progress(0, f"Starting Cycles lightmap bake for {obj.name}: {len(imported_lights)} lights")
             _set_black_preview_world(scene, obj)
             scene.render.engine = 'CYCLES'
+            # Re-apply after selecting Cycles: delay 0/5 use point-sized emitters
+            # here so the node correction matches the calibrated radial curves.
+            _apply_quake_light_energy_scale(scene)
             # Blender allows baking to either image textures or the active mesh
             # colour attribute. QSS always bakes into the selected atlas image.
             # If the user's previous setting was VERTEX_COLORS, Cycles can finish
@@ -7939,6 +7953,7 @@ class QSS_OT_bake_scene_lights(Operator):
                     pass
             try:
                 scene.render.engine = old_engine
+                _apply_quake_light_energy_scale(scene)
                 scene.cycles.samples = old_cycles['samples']
                 scene.cycles.diffuse_bounces = old_cycles['diffuse_bounces']
                 scene.cycles.max_bounces = old_cycles['max_bounces']
