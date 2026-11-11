@@ -42,10 +42,10 @@ The archive filename and some historic headings contain the old spelling “Slip
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
 - Active branch: fix/v0.11.1-metadata-style-order-test
 - Current add-on version: **0.21.0**.
-- Exact source commit for the 0.21.0 build: ffaf071f1d05f57d3b48d4bb9afb0b0d294cd377.
-- Successful QSS Python workflow: run 43005381450 (run 710); compileall, standalone suite, package assembly and artifact upload passed.
-- Install artifact: Quake-Surface-Studio-v0.21.0-Blender-Install, artifact ID 13847329207, 250,296 bytes, 41 ZIP entries.
-- SHA-256: 4f21d1514f81e4c363f85f8472c983b772d5ba04c2928cfab6c669e29d6cb253. ZIP integrity and installable package root verified; expiry 2027-02-09.
+- Exact source commit for the final 0.21.0 build: 2a4da218e00f96b2cd453aac565f2ef5b546fb18.
+- Successful final QSS Python workflow: run 43005870226 (run 717); compileall, standalone suite, package assembly and artifact upload passed.
+- Install artifact: Quake-Surface-Studio-v0.21.0-Blender-Install, artifact ID 13848960227, 250,388 bytes, 41 ZIP entries.
+- SHA-256: 39bcff383f811a9f0e3906da0e8b3de2940fc04dd6b2f47e6d3da32a2ef8969e. ZIP integrity and installable package root verified; expiry 2027-02-09.
 - Runtime validation outstanding: no Blender 5.2 GUI, actual QBSP/VIS, Cycles/Eevee render/bake, or Ironwail run.
 - Previous 0.20.9 artifact details are historical.
 - Main add-on source: quake_surface_studio (zip me for blender)/addon.py; MAP text-preserving parser/synchronizer: map_sync.py; focused tests: tests/test_map_sync.py. Direct MAP-via-QBSP import was superseded and removed in 0.21.0.
@@ -232,7 +232,7 @@ This keeps TrenchBroom authoritative for brush geometry, SLOPGATE authoritative 
 - No actual QBSP executable was run against the user's Quake installation. No Blender 5.2 runtime/UI import was performed. The user still needs to test the new Import MAP button using their configured QBSP and game/WAD paths.
 
 
-### Delivered implementation: version 0.21.0 — companion MAP workflow (validation pending)
+### Delivered implementation: version 0.21.0 — companion MAP workflow (automated tests passed)
 
 - Current user scope: import BSP as before; if a same-basename MAP exists beside it, discover and associate it silently. No direct MAP import, QBSP invocation, WAD discovery, or WAD resolution.
 - Added map_sync.py, a source-span MAP parser/patcher. It indexes top-level entity key/value pairs while treating nested brush blocks as opaque. Patches preserve brush planes, texture axes, comments, unknown keys, WAD references, and unrelated source text.
@@ -241,7 +241,7 @@ This keeps TrenchBroom authoritative for brush geometry, SLOPGATE authoritative 
 - Current supported MAP edits: linked light origin, RGB color, light magnitude, and spotlight cone angle. Spot direction/mangle synchronization is not yet implemented; original target and mangle keys are preserved. Painted texture pixels continue through the existing BSP texture export path. MAP WAD paths and texture references are not rewritten.
 - No geometry synchronization, QBSP rebuild, VIS, ericw light, WAD generation, or WAD search is performed. The source MAP remains unchanged.
 - The old direct Import MAP via QBSP operator and sidebar control were removed as explicitly superseded by the BSP-first companion workflow.
-- Version 0.21.0. QSS Python workflow 43005381450 passed compileall, standalone tests, package assembly and artifact upload. The installable ZIP was downloaded and verified (41 entries, correct package root, no corrupt members). Blender 5.2 GUI/runtime and Quake toolchain validation remain outstanding.
+- Version 0.21.0. Final QSS Python workflow 43005870226 passed compileall, standalone tests (including MAP preservation/byte-write tests), package assembly and artifact upload. The installable ZIP was downloaded and verified (41 entries, correct package root, no corrupt members; SHA-256 39bcff383f811a9f0e3906da0e8b3de2940fc04dd6b2f47e6d3da32a2ef8969e). Blender 5.2 GUI/runtime and Quake toolchain validation remain outstanding.
 
 ### Remaining MAP implementation boundary
 
