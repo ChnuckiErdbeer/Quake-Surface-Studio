@@ -1,3 +1,15 @@
+# SLOPGATE 0.20.9
+
+## 0.20.9 — MAP-to-BSP import foundation
+
+- Adds **Import MAP via QBSP** when a valid ericw-tools `qbsp` executable is configured.
+- Compiles the selected `.map` into a dedicated Blender user-cache working directory, validates classic BSP29, then reuses the existing BSP importer.
+- Records the linked source MAP path and SHA-256 on the imported map object for future entity synchronization work.
+- Does not overwrite the source MAP or a game BSP. Does not run VIS or ericw `light`; existing BSP import/export and all lighting/painting workflows remain available.
+- Automated command-builder tests cover explicit output paths, optional search paths and overwrite protection. Interactive Blender 5.2 import still requires user verification.
+
+---
+
 # Slipgate 0.20.7
 
 ## 0.20.7 — Faster BSP import entry and cursor palette

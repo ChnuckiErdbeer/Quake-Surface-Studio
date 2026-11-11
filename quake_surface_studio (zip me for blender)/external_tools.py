@@ -47,6 +47,67 @@ def discover_tools(tool_directory: str) -> dict[str, str]:
 
 
 def build_decoupled_light_command(
+
+def build_qbsp_command(
+    executable: str,
+    map_path: str,
+    output_bsp: str,
+    *,
+    quake_root: str = "",
+    game_dir: str = "",
+    wad_paths: Iterable[str] = (),
+    search_paths: Iterable[str] = (),
+    verbose: bool = True,
+) -> list[str]:
+    """Build a safe ericw QBSP command for a MAP file and explicit BSP output.
+
+    The caller owns the output directory and working directory. The function
+    never invokes a shell and never derives an output path beside the source MAP.
+    """
+    exe = os.path.abspath(os.path.expandvars(os.path.expanduser(executable or "")))
+    source = os.path.abspath(os.path.expandvars(os.path.expanduser(map_path or "")))
+    destination = os.path.abspath(os.path.expandvars(os.path.expanduser(output_bsp or "")))
+    if not exe:
+        raise ValueError("No ericw-tools qbsp executable was configured.")
+    if not source or not source.lower().endswith(".map"):
+        raise ValueError("Select a source .map file.")
+    if not os.path.isfile(source):
+        raise FileNotFoundError(source)
+    if not destination or not destination.lower().endswith(".bsp"):
+        raise ValueError("The QBSP output path must end in .bsp.")
+    if os.path.normcase(source) == os.path.normcase(destination):
+        raise ValueError("The QBSP output must not overwrite the source MAP.")
+
+    command = [exe]
+    if verbose:
+        command.append("-verbose")
+
+    root = os.path.abspath(os.path.expandvars(os.path.expanduser(quake_root))) if quake_root else ""
+    game = os.path.abspath(os.path.expandvars(os.path.expanduser(game_dir))) if game_dir else ""
+    if root and os.path.isdir(root):
+        command.extend(["-basedir", root])
+    if game and os.path.isdir(game):
+        command.extend(["-gamedir", game])
+
+    def append_directories(option: str, directories: Iterable[str]) -> None:
+        seen = set()
+        for directory in directories or ():
+            if not directory:
+                continue
+            path = os.path.abspath(os.path.expandvars(os.path.expanduser(str(directory))))
+            key = os.path.normcase(path)
+            if key in seen or not os.path.isdir(path):
+                continue
+            seen.add(key)
+            command.extend([option, path])
+
+    append_directories("-wadpath", wad_paths)
+    append_directories("-path", search_paths)
+    command.extend([source, destination])
+    return command
+
+
+def build_decoupled_light_command(
     executable: str,
     bsp_path: str,
     *,

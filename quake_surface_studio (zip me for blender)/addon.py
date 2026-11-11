@@ -28,7 +28,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils
 
 
-ADDON_VERSION = (0, 20, 8)
+ADDON_VERSION = (0, 20, 9)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -4248,6 +4248,7 @@ class QSS_OT_confirm_import(Operator):
     filepath: StringProperty(subtype="FILE_PATH", options={"HIDDEN"})
     game_dir: StringProperty(subtype="DIR_PATH", options={"HIDDEN"})
     game_map_path: StringProperty(options={"HIDDEN"})
+    source_map_path: StringProperty(subtype="FILE_PATH", options={"HIDDEN"})
     unit_scale: FloatProperty(default=DEFAULT_QUAKE_UNIT_SCALE, min=0.0001, max=10.0, options={"HIDDEN"})
     flip_z: BoolProperty(default=False, options={"HIDDEN"})
     lightmap_resolution: EnumProperty(
@@ -4280,6 +4281,7 @@ class QSS_OT_confirm_import(Operator):
             filepath=self.filepath,
             game_dir=self.game_dir,
             game_map_path=self.game_map_path,
+            source_map_path=self.source_map_path,
             unit_scale=self.unit_scale,
             flip_z=self.flip_z,
             lightmap_resolution=self.lightmap_resolution,
@@ -4322,6 +4324,7 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
     )
     skip_import_prompt: BoolProperty(default=False, options={'HIDDEN'})
     game_map_path: StringProperty(default="", options={'HIDDEN'})
+    source_map_path: StringProperty(subtype="FILE_PATH", default="", options={'HIDDEN'})
 
     def invoke(self, context, event):
         self.game_dir = context.scene.qss_game_dir
@@ -4351,6 +4354,7 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
                 filepath=self.filepath,
                 game_dir=self.game_dir,
                 game_map_path=self.game_map_path,
+                source_map_path=self.source_map_path,
                 unit_scale=self.unit_scale,
                 flip_z=self.flip_z,
                 lightmap_resolution=self.lightmap_resolution,
@@ -4382,6 +4386,15 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
             light_count, has_spawn = _import_bsp_entities(
                 context, obj, parsed, self.unit_scale, self.flip_z
             )
+            if self.source_map_path:
+                linked_map_path = bpy.path.abspath(self.source_map_path)
+                if not os.path.isfile(linked_map_path):
+                    raise FileNotFoundError(f"Linked source MAP no longer exists: {linked_map_path}")
+                with open(linked_map_path, "rb") as map_handle:
+                    linked_map_hash = hashlib.sha256(map_handle.read()).hexdigest()
+                obj["qss_source_map_path"] = os.path.abspath(linked_map_path)
+                obj["qss_source_map_sha256"] = linked_map_hash
+                obj["qss_map_imported_via_qbsp"] = True
             context.scene.qss_game_dir = game_dir
             context.scene.qss_quake_unit_scale = float(self.unit_scale)
             if self.game_map_path:
@@ -4416,6 +4429,144 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
         except Exception as exc:
             _report(self, 'ERROR', str(exc))
             return {'CANCELLED'}
+
+
+class QSS_OT_browse_game_maps(Operator):
+
+class QSS_OT_import_map(Operator, ImportHelper):
+    bl_idname = "qss.import_map"
+    bl_label = "Import Quake MAP"
+    bl_description = "Compile a MAP file to a separate working BSP with ericw QBSP, then use the existing BSP importer"
+    filename_ext = ".map"
+    filter_glob: StringProperty(default="*.map", options={'HIDDEN'})
+    game_dir: StringProperty(name="Quake game directory", subtype='DIR_PATH', default="", options={'HIDDEN'})
+    unit_scale: FloatProperty(
+        name="Quake unit scale", description="Blender metres per Quake map unit",
+        default=DEFAULT_QUAKE_UNIT_SCALE, min=0.0001, max=10.0, precision=5, options={'HIDDEN'}
+    )
+    lightmap_resolution: EnumProperty(
+        name="Working lightmap resolution",
+        items=(('1', '1× · Original', 'Original packed atlas resolution'),
+               ('2', '2×', 'Twice the pixels per axis'),
+               ('4', '4×', 'Four times the pixels per axis'),
+               ('8', '8×', 'Eight times the pixels per axis')),
+        default='1', options={'HIDDEN'}
+    )
+
+    def invoke(self, context, event):
+        scene = context.scene
+        self.game_dir = _qss_abspath(getattr(scene, "qss_game_dir", "") or "")
+        self.unit_scale = float(getattr(scene, "qss_quake_unit_scale", DEFAULT_QUAKE_UNIT_SCALE))
+        self.lightmap_resolution = getattr(scene, "qss_import_lightmap_resolution", "1")
+        game_dir = self.game_dir
+        maps_dir = os.path.join(game_dir, "maps") if game_dir else ""
+        start_dir = maps_dir if maps_dir and os.path.isdir(maps_dir) else game_dir
+        if start_dir and os.path.isdir(start_dir):
+            self.filepath = os.path.join(start_dir, "")
+        return ImportHelper.invoke(self, context, event)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="Requires the configured ericw-tools QBSP executable.")
+        layout.label(text="QBSP only: VIS and ericw light are not run for Blender import.")
+
+    def execute(self, context):
+        source_map = bpy.path.abspath(self.filepath)
+        if not source_map or not os.path.isfile(source_map):
+            self.report({"ERROR"}, "Choose an existing .map source file.")
+            return {"CANCELLED"}
+        if os.path.splitext(source_map)[1].lower() != ".map":
+            self.report({"ERROR"}, "The selected source must have a .map extension.")
+            return {"CANCELLED"}
+
+        scene = context.scene
+        tools_dir = _qss_abspath(getattr(scene, "qss_ericw_tools_dir", "") or "")
+        qbsp = external_tools.resolve_tool(tools_dir, "qbsp")
+        if not qbsp:
+            self.report({"ERROR"}, "Configure an ericw-tools folder containing qbsp before importing a MAP file.")
+            return {"CANCELLED"}
+
+        game_dir = _qss_abspath(self.game_dir or getattr(scene, "qss_game_dir", "") or "")
+        if not game_dir or not os.path.isdir(game_dir):
+            self.report({"ERROR"}, "Select a valid Quake game/mod directory before importing a MAP file.")
+            return {"CANCELLED"}
+        quake_root = _qss_abspath(getattr(scene, "qss_quake_root", "") or "")
+        source_directory = os.path.dirname(os.path.abspath(source_map))
+
+        try:
+            cache_root = bpy.utils.user_resource(
+                "DATAFILES", path=os.path.join("qss", "map_imports"), create=True
+            )
+            if not cache_root or not os.path.isdir(cache_root):
+                raise OSError("Blender could not create the SLOPGATE MAP import cache.")
+            clean_stem = bpy.path.clean_name(os.path.splitext(os.path.basename(source_map))[0]) or "QuakeMap"
+            work_directory = tempfile.mkdtemp(prefix=f"{clean_stem}_", dir=cache_root)
+            output_bsp = os.path.join(work_directory, f"{clean_stem}.bsp")
+            command = external_tools.build_qbsp_command(
+                qbsp,
+                source_map,
+                output_bsp,
+                quake_root=quake_root,
+                game_dir=game_dir,
+                wad_paths=(source_directory, game_dir, quake_root),
+                search_paths=(source_directory, game_dir),
+            )
+            result = external_tools.run_command(
+                command[0], command[1:], timeout=1800, cwd=work_directory
+            )
+            log_path = os.path.join(work_directory, "qbsp.log")
+            try:
+                with open(log_path, "w", encoding="utf-8", errors="replace") as log_handle:
+                    log_handle.write("Command:\n" + "\n".join(command) + "\n\n")
+                    log_handle.write(result.get("stdout", "") or "")
+                    if result.get("stderr"):
+                        log_handle.write("\n[stderr]\n" + result["stderr"])
+            except OSError as log_exc:
+                print(f"SLOPGATE: could not write QBSP log: {log_exc}")
+
+            if result.get("status") != "PASS":
+                detail = (result.get("stderr") or result.get("stdout") or "QBSP failed without diagnostic output.")
+                raise RuntimeError(
+                    f"QBSP did not complete successfully (status {result.get('status')}, "
+                    f"exit {result.get('returncode')}). Log: {log_path}\n{detail[-1800:]}"
+                )
+            if not os.path.isfile(output_bsp):
+                raise RuntimeError(f"QBSP reported success but did not create the expected BSP. Log: {log_path}")
+
+            # Validate the format before invoking Blender's full importer. This
+            # add-on currently accepts classic BSP29, not BSP2/2PSB.
+            bsp.BSP29.from_file(output_bsp)
+            game_map_path = ""
+            try:
+                relative_map = os.path.relpath(os.path.abspath(source_map), os.path.abspath(game_dir))
+                if relative_map != os.pardir and not relative_map.startswith(os.pardir + os.sep):
+                    game_map_path = os.path.splitext(relative_map)[0].replace(os.sep, "/") + ".bsp"
+            except ValueError:
+                pass
+
+            import_result = bpy.ops.qss.import_bsp(
+                "EXEC_DEFAULT",
+                filepath=output_bsp,
+                game_dir=game_dir,
+                game_map_path=game_map_path,
+                source_map_path=source_map,
+                unit_scale=self.unit_scale,
+                lightmap_resolution=self.lightmap_resolution,
+            )
+            if "CANCELLED" in import_result:
+                raise RuntimeError("QBSP succeeded, but the existing SLOPGATE BSP importer cancelled the import.")
+            message = (
+                f"QBSP compiled the MAP to a working BSP and passed BSP29 validation. "
+                f"VIS and ericw light were not run. Work files: {work_directory}"
+            )
+            if "RUNNING_MODAL" in import_result:
+                message = "QBSP compiled successfully; choose Add or Replace in the open import dialog. " + message
+            self.report({"INFO"}, message[:240])
+            return {"FINISHED"}
+        except Exception as exc:
+            self.report({"ERROR"}, str(exc)[:240])
+            return {"CANCELLED"}
+
 
 
 class QSS_OT_browse_game_maps(Operator):
@@ -10436,6 +10587,15 @@ class QSS_PT_project(Panel):
         export_row = row.row(align=True)
         export_row.enabled = _qss_is_map_object(obj) and context.mode == "OBJECT"
         export_row.operator(QSS_OT_export_bsp.bl_idname, text="Export BSP", icon="EXPORT")
+        qbsp_available = bool(
+            scene.qss_ericw_tools_dir
+            and external_tools.resolve_tool(_qss_abspath(scene.qss_ericw_tools_dir), "qbsp")
+        )
+        map_import_row = layout.row(align=True)
+        map_import_row.enabled = game_ready and qbsp_available
+        map_import_row.operator(QSS_OT_import_map.bl_idname, text="Import MAP via QBSP", icon="FILE_FOLDER")
+        if not qbsp_available:
+            layout.label(text="Set the ericw-tools folder to enable MAP import.", icon="INFO")
         launch = layout.row(align=True)
         test_button = launch.row(align=True)
         test_button.enabled = bool(
@@ -10717,7 +10877,7 @@ class QSS_PT_stats(Panel):
 
 
 CLASSES = (
-    QSS_OT_confirm_import, QSS_OT_import_bsp, QSS_OT_browse_game_maps, QSS_OT_validate_bsp_export,
+    QSS_OT_confirm_import, QSS_OT_import_bsp, QSS_OT_import_map, QSS_OT_browse_game_maps, QSS_OT_validate_bsp_export,
     QSS_OT_scan_game_maps, QSS_OT_run_python_tests, QSS_OT_run_map_audit,
     QSS_OT_launch_ironwail, QSS_OT_open_last_export, QSS_OT_test_in_ironwail, QSS_OT_open_config_text,
     QSS_OT_close_active_map, QSS_OT_load_quake_palette, QSS_OT_open_quake_palette,

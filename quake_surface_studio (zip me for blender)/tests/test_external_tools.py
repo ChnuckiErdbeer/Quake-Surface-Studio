@@ -9,6 +9,57 @@ import external_tools
 
 
 class ExternalToolsTests(unittest.TestCase):
+
+    def test_builds_qbsp_command_with_isolated_output_and_search_paths(self):
+        with tempfile.TemporaryDirectory() as root:
+            game = os.path.join(root, "id1")
+            map_dir = os.path.join(root, "source maps")
+            tool_dir = os.path.join(root, "tools")
+            output_dir = os.path.join(root, "work")
+            for directory in (game, map_dir, tool_dir, output_dir):
+                os.makedirs(directory)
+            source = os.path.join(map_dir, "test map.map")
+            destination = os.path.join(output_dir, "test map.bsp")
+            with open(source, "w", encoding="utf-8") as handle:
+                handle.write("{}")
+            command = external_tools.build_qbsp_command(
+                os.path.join(tool_dir, "qbsp"),
+                source,
+                destination,
+                quake_root=root,
+                game_dir=game,
+                wad_paths=(map_dir, game, map_dir),
+                search_paths=(map_dir,),
+            )
+            self.assertEqual(command[0], os.path.join(tool_dir, "qbsp"))
+            self.assertIn("-basedir", command)
+            self.assertIn("-gamedir", command)
+            self.assertEqual(command.count("-wadpath"), 2)
+            self.assertEqual(command.count("-path"), 1)
+            self.assertEqual(command[-2:], [source, destination])
+            self.assertNotEqual(command[-1], source)
+
+    def test_qbsp_command_rejects_invalid_or_overwriting_paths(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = os.path.join(temp, "valid.map")
+            with open(source, "w", encoding="utf-8") as handle:
+                handle.write("{}")
+            with self.assertRaises(ValueError):
+                external_tools.build_qbsp_command("", source, os.path.join(temp, "out.bsp"))
+            with self.assertRaises(ValueError):
+                external_tools.build_qbsp_command("qbsp", source, os.path.join(temp, "out.map"))
+            with self.assertRaises(ValueError):
+                external_tools.build_qbsp_command("qbsp", source, source)
+            with self.assertRaises(ValueError):
+                external_tools.build_qbsp_command("qbsp", os.path.join(temp, "wrong.txt"), os.path.join(temp, "out.bsp"))
+
+    def test_qbsp_command_requires_existing_map_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with self.assertRaises(FileNotFoundError):
+                external_tools.build_qbsp_command(
+                    "qbsp", os.path.join(temp, "missing.map"), os.path.join(temp, "out.bsp")
+                )
+
     def test_resolves_windows_and_unix_binary_names_case_insensitively(self):
         with tempfile.TemporaryDirectory() as temp:
             path = os.path.join(temp, "QBSP.EXE" if os.name == "nt" else "qbsp")
