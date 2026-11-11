@@ -30,8 +30,8 @@ This archive is the detailed project record. The handoff file is a compressed ed
 - Product name: **SLOPGATE**.
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
 - Active branch: fix/v0.11.1-metadata-style-order-test
-- Last inspected add-on source commit: a5e5be55050ecce6532222aeb0d19eb017cb1254. Documentation-only commits may advance the branch; always re-check before code edits.
-- Add-on version: **0.20.8** in both __init__.py and addon.py.
+- Last inspected add-on source commit: ffaf071f1d05f57d3b48d4bb9afb0b0d294cd377 (SLOPGATE 0.21.0). Always re-check the current branch head before code edits.
+- Add-on version: **0.21.0** in both __init__.py and addon.py.
 - Blender package/internal module remains quake_surface_studio / QSS for compatibility. Do not perform a partial global rename.
 - Target environment: Blender 5.2 on Linux, Quake 1 BSP29; target engine includes Ironwail 0.8.2.
 
@@ -42,8 +42,9 @@ This archive is the detailed project record. The handoff file is a compressed ed
 - Install artifact: Quake-Surface-Studio-v0.20.8-Blender-Install, artifact ID 13827248365, 241,052 bytes.
 - SHA-256: 0798ac71cf207af5c985a94cb2dcf941d6b8907657d96b322a50f40b543df160.
 - Artifact expiry recorded as 2027-02-09.
-- Automated Python tests, converter GUI tests and Python compilation passed.
-- **Not verified by the assistant:** Blender 5.2 runtime, Cycles bake, Eevee render, QBSP compile, Ironwail launch. Treat 0.20.8 as an experimental build, not a fully runtime-validated release.
+- The above 0.20.8 build is historical. Current build: **SLOPGATE 0.21.0**, source commit ffaf071f1d05f57d3b48d4bb9afb0b0d294cd377; QSS Python workflow 43005381450 passed compileall, the standalone suite, package assembly and upload.
+- Current install ZIP: Quake-Surface-Studio-v0.21.0-Blender-Install, artifact ID 13847329207, 250,296 bytes, 41 entries; SHA-256 4f21d1514f81e4c363f85f8472c983b772d5ba04c2928cfab6c669e29d6cb253. ZIP integrity and install package root verified.
+- **Not verified by the assistant:** Blender 5.2 runtime, Cycles bake, Eevee render, QBSP/VIS compile, or Ironwail launch. Treat 0.21.0 as an experimental development build, not a runtime-validated official release.
 
 ### Current implementation / important paths
 
