@@ -41,9 +41,9 @@ The archive filename and some historic headings contain the old spelling “Slip
 
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
 - Active branch: fix/v0.11.1-metadata-style-order-test
-- Current add-on version: **0.20.9**
+- Current add-on version: **0.21.0** (companion MAP synchronization; CI/runtime verification pending).
 - Exact source commit used to build the 0.20.9 install artifact: 770410f371287d0841f5da7288432fb1f532bdfb
-- Main add-on source: quake_surface_studio (zip me for blender)/addon.py; external tool helpers: external_tools.py; focused tests: tests/test_external_tools.py.
+- Main add-on source: quake_surface_studio (zip me for blender)/addon.py; MAP text-preserving parser/synchronizer: map_sync.py; focused tests: tests/test_map_sync.py. Direct MAP-via-QBSP import was superseded and removed in 0.21.0.
 - Successful QSS Python workflow push run: 42997883763. Python compilation, the standalone unit suite, package assembly and artifact upload passed.
 - Successful PR-triggered QSS Python run: 42997891885.
 - Successful companion converter GUI workflow run: 42997891883.
@@ -229,6 +229,18 @@ This keeps TrenchBroom authoritative for brush geometry, SLOPGATE authoritative 
 - Successful PR workflow run 42997891885 passed; converter GUI run 42997891883 also passed.
 - Install ZIP SHA-256 and package layout were verified after download (details above).
 - No actual QBSP executable was run against the user's Quake installation. No Blender 5.2 runtime/UI import was performed. The user still needs to test the new Import MAP button using their configured QBSP and game/WAD paths.
+
+
+### Delivered implementation: version 0.21.0 — companion MAP workflow (validation pending)
+
+- Current user scope: import BSP as before; if a same-basename MAP exists beside it, discover and associate it silently. No direct MAP import, QBSP invocation, WAD discovery, or WAD resolution.
+- Added map_sync.py, a source-span MAP parser/patcher. It indexes top-level entity key/value pairs while treating nested brush blocks as opaque. Patches preserve brush planes, texture axes, comments, unknown keys, WAD references, and unrelated source text.
+- BSP import associates compiled BSP light entities with MAP light entities by classname and origin. Malformed/unreadable companions do not block ordinary BSP import.
+- BSP export prepares a separate companion MAP beside the exported BSP. It refuses to overwrite the source MAP, refuses an unrelated existing output MAP, and checks the source MAP hash to detect external TrenchBroom edits.
+- Current supported MAP edits: linked light origin, RGB color, light magnitude, and spotlight cone angle. Target-controlled spot direction is left unchanged. Painted texture pixels continue through the existing BSP texture export path. MAP WAD paths and texture references are not rewritten.
+- No geometry synchronization, QBSP rebuild, VIS, ericw light, WAD generation, or WAD search is performed. The source MAP remains unchanged.
+- The old direct Import MAP via QBSP operator and sidebar control were removed as explicitly superseded by the BSP-first companion workflow.
+- Version 0.21.0. CI, Blender 5.2 GUI/runtime validation, and the installable ZIP are pending. Do not claim a tested release until those checks pass.
 
 ### Remaining MAP implementation boundary
 
