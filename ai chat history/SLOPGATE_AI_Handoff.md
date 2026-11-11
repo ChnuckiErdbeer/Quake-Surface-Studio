@@ -41,8 +41,13 @@ The archive filename and some historic headings contain the old spelling “Slip
 
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
 - Active branch: fix/v0.11.1-metadata-style-order-test
-- Current add-on version: **0.21.0** (companion MAP synchronization; CI/runtime verification pending).
-- Exact source commit used to build the 0.20.9 install artifact: 770410f371287d0841f5da7288432fb1f532bdfb
+- Current add-on version: **0.21.0**.
+- Exact source commit for the 0.21.0 build: ffaf071f1d05f57d3b48d4bb9afb0b0d294cd377.
+- Successful QSS Python workflow: run 43005381450 (run 710); compileall, standalone suite, package assembly and artifact upload passed.
+- Install artifact: Quake-Surface-Studio-v0.21.0-Blender-Install, artifact ID 13847329207, 250,296 bytes, 41 ZIP entries.
+- SHA-256: 4f21d1514f81e4c363f85f8472c983b772d5ba04c2928cfab6c669e29d6cb253. ZIP integrity and installable package root verified; expiry 2027-02-09.
+- Runtime validation outstanding: no Blender 5.2 GUI, actual QBSP/VIS, Cycles/Eevee render/bake, or Ironwail run.
+- Previous 0.20.9 artifact details are historical.
 - Main add-on source: quake_surface_studio (zip me for blender)/addon.py; MAP text-preserving parser/synchronizer: map_sync.py; focused tests: tests/test_map_sync.py. Direct MAP-via-QBSP import was superseded and removed in 0.21.0.
 - Successful QSS Python workflow push run: 42997883763. Python compilation, the standalone unit suite, package assembly and artifact upload passed.
 - Successful PR-triggered QSS Python run: 42997891885.
@@ -237,23 +242,22 @@ This keeps TrenchBroom authoritative for brush geometry, SLOPGATE authoritative 
 - Added map_sync.py, a source-span MAP parser/patcher. It indexes top-level entity key/value pairs while treating nested brush blocks as opaque. Patches preserve brush planes, texture axes, comments, unknown keys, WAD references, and unrelated source text.
 - BSP import associates compiled BSP light entities with MAP light entities by classname and origin. Malformed/unreadable companions do not block ordinary BSP import.
 - BSP export prepares a separate companion MAP beside the exported BSP. It refuses to overwrite the source MAP, refuses an unrelated existing output MAP, and checks the source MAP hash to detect external TrenchBroom edits.
-- Current supported MAP edits: linked light origin, RGB color, light magnitude, and spotlight cone angle. Target-controlled spot direction is left unchanged. Painted texture pixels continue through the existing BSP texture export path. MAP WAD paths and texture references are not rewritten.
+- Current supported MAP edits: linked light origin, RGB color, light magnitude, and spotlight cone angle. Spot direction/mangle synchronization is not yet implemented; original target and mangle keys are preserved. Painted texture pixels continue through the existing BSP texture export path. MAP WAD paths and texture references are not rewritten.
 - No geometry synchronization, QBSP rebuild, VIS, ericw light, WAD generation, or WAD search is performed. The source MAP remains unchanged.
 - The old direct Import MAP via QBSP operator and sidebar control were removed as explicitly superseded by the BSP-first companion workflow.
-- Version 0.21.0. CI, Blender 5.2 GUI/runtime validation, and the installable ZIP are pending. Do not claim a tested release until those checks pass.
+- Version 0.21.0. QSS Python workflow 43005381450 passed compileall, standalone tests, package assembly and artifact upload. The installable ZIP was downloaded and verified (41 entries, correct package root, no corrupt members). Blender 5.2 GUI/runtime and Quake toolchain validation remain outstanding.
 
 ### Remaining MAP implementation boundary
 
-Still not implemented:
-1. MAP parser/writer capable of preserving original entity blocks, brush geometry, comments and unknown keys.
-2. Blender-to-MAP synchronization for moved/edited/added/deleted lights.
-3. Worldspawn _sl_SLOPGATE_lighting mode and the full existing entity-convention classification for point/spot/sun/surface lights.
-4. Full / entities-only / skip export workflow and qbsp -onlyents handling.
-5. WAD export into a per-map ##SLOPGATE output directory and safe BSP texture update.
-6. Optional BSP-to-MAP recovery through bsputil --decompile.
-7. Blender light-property key registry and, after it stabilizes, the official rerelease-based FGD.
+The MAP parser, source-preserving patch mechanism, same-basename companion discovery, and safe companion export are implemented in 0.21.0. Current synchronization is deliberately limited to existing linked light origin, color, magnitude and spot cone values. Remaining work:
+1. Spot direction/mangle, target-linked lights, worldspawn sunlight, added/deleted lights, and additional point entities.
+2. Worldspawn _sl_SLOPGATE_lighting mode and full point/spot/sun/surface entity classification.
+3. Full / entities-only / skip export workflow and qbsp -onlyents handling.
+4. WAD export and safe BSP texture replacement/deployment. Painted pixels still use the existing BSP texture export path; SLOPGATE does not generate or search for WADs.
+5. Optional BSP-to-MAP recovery through bsputil --decompile.
+6. Blender light-property key registry and, after it stabilizes, the official rerelease-based FGD.
 
-Future MAP import/export work must preserve existing BSP import/export, Quake Direct, Cycles bake, Live Lights, texture painting, and user data. Do not regenerate MAP brushwork from the imported Blender mesh as part of the first entity-roundtrip milestone.
+Keep the first MAP round-trip strictly limited to lights and textures; never regenerate brush geometry from the Blender mesh. Preserve existing BSP import/export, Quake Direct, Cycles bake, Live Lights, texture painting, and user data.
 
 ### Source references checked for this plan
 
