@@ -15477,3 +15477,63 @@ The user asked to analyze the uploaded `results_20261110_155139` measurements an
 - The corrected helper's clamp uses the existing style sample before global range/gamma postprocessing, consistent with alpha11 source: ordinary direct contributions are accumulated first, local min compares arithmetic RGB mean to the light threshold, then channel-clamps to `light × colour / 255`; global output scaling is applied later.
 - User's stated visual observation remains: delay4_300 and delay4_900 appear completely white in Ironwail. The source BSP samples are 150 and 255 on visible receiver points (with the noted north-side blocked samples), so this alone does not prove why the rendered texture appears white. Do not infer final display RGB from a raw lightmap byte without checking the engine's lightmap scale, texture albedo, gamma/overbright and final shading.
 - No Cycles or Eevee coefficient changes have been made in this pass. The native lamp helper is still the prior approximation; exact direct bake is the recommended reference path for both engines until a tested material/shader evaluation and visibility solution exists.
+
+
+## 2026-11-11 — First Cycles custom attenuation implementation (delay 0 and 5)
+
+### User request
+- User asked for an implementation focused on ericw delay 0 (linear) and delay 5 (softened inverse-square), prioritizing the existing Cycles bake and Cycles rendered viewport. Delay 2 is understood to already match inverse-square; delays 3 and 4 may remain approximate or be deferred. Eevee support is desired later.
+- Preserve all existing workflows and features. No UI changes or removal of operators were requested.
+
+### Existing architecture re-confirmed
+- The main "Bake Imported Lights to Lightmap" operation is a native Cycles diffuse bake with direct and indirect passes.
+- Lighting preview modes "Cycles" and "Live Lights" use the imported Quake lamps; Cycles switches the scene to Cycles and the live mode uses Eevee Next.
+- Existing imported lamp calibration is centralized in `_apply_quake_light_energy_scale()`, which calls `lighting.blender_live_light_preview_parameters()`.
+- Existing Quake Direct remains a separate path and was not changed as part of this implementation.
+
+### Cycles approach implemented
+- Blender 5.2 documentation confirms that Cycles light objects support custom light shader node trees and that Eevee ignores those node trees. The Light Falloff node is Cycles-only. Source/manual references checked during implementation:
+  - Blender 5.2 Cycles light settings: https://docs.blender.org/manual/en/5.2/render/cycles/light_settings.html
+  - Blender 5.2 Light Falloff node: https://docs.blender.org/manual/nl/5.2/render/shader_nodes/color/light_falloff.html
+  - Blender 5.2 Light Output node: https://docs.staging.blender.org/manual/en/latest/render/shader_nodes/output/light.html
+  - Blender Cycles source for the Light Falloff node: https://github.com/blender/blender/blob/main/intern/cycles/scene/shader_nodes.cpp
+- Added `lighting.ericw_cycles_light_falloff_correction()`, a pure helper returning the dimensionless correction ratio between the already-calibrated inverse-square lamp and the exact ericw delay-0 or delay-5 radial equation.
+- Added a Cycles-only light shader graph for imported delay-0 and delay-5 point/spot lights:
+  - Uses `ShaderNodeLightFalloff` with Smooth=0 as a distance probe.
+  - In Blender's Light Falloff node implementation, Quadratic is Strength and Linear is Strength multiplied by ray length. Their ratio therefore recovers the shading-point distance in Blender units.
+  - Converts that distance to Quake map units using each light's stored QSS unit scale.
+  - Delay 0 multiplies the inverse-square base by `8 * (d/R)^2 * max(0, 1-d/R)`, where `R = light/(wait*world_dist)` unless an explicit `_falloff` radius is set (then `R = _falloff*world_dist`). This reconstructs the ericw linear ramp after the existing lamp energy is calibrated at R/2.
+  - Delay 5 multiplies the inverse-square base by `4 * (s/(s+128))^2`, where `s = wait*world_dist*d`. This reconstructs ericw's shifted inverse-square curve after calibration at its 128-unit reference distance.
+  - The custom graph outputs through a Light Output node targeted at Cycles. The lamp's regular energy and color settings remain the base calibration; Eevee ignores the Cycles graph and continues to use the existing native-light approximation.
+- The graph is rebuilt/updated by `_qss_update_cycles_delay_falloff()` when the user applies the light-energy scale or changes lighting mode. Delays 1–4 retain their existing native behaviour. User-authored lights are not targeted; only QSS-tagged imported Quake entity lights are handled.
+- For delay 0 and 5 in Cycles, point-light emitter radius is set to zero while Cycles is active. A finite emitter radius alters the inverse-square base curve and would undermine the correction. Eevee retains the existing shadow-soft-size approximation. The bake reapplies light settings after switching to Cycles and restores them after returning to the previous render engine.
+- Corrected an existing delay-0 live-preview calibration bug: the default ericw linear cutoff radius is `light/(wait*world_dist)`, not `light*wait*world_dist`. The native preview energy now calibrates at the correct midpoint. Explicit `_falloff` continues to override wait as intended.
+- No Cycles bake stages, direct/indirect pass settings, atlas behavior, Quake Direct functionality, or UI controls were removed or replaced.
+
+### Tests and mathematical validation
+- Added regression tests for delay-0 and delay-5 correction across multiple distances, including the explicit delay-0 falloff radius, and a test that delays 1–4 remain unchanged by the helper.
+- Added a regression test for the corrected default delay-0 cutoff radius and energy calibration.
+- Independently evaluated the correction algebra at eight distances for each profile using the same formulas. Maximum absolute difference from the ericw formula was approximately 5.7e-14 for both delay 0 and delay 5 (floating-point roundoff).
+- The standalone test suite and Blender 5.2 runtime/API integration have NOT yet been executed in this session. No Blender executable was available in the assistant's execution environment. Do not describe this as a completed Blender render/bake test.
+- No Eevee custom attenuation has been implemented. It still uses the existing native-light approximation; this is intentional because Eevee ignores Cycles light shader nodes.
+
+### Known limitations and next validation
+- The correction is exact for the radial attenuation component under the point-light inverse-square baseline. It does not yet make the entire rendered result pixel-identical to ericw.
+- Blender's Lambertian receiving-surface response is not the same as ericw's configurable `_anglescale` incidence factor. That remains a source of mismatch, especially for grazing surfaces and `_anglescale 0`.
+- Zero emitter radius is required for the intended point-source radial calibration, so Cycles delay-0/5 shadows are currently harder than the prior soft-radius approximation. Matching ericw `-soft` shadows needs a separate treatment.
+- Cycles indirect bounce is not equivalent to ericw's bounce solver. The custom non-physical attenuation can also affect indirect paths; Blender's Light Falloff documentation warns that non-quadratic falloff can increase energy across GI bounces. Compare direct-only first, then test existing bounce settings separately.
+- Next step is a user-side Blender 5.2 test on the existing lighttest map: compare Cycles rendered viewport and Cycles baked luxels against the uploaded ericw delay-0/5 CSV curves. Record actual distances, energy scale, `_range`, `_dist`, `wait`, and explicit `_falloff` values. If node setup fails, inspect the per-light `qss_cycles_falloff_error` property and Blender console log. Only after that test should we tune shadow softness or begin Eevee-specific work.
+
+### Code commits on branch `fix/v0.11.1-metadata-style-order-test`
+- `165ab09a825f162a5aed2cefc768c5528140c623` — add Cycles falloff correction math.
+- `e1bde801ede46dfd0579549f1413e065815412ae` — add delay-0/5 correction tests.
+- `6758ee3b7b4b0842cb47baeea3c96e865888ef3d` — build Cycles light-node graphs for delay 0 and 5.
+- `f58001c299fc0a20e2288775082754cdfd8fcfd2` — clarify Light Falloff distance derivation.
+- `685bd9dd31798c8fa19f731aca79dfacfc455d0e` — correct default delay-0 linear radius calibration.
+- `3dd1ed54684eb2252e9a3fa599c62648a32246fc` — apply corrected radius in Cycles graph.
+- `f9a15348b87789cc217589e6093e01625933ef14` — test delay-0 radius calibration.
+- `a1155d58344e7cd4eb496d998e74a4f82c660f10` — preserve point-source radial calibration in Cycles and existing softness in Eevee.
+- Add-on metadata remains version 0.20.7. No release/version bump was made.
+
+### Naming correction
+- The product and add-on name is **SLOPGATE**, not Slipgate. Older archive headings and the legacy archive filename may retain the historical spelling; do not perpetuate it in new project prose, code labels, UI text, or future log entries. Do not rewrite prior historical records merely to rename them.
