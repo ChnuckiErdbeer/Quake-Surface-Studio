@@ -359,7 +359,7 @@ def write_text_atomic(path: str, text: str) -> None:
     os.makedirs(directory, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".slopgate-map-", suffix=".tmp", dir=directory)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape", newline="") as handle:
+        with os.fdopen(fd, "w", encoding="latin1", newline="") as handle:
             handle.write(str(text))
             handle.flush()
             os.fsync(handle.fileno())
