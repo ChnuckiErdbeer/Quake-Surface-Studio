@@ -2987,7 +2987,7 @@ def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
             radius = (
                 falloff * world_dist
                 if falloff > 0.0
-                else abs(float(raw_value)) * wait * world_dist
+                else abs(float(raw_value)) / (wait * world_dist)
             )
             by_name["QSS_NormalizedRadius"].inputs[1].default_value = max(1e-9, radius)
         else:
