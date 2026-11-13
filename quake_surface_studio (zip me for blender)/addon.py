@@ -7845,8 +7845,20 @@ def _qss_partial_lightmap_rectangles(obj, image, face_indices, padding=0):
 class QSS_OT_bake_scene_lights(Operator):
     bl_idname = "qss.bake_scene_lights"
     bl_label = "Bake Imported Lights to Lightmap"
-    bl_description = "Bake the complete map lightmap; temporarily leaves Mesh Edit Mode and restores it afterwards"
+    bl_description = "Bake all faces or restrict the update to selected faces and/or receiver faces affected by selected lights"
     bl_options = {'REGISTER'}
+
+    bake_scope: EnumProperty(
+        name="Bake scope",
+        description="Choose which lightmap face regions to update",
+        items=(
+            ("FULL", "Full Map", "Bake all lightmap faces (existing default workflow)"),
+            ("SELECTED_FACES", "Selected Faces", "Bake only faces selected in Mesh Edit Mode"),
+            ("SELECTED_LIGHTS", "Faces Affected by Selected Lights", "Re-bake faces directly illuminated by selected map lights; all map lights remain active for complete illumination"),
+            ("FACES_AND_LIGHTS", "Selected Faces Affected by Selected Lights", "Bake the intersection of selected faces and faces directly illuminated by selected map lights"),
+        ),
+        default="FULL",
+    )
 
     @classmethod
     def poll(cls, context):
@@ -7862,13 +7874,39 @@ class QSS_OT_bake_scene_lights(Operator):
         return self.execute(context)
 
     def execute(self, context):
-        """Run the full-map bake in Object Mode, then restore the user's mode."""
+        """Run the full or partial map bake in Object Mode, restoring user state."""
         obj = context.object
         original_mode = getattr(obj, "mode", "OBJECT") if obj is not None else "OBJECT"
         if original_mode not in {"OBJECT", "EDIT"}:
             self.report({"ERROR"}, "Bake from Object Mode or Mesh Edit Mode.")
             return {"CANCELLED"}
 
+        target_faces = None
+        if self.bake_scope in {"SELECTED_FACES", "FACES_AND_LIGHTS"}:
+            selected_faces = _qss_selected_face_indices(obj)
+            if not selected_faces:
+                self.report({"ERROR"}, "Select one or more BSP faces in Mesh Edit Mode before using this bake scope.")
+                return {"CANCELLED"}
+            target_faces = selected_faces
+
+        if self.bake_scope in {"SELECTED_LIGHTS", "FACES_AND_LIGHTS"}:
+            selected_lights = _qss_selected_lights(context, obj)
+            if not selected_lights:
+                self.report({"ERROR"}, "Select one or more imported SLOPGATE lights as well as the active BSP object.")
+                return {"CANCELLED"}
+            light_faces = _qss_faces_affected_by_lights(obj, selected_lights, context)
+            if not light_faces:
+                self.report({"ERROR"}, "The selected lights have no directly illuminated BSP faces in the current map.")
+                return {"CANCELLED"}
+            target_faces = (
+                light_faces if target_faces is None
+                else sorted(set(target_faces).intersection(light_faces))
+            )
+            if not target_faces:
+                self.report({"ERROR"}, "The selected faces are not directly illuminated by the selected lights.")
+                return {"CANCELLED"}
+
+        scope_label = self.bake_scope
         edit_objects = []
         old_selected = list(context.selected_objects)
         old_active = context.view_layer.objects.active
@@ -7882,7 +7920,9 @@ class QSS_OT_bake_scene_lights(Operator):
                 return {"CANCELLED"}
 
         try:
-            return self._execute_object_mode(context)
+            return self._execute_object_mode(
+                context, target_face_indices=target_faces, bake_scope_name=scope_label
+            )
         finally:
             # A lightmap bake covers the complete imported map, not just selected
             # edit faces. Restore the original edit-object set after all bake
@@ -7909,7 +7949,7 @@ class QSS_OT_bake_scene_lights(Operator):
                 except Exception as exc:
                     print(f"SLOPGATE: could not restore Edit Mode after bake: {exc}")
 
-    def _execute_object_mode(self, context):
+    def _execute_object_mode(self, context, target_face_indices=None, bake_scope_name='FULL'):
         obj = context.object
         scene = context.scene
         image = bpy.data.images.get(obj.get('qss_lightmap_image_name', ''))
