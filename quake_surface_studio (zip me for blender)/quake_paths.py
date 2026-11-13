@@ -11,6 +11,7 @@ import os
 import re
 import struct
 import tempfile
+from functools import lru_cache
 
 
 CONFIG_VERSION = 1
@@ -139,10 +140,10 @@ def _pak_sort_key(path: str) -> tuple:
     return (int(match.group(1)) if match else -1, name.casefold())
 
 
-def read_pak_directory(pak_path: str) -> list[dict]:
-    """Read a Quake PACK directory, validating every entry range and path."""
+@lru_cache(maxsize=256)
+def _read_pak_directory_cached(pak_path: str, mtime_ns: int, file_size: int):
+    """Cache a validated PAK index by path and stable file signature."""
     try:
-        size = os.path.getsize(pak_path)
         with open(pak_path, "rb") as handle:
             header = handle.read(12)
             if len(header) != 12 or header[:4] != b"PACK":
@@ -151,7 +152,7 @@ def read_pak_directory(pak_path: str) -> list[dict]:
             if (
                 directory_offset < 12 or directory_length < 0
                 or directory_length % 64
-                or directory_offset + directory_length > size
+                or directory_offset + directory_length > file_size
             ):
                 raise ValueError("invalid PACK directory bounds")
             handle.seek(directory_offset)
@@ -160,6 +161,7 @@ def read_pak_directory(pak_path: str) -> list[dict]:
                 raise ValueError("truncated PACK directory")
     except OSError as exc:
         raise ValueError(f"could not read PAK '{pak_path}': {exc}") from exc
+
     entries = []
     for offset in range(0, len(directory), 64):
         record = directory[offset:offset + 64]
@@ -168,15 +170,136 @@ def read_pak_directory(pak_path: str) -> list[dict]:
         file_offset, file_length = struct.unpack_from("<ii", record, 56)
         if not name or file_length < 0 or file_offset < 12:
             continue
-        if file_offset + file_length > size or file_offset + file_length > directory_offset:
+        if file_offset + file_length > file_size or file_offset + file_length > directory_offset:
             continue
-        entries.append({
-            "path": name,
-            "offset": file_offset,
-            "length": file_length,
-        })
-    return entries
+        entries.append((name, file_offset, file_length))
+    return tuple(entries)
 
+
+def read_pak_directory(pak_path: str) -> list[dict]:
+    """Read a Quake PACK directory, validating ranges and caching its index."""
+    absolute = os.path.abspath(os.path.expanduser(str(pak_path)))
+    try:
+        stat = os.stat(absolute)
+    except OSError as exc:
+        raise ValueError(f"could not read PAK '{pak_path}': {exc}") from exc
+    entries = _read_pak_directory_cached(
+        absolute, int(stat.st_mtime_ns), int(stat.st_size)
+    )
+    return [
+        {"path": name, "offset": offset, "length": length}
+        for name, offset, length in entries
+    ]
+
+
+def discover_pak_archives(game_dir: str) -> list[dict]:
+    """Return valid direct-child pakN.pak archives in Quake search order."""
+    if not game_dir or not os.path.isdir(game_dir):
+        return []
+    try:
+        paths = [
+            os.path.join(game_dir, name)
+            for name in os.listdir(game_dir)
+            if re.fullmatch(r"pak\d+\.pak", name, flags=re.IGNORECASE)
+            and os.path.isfile(os.path.join(game_dir, name))
+        ]
+    except OSError:
+        return []
+    result = []
+    for path in sorted(paths, key=_pak_sort_key):
+        try:
+            stat = os.stat(path)
+            entries = read_pak_directory(path)
+        except (OSError, ValueError):
+            continue
+        result.append({
+            "path": os.path.abspath(path),
+            "name": os.path.basename(path),
+            "mtime_ns": int(stat.st_mtime_ns),
+            "size": int(stat.st_size),
+            "entry_count": len(entries),
+            "total_bytes": sum(int(item["length"]) for item in entries),
+        })
+    return result
+
+
+def extract_pak_archive(pak_path: str, destination: str) -> dict:
+    """Safely extract one Quake PAK into its own folder without modifying it."""
+    absolute = os.path.abspath(os.path.expanduser(str(pak_path)))
+    destination = os.path.abspath(os.path.expanduser(str(destination)))
+    entries = read_pak_directory(absolute)
+    os.makedirs(destination, exist_ok=True)
+    extracted = total_bytes = skipped = 0
+    for entry in entries:
+        virtual = _safe_virtual_path(entry["path"])
+        if not virtual:
+            continue
+        target = os.path.abspath(os.path.join(destination, *virtual.split("/")))
+        try:
+            if os.path.commonpath((destination, target)) != destination:
+                continue
+        except ValueError:
+            continue
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        length = int(entry["length"])
+        if os.path.isfile(target) and os.path.getsize(target) == length:
+            skipped += 1
+            continue
+        with open(absolute, "rb") as source:
+            source.seek(int(entry["offset"]))
+            data = source.read(length)
+        if len(data) != length:
+            raise ValueError(f"Truncated PAK payload while extracting {virtual!r}.")
+        fd, temporary = tempfile.mkstemp(
+            prefix=".qss-pak-", suffix=".tmp", dir=os.path.dirname(target)
+        )
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+            os.replace(temporary, target)
+        finally:
+            try:
+                if os.path.exists(temporary):
+                    os.remove(temporary)
+            except OSError:
+                pass
+        extracted += 1
+        total_bytes += length
+    return {
+        "pak_path": absolute,
+        "destination": destination,
+        "entry_count": len(entries),
+        "files_extracted": extracted,
+        "files_skipped": skipped,
+        "bytes_extracted": total_bytes,
+    }
+
+
+def extract_all_paks(game_dir: str, cache_dir: str) -> list[dict]:
+    """Extract each PAK into its own versioned cache folder, retaining precedence.
+
+    Separate directories preserve duplicate virtual paths from different PAKs.
+    The source archive is read-only. Each destination is keyed by archive path,
+    size and modification time so a changed archive gets a fresh cache folder.
+    """
+    root = os.path.abspath(os.path.expanduser(str(game_dir or "")))
+    cache_root = os.path.abspath(os.path.expanduser(str(cache_dir or "")))
+    if not root or not os.path.isdir(root):
+        raise ValueError("Select a valid Quake game directory before extracting PAKs.")
+    archives = discover_pak_archives(root)
+    if not archives:
+        return []
+    root_key = hashlib.sha256(os.path.normcase(root).encode("utf-8")).hexdigest()[:16]
+    output_root = os.path.join(cache_root, root_key)
+    results = []
+    for archive in archives:
+        signature = (
+            f"{archive['path']}\0{archive['size']}\0{archive['mtime_ns']}"
+        ).encode("utf-8")
+        archive_key = hashlib.sha256(signature).hexdigest()[:16]
+        folder = os.path.join(output_root, archive["name"][:-4] + "-" + archive_key)
+        results.append(extract_pak_archive(archive["path"], folder))
+    return results
 
 def discover_maps(game_dir: str) -> list[dict]:
     """Discover loose and archived BSPs, applying Quake search-path precedence.
