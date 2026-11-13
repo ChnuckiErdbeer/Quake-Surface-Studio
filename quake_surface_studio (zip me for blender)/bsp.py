@@ -692,8 +692,52 @@ def _palette_from_pak(path: str) -> Optional[bytes]:
     return None
 
 
+def _find_palette_in_game_root(root: str) -> tuple[Optional[bytes], str]:
+    """Search one game directory, preferring loose files to PACK archives."""
+    root = os.path.abspath(os.path.expanduser(str(root or "")))
+    if not root or not os.path.isdir(root):
+        return None, ""
+
+    for path in (
+        os.path.join(root, "gfx", "palette.lmp"),
+        os.path.join(root, "palette.lmp"),
+    ):
+        if os.path.isfile(path):
+            try:
+                return load_palette_file(path), path
+            except (OSError, BSPError):
+                pass
+
+    for base, dirs, files in os.walk(root):
+        # Keep archive/resource discovery bounded and deterministic.
+        depth = os.path.relpath(base, root).count(os.sep)
+        dirs.sort(key=str.casefold)
+        if depth >= 3:
+            dirs[:] = []
+        for filename in sorted(files, key=str.casefold):
+            low = filename.casefold()
+            if low == "palette.lmp":
+                path = os.path.join(base, filename)
+                try:
+                    return load_palette_file(path), path
+                except (OSError, BSPError):
+                    continue
+            if low.startswith("pak") and low.endswith(".pak"):
+                pak_path = os.path.join(base, filename)
+                palette = _palette_from_pak(pak_path)
+                if palette:
+                    return palette, pak_path + "!gfx/palette.lmp"
+    return None, ""
+
+
 def find_quake_palette(game_dir: str = "", palette_file: str = "") -> tuple[Optional[bytes], str]:
-    """Find a 768-byte palette.lmp directly or inside a Quake PAK archive."""
+    """Find a Quake palette in the selected mod, then fall back to base id1.
+
+    A mod-specific loose palette or PAK takes precedence. When game_dir is a
+    mod directory (for example <quake>/ad), the sibling <quake>/id1 directory
+    is searched only after the selected mod. When game_dir is the installation
+    root, its id1 directory is treated as the base game.
+    """
     # An explicitly selected palette file takes precedence over game archives.
     if palette_file:
         explicit = os.path.expanduser(palette_file)
@@ -703,37 +747,32 @@ def find_quake_palette(game_dir: str = "", palette_file: str = "") -> tuple[Opti
             except (OSError, BSPError):
                 pass
 
-    candidates = []
-    if game_dir:
-        root = os.path.abspath(os.path.expanduser(game_dir))
-        candidates.extend([
-            os.path.join(root, "gfx", "palette.lmp"),
-            os.path.join(root, "id1", "gfx", "palette.lmp"),
-            os.path.join(root, "palette.lmp"),
-        ])
-        # Prefer loose palettes (e.g. mod overrides) before looking inside PAKs.
-        for path in candidates:
-            if os.path.isfile(path):
-                try:
-                    return load_palette_file(path), path
-                except (OSError, BSPError):
-                    continue
+    if not game_dir:
+        return None, ""
 
-        for base, dirs, files in os.walk(root):
-            # Keep this search bounded and avoid crawling an entire Steam library.
-            depth = os.path.relpath(base, root).count(os.sep)
-            if depth >= 3:
-                dirs[:] = []
-            for filename in files:
-                low = filename.lower()
-                if low == "palette.lmp":
-                    path = os.path.join(base, filename)
-                    try:
-                        return load_palette_file(path), path
-                    except (OSError, BSPError):
-                        pass
-                elif low.startswith("pak") and low.endswith(".pak"):
-                    palette = _palette_from_pak(os.path.join(base, filename))
-                    if palette:
-                        return palette, os.path.join(base, filename) + "!gfx/palette.lmp"
+    selected = os.path.abspath(os.path.expanduser(str(game_dir)))
+    selected_name = os.path.basename(os.path.normpath(selected)).casefold()
+    roots = []
+
+    if selected_name == "id1":
+        roots.append(selected)
+    elif os.path.isdir(os.path.join(selected, "id1")):
+        # A Quake installation root was selected instead of a particular mod.
+        roots.extend((os.path.join(selected, "id1"), selected))
+    else:
+        # A mod folder has priority; the original game's id1 is its sibling.
+        roots.append(selected)
+        base_id1 = os.path.join(os.path.dirname(os.path.normpath(selected)), "id1")
+        if os.path.isdir(base_id1):
+            roots.append(base_id1)
+
+    seen = set()
+    for root in roots:
+        identity = os.path.normcase(os.path.abspath(root))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        palette, origin = _find_palette_in_game_root(root)
+        if palette is not None:
+            return palette, origin
     return None, ""
