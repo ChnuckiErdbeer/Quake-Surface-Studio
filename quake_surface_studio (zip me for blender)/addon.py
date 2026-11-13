@@ -7641,6 +7641,7 @@ class QSS_OT_bake_scene_lights(Operator):
             return {"CANCELLED"}
 
         edit_objects = []
+        old_selected = list(context.selected_objects)
         old_active = context.view_layer.objects.active
         if original_mode == "EDIT":
             edit_objects = list(getattr(context, "objects_in_mode", ()) or (obj,))
@@ -7662,9 +7663,12 @@ class QSS_OT_bake_scene_lights(Operator):
                     for selected in list(context.selected_objects):
                         selected.select_set(False)
                     restore_objects = [
-                        item for item in edit_objects
+                        item for item in old_selected + edit_objects
                         if item is not None and item.name in bpy.data.objects
                     ]
+                    # Keep the original selection while ensuring every object
+                    # that was actually in multi-object Edit Mode is selected.
+                    restore_objects = list({item.as_pointer(): item for item in restore_objects}.values())
                     for item in restore_objects:
                         item.select_set(True)
                     restore_active = (
