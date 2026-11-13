@@ -88,6 +88,54 @@ class QuakePathsTests(unittest.TestCase):
             self.assertEqual([item["path"] for item in quake_paths.read_pak_directory(pak)],
                              ["maps/ok.bsp"])
 
+
+    def test_extracts_all_paks_into_separate_cached_folders(self):
+        with tempfile.TemporaryDirectory() as temp:
+            pak0 = os.path.join(temp, "pak0.pak")
+            pak2 = os.path.join(temp, "pak2.pak")
+            write_pak(pak0, [
+                ("maps/e1m1.bsp", b"old-map"),
+                ("gfx/palette.lmp", bytes([7]) * 768),
+            ])
+            write_pak(pak2, [
+                ("maps/e1m1.bsp", b"new-map"),
+                ("progs/player.mdl", b"player-model"),
+            ])
+            cache = os.path.join(temp, "cache")
+            results = quake_paths.extract_all_paks(temp, cache)
+            self.assertEqual([os.path.basename(item["pak_path"]) for item in results],
+                             ["pak0.pak", "pak2.pak"])
+            self.assertEqual([item["files_extracted"] for item in results], [2, 2])
+            pak0_map = os.path.join(results[0]["destination"], "maps", "e1m1.bsp")
+            pak2_map = os.path.join(results[1]["destination"], "maps", "e1m1.bsp")
+            with open(pak0_map, "rb") as handle:
+                self.assertEqual(handle.read(), b"old-map")
+            with open(pak2_map, "rb") as handle:
+                self.assertEqual(handle.read(), b"new-map")
+            self.assertTrue(os.path.isfile(os.path.join(results[1]["destination"], "progs", "player.mdl")))
+
+    def test_extract_all_paks_reuses_versioned_cache(self):
+        with tempfile.TemporaryDirectory() as temp:
+            pak = os.path.join(temp, "pak0.pak")
+            write_pak(pak, [("maps/test.bsp", b"map")])
+            cache = os.path.join(temp, "cache")
+            first = quake_paths.extract_all_paks(temp, cache)
+            second = quake_paths.extract_all_paks(temp, cache)
+            self.assertEqual(first[0]["destination"], second[0]["destination"])
+            self.assertEqual(second[0]["files_extracted"], 0)
+            self.assertEqual(second[0]["files_skipped"], 1)
+
+    def test_extract_all_paks_ignores_traversal_paths(self):
+        with tempfile.TemporaryDirectory() as temp:
+            pak = os.path.join(temp, "pak0.pak")
+            write_pak(pak, [
+                ("../escape.txt", b"unsafe"),
+                ("maps/safe.bsp", b"safe"),
+            ])
+            results = quake_paths.extract_all_paks(temp, os.path.join(temp, "cache"))
+            self.assertEqual(results[0]["files_extracted"], 1)
+            self.assertFalse(os.path.exists(os.path.join(temp, "escape.txt")))
+
     def test_config_file_round_trip(self):
         with tempfile.TemporaryDirectory() as temp:
             path = os.path.join(temp, "qss", "config.json")
