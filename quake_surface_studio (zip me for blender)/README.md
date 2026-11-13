@@ -1,4 +1,15 @@
-# SLOPGATE 0.21.0
+# SLOPGATE 0.21.1
+
+## 0.21.1 — Mod palette fallback and bake workflow improvements
+
+- Palette lookup now searches the selected mod first and then the sibling base-game \`id1\` directory. Within a game directory, loose palette files take precedence over PAK contents, and higher-numbered PAK archives take precedence over lower-numbered archives.
+- The Cycles \`Bake Lightmap\` action can be started from Mesh Edit Mode. SLOPGATE temporarily switches to Object Mode for the full-map bake and restores the previous edit-object selection afterwards. The bake still covers the entire map; it is not limited to selected faces.
+- The existing archive-aware game-map picker is now exposed in the main SLOPGATE panel as \`Browse Maps\`. It lists loose BSPs and BSPs inside Quake PAK archives and extracts an archived BSP to the user-data cache before import.
+- The standard Blender file selector is not yet a virtual PAK filesystem. PAK entries are accessible through SLOPGATE's map picker, but the archive's internal folders are not mounted as native file-browser folders.
+- BSP2 and 2PSB parsing/export, preview-brightness calibration, and lightmap edge-padding/bleed improvements remain unimplemented. The parser still accepts classic BSP29 only.
+- Automated tests and package assembly must pass before this development build is distributed. No interactive Blender 5.2, Cycles/Eevee runtime, or Ironwail test is implied by Python CI.
+
+---
 
 ## 0.21.0 — Companion MAP synchronization
 
