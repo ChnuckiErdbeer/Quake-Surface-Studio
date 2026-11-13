@@ -72,7 +72,10 @@ class SelectiveBakeScopeTests(unittest.TestCase):
                 if inside:
                     self.assertEqual(list(original[offset:offset + 4]), [1.0, 1.5, 2.0, 1.0])
                 else:
-                    self.assertEqual(list(original[offset:offset + 4]), [0.1, 0.2, 0.3, 1.0])
+                    self.assertAlmostEqual(original[offset], 0.1, places=6)
+                    self.assertAlmostEqual(original[offset + 1], 0.2, places=6)
+                    self.assertAlmostEqual(original[offset + 2], 0.3, places=6)
+                    self.assertEqual(original[offset + 3], 1.0)
 
     def test_overlapping_rectangles_are_merged_without_double_scaling(self):
         pixels = array.array("f", [1.0, 1.0, 1.0, 1.0] * 9)
