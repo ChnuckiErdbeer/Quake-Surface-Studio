@@ -292,24 +292,43 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - FGD property conventions reference: https://book.leveldesignbook.com/appendix/resources/formats/fgd
 
 
-## Current source changes — 2026-11-13 (0.21.1 development, not yet packaged)
+## Current source and install baseline — 2026-11-13 (SLOPGATE 0.21.1)
 
-The user tested 0.21.0 and confirmed that the companion MAP was found, edits to supported light values were synchronized into the exported MAP, and Cycles-baked lightmap changes appeared in the exported BSP.
+The user tested 0.21.0 and confirmed that the companion MAP was found, supported light edits appeared in the exported MAP, and Cycles-baked lightmap changes appeared in the exported BSP.
 
-Source changes now on \`fix/v0.11.1-metadata-style-order-test\` (latest inspected commit: \`4470fccf412a05ef7b7a9275ac75265c028e6d9b\`):
-- \`bsp.py\`: palette search now prioritizes the selected mod, then falls back to the sibling base-game \`id1\`; loose palette files precede PAK resources, and higher-numbered \`pakN.pak\` files precede lower-numbered archives.
-- Added \`tests/test_palette_fallback.py\` for mod fallback, mod overrides, PAK precedence and installation-root lookup. These tests have been authored but no CI result is yet verified.
-- \`QSS_OT_bake_scene_lights\`: the Cycles bake can start in Mesh Edit Mode, temporarily switches to Object Mode, bakes the entire map (not only selected faces), then restores the original edit-object set, selection and active object.
-- The existing loose/PAK-aware map picker is visible in the main SLOPGATE panel as **Browse Maps**. It lists BSP maps in PAKs and extracts an archived map to the user-data cache. This is not a virtual filesystem mounted into Blender's native OS file browser; true folder navigation inside PAK remains a separate UI improvement.
-- Version metadata in \`__init__.py\` and \`addon.py\` has been bumped to 0.21.1. README includes the development notes.
-- No verified install ZIP exists for 0.21.1 yet. Do not offer the historical 0.21.0 ZIP as though it contains these changes.
+### Implemented in 0.21.1 source
 
-### Still open from the 2026-11-13 user report
+- Palette fallback: selected mod first, sibling base-game id1 second. Within a game directory, loose palette files override PAK copies; higher-numbered pakN.pak archives override lower-numbered PAKs.
+- Cycles baking can start in Mesh Edit Mode. SLOPGATE temporarily switches to Object Mode and restores the edit-object set, selection and active object. Full Map remains the default scope.
+- Added a Bake Scope menu with Full Map, Selected Faces, Faces Affected by Selected Lights, and Selected Faces Affected by Selected Lights.
+- Partial bake works by temporarily moving non-target lightmap UV islands outside the target image, baking the existing full map geometry, and restoring UVs. The result is merged only into target face atlas rectangles and reserved margin pixels; untouched pixels are copied from the pre-bake snapshot and preserved. Source-mean normalization is calculated from the target face samples.
+- Selected-light scope derives a direct-light receiver-face mask from selected imported lights, face normals, point/spot/sun direction/cone/cutoff and BSP-geometry line-of-sight. **All active-map lights remain enabled during the actual bake**, so non-selected lamps and indirect contributions on those targeted faces are recalculated too. This updates receiver regions affected by the selected lights without discarding other light contributions on the same faces. The mask is an approximation based on a face-level representative point; indirect-only receiver faces are not guaranteed to be included.
+- PAK map browsing performs directory discovery once when the dialog opens. Enum redraw and hover operate on the in-memory map list. Filtering uses only that cached list. PAK directory indexes are cached by absolute path, file size and modification time.
+- Added Extract PAKs. Each archive is safely extracted into its own versioned SLOPGATE user-data cache directory; source PAK files remain untouched and duplicate virtual paths from distinct PAKs remain distinct. Repeated extraction reuses unchanged cached files.
+- Added bake_scope.py with pure face-mask, atlas-rectangle and partial RGBA region-merge helpers.
+- Added tests/test_bake_scope.py, expanded tests/test_quake_paths.py, and retained tests/test_palette_fallback.py.
+- README documents the new workflows and current limitations.
 
-- **BSP2 and 2PSB:** current \`bsp.py\` still accepts classic BSP29 only. Both extended variants need format-aware readers and writers for all widened records and validation/export paths. Do not merely accept their magic/version and do not silently convert on export. The exact compatibility of Quake's 2021 rerelease with community BSP2 must be verified separately: QuakeSpasm's release notes call out Q64 BSP support, which is not automatically synonymous with BSP2/2PSB.
-- **Preview brightness:** current native Blender energy conversion is only an approximation to Quake units; it does not guarantee Quake renderer parity. A distinct live-preview multiplier, independent of bake energy and baked-atlas normalization, remains a possible improvement. No such control has been implemented yet.
-- **Lightmap edge clipping / engine blur:** no fix has been implemented. Investigate a per-face lightmap border/edge-extension or carefully constrained adjacent-face bleed approach, preserving real shadow and orientation discontinuities. Blender atlas UV gutter alone does not solve the engine's per-face lightmap interpolation.
-- **PAK browsing:** current Browse Maps lists all loose and archived BSPs with virtual path/source labels; the native Blender file selector still cannot treat PAK subpaths as real folders. A more complete SLOPGATE virtual folder browser remains future work.
-- **Interactive validation:** the Edit Mode bake change needs Blender 5.2 validation, including multi-object Edit Mode restoration. Palette fallback tests need CI confirmation. No BSP2/2PSB, Eevee/Cycles preview calibration, game-engine lightmap seam or Ironwail runtime test has been performed for 0.21.1.
+### Latest verified build
 
-Keep the older 0.21.0 verified build details as historical. The 0.21.1 source is experimental until CI produces a verified package artifact.
+- Branch: \`fix/v0.11.1-metadata-style-order-test\`
+- Package source commit: \`bbfe192600a3bff3727387499e6c4d607dd3e253\`
+- Version: \`0.21.1\`
+- QSS Python push workflow: run \`43513363267\`, job \`132188948610\`; passed Python compilation, 232 standalone unit tests, package assembly and artifact upload.
+- QSS Python PR workflow: run \`43513370669\`; this was in progress at handoff update. Push workflow success is the validated artifact source.
+- Companion converter GUI PR workflow: run \`43513370688\`, success. This tests the companion converter, not the Blender GUI.
+- Artifact: \`14079401997\`, \`Quake-Surface-Studio-v0.21.1-Blender-Install\`, 264,338 bytes, 45 ZIP entries, expires 2027-02-11.
+- SHA-256: \`e8438593d12616e0a46c72fe7f1426b9c490be3a984c9a870ae250ca699a1378\`.
+- Artifact URL: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43513363267/artifacts/14079401997
+- The downloaded ZIP passed unzip integrity; package root is \`quake_surface_studio/\`; required \`__init__.py\`, \`addon.py\`, \`bake_scope.py\`, \`quake_paths.py\` and test modules are present.
+- Local verified ZIP path in this session: \`/mnt/data/SLOPGATE-v0.21.1-Blender-Install.zip\`.
+
+### Runtime validation and remaining caveats
+
+- No interactive Blender 5.2 test has been run in this environment. The partial-bake UV-isolation and atlas-rectangle merge strategy therefore needs testing in the user's Blender file before relying on it for valuable lightmaps.
+- Test selected faces on multiple materials, verify that non-selected atlas pixels remain byte/pixel-identical, then verify Undo Last Bake and save/reopen.
+- Test selected-light mask for point, spot and sun; it is a direct-receiver approximation. Verify it does not miss wide-face/edge illumination or produce occlusion false positives. All map lights intentionally remain enabled during the regional re-bake.
+- Test multi-object Edit Mode restoration after both successful and failed bakes.
+- PAK cache/extract behavior has Python unit coverage, but no huge real-world archive timing test or Blender UI hover test has been performed.
+- No BSP2/2PSB parser/writer, live preview brightness calibration, lightmap engine-blur edge padding/bleed, or Ironwail runtime validation has been performed.
+- For every updated installable add-on build, provide a verified install ZIP and link with version, commit, test status and digest. Never reuse an older ZIP for newer code.
