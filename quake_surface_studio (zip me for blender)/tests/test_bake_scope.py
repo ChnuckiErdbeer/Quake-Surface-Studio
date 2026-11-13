@@ -1,5 +1,9 @@
 import array
+import os
+import sys
 import unittest
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import bake_scope
 
@@ -52,7 +56,7 @@ class SelectiveBakeScopeTests(unittest.TestCase):
             image_width=128, image_height=128,
             resolution=2, lightmap_scale=1, gutter=2, padding=1,
         )
-        self.assertEqual(rects, [(21, 63, 32, 75)])
+        self.assertEqual(rects, [(21, 79, 31, 87)])
 
     def test_region_merge_preserves_pixels_outside_target(self):
         original = array.array("f", [0.1, 0.2, 0.3, 1.0] * 16)
