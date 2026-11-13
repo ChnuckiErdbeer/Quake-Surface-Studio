@@ -693,42 +693,44 @@ def _palette_from_pak(path: str) -> Optional[bytes]:
 
 
 def _find_palette_in_game_root(root: str) -> tuple[Optional[bytes], str]:
-    """Search one game directory, preferring loose files to PACK archives."""
+    """Search one game directory: all loose palettes first, then PACK archives."""
     root = os.path.abspath(os.path.expanduser(str(root or "")))
     if not root or not os.path.isdir(root):
         return None, ""
 
-    for path in (
-        os.path.join(root, "gfx", "palette.lmp"),
-        os.path.join(root, "palette.lmp"),
-    ):
-        if os.path.isfile(path):
-            try:
-                return load_palette_file(path), path
-            except (OSError, BSPError):
-                pass
-
+    loose = []
+    packs = []
     for base, dirs, files in os.walk(root):
-        # Keep archive/resource discovery bounded and deterministic.
         depth = os.path.relpath(base, root).count(os.sep)
         dirs.sort(key=str.casefold)
         if depth >= 3:
             dirs[:] = []
         for filename in sorted(files, key=str.casefold):
             low = filename.casefold()
+            path = os.path.join(base, filename)
             if low == "palette.lmp":
-                path = os.path.join(base, filename)
-                try:
-                    return load_palette_file(path), path
-                except (OSError, BSPError):
-                    continue
-            if low.startswith("pak") and low.endswith(".pak"):
-                pak_path = os.path.join(base, filename)
-                palette = _palette_from_pak(pak_path)
-                if palette:
-                    return palette, pak_path + "!gfx/palette.lmp"
-    return None, ""
+                loose.append(path)
+            elif low.startswith("pak") and low.endswith(".pak"):
+                packs.append(path)
 
+    # Quake's loose files override any packaged version, regardless of
+    # whether the loose palette lives directly in gfx/ or a mod subfolder.
+    for path in loose:
+        try:
+            return load_palette_file(path), path
+        except (OSError, BSPError):
+            continue
+
+    def pak_order(path):
+        match = re.fullmatch(r"pak(\d+)\.pak", os.path.basename(path), flags=re.IGNORECASE)
+        return (int(match.group(1)) if match else -1, os.path.basename(path).casefold())
+
+    # Higher numbered PACK archives take precedence over lower numbered ones.
+    for pak_path in sorted(packs, key=pak_order, reverse=True):
+        palette = _palette_from_pak(pak_path)
+        if palette:
+            return palette, pak_path + "!gfx/palette.lmp"
+    return None, ""
 
 def find_quake_palette(game_dir: str = "", palette_file: str = "") -> tuple[Optional[bytes], str]:
     """Find a Quake palette in the selected mod, then fall back to base id1.
