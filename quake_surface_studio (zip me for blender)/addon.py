@@ -10976,6 +10976,13 @@ class QSS_PT_project(Panel):
             text="Browse Maps",
             icon="FILE_FOLDER",
         )
+        extract_button = row.row()
+        extract_button.enabled = game_ready
+        extract_button.operator(
+            QSS_OT_extract_game_paks.bl_idname,
+            text="Extract PAKs",
+            icon="PACKAGE",
+        )
         export_row = row.row(align=True)
         export_row.enabled = _qss_is_map_object(obj) and context.mode == "OBJECT"
         export_row.operator(QSS_OT_export_bsp.bl_idname, text="Export BSP", icon="EXPORT")
@@ -11168,11 +11175,18 @@ class QSS_PT_lighting(Panel):
             depress=bool(obj.get("qss_source_lightmaps_enabled", True)),
         )
 
-        bake = layout.row()
+        bake = layout.row(align=True)
         bake.enabled = context.mode in {"OBJECT", "EDIT_MESH"} and mode in {"realtime", "cycles"} and obj.get("qss_light_entity_count", 0) > 0
-        bake.operator(QSS_OT_bake_scene_lights.bl_idname, text="Bake Lightmap", icon="RENDER_STILL")
+        bake.operator(QSS_OT_bake_scene_lights.bl_idname, text="Bake Full Map", icon="RENDER_STILL").bake_scope = "FULL"
+        bake.operator_menu_enum(
+            QSS_OT_bake_scene_lights.bl_idname,
+            "bake_scope",
+            text="Bake Scope",
+            icon="DOWNARROW_HLT",
+        )
         if context.mode == "EDIT_MESH":
-            layout.label(text="Bakes the entire map, then restores Edit Mode.", icon="INFO")
+            layout.label(text="Partial bake uses selected faces; full bake restores Edit Mode after completion.", icon="INFO")
+        layout.label(text="Selected-light scope re-bakes the directly affected faces with all map lights active.", icon="INFO")
         if mode == "realtime":
             layout.label(text="Eevee preview selected; baking currently uses the Cycles backend.", icon="INFO")
         if obj.get("qss_last_quake_bake_error"):
@@ -11267,7 +11281,7 @@ class QSS_PT_stats(Panel):
 
 
 CLASSES = (
-    QSS_OT_confirm_import, QSS_OT_import_bsp, QSS_OT_browse_game_maps, QSS_OT_validate_bsp_export,
+    QSS_OT_confirm_import, QSS_OT_import_bsp, QSS_OT_browse_game_maps, QSS_OT_extract_game_paks, QSS_OT_validate_bsp_export,
     QSS_OT_scan_game_maps, QSS_OT_run_python_tests, QSS_OT_run_map_audit,
     QSS_OT_launch_ironwail, QSS_OT_open_last_export, QSS_OT_test_in_ironwail, QSS_OT_open_config_text,
     QSS_OT_close_active_map, QSS_OT_load_quake_palette, QSS_OT_open_quake_palette,
