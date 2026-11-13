@@ -615,16 +615,18 @@ def _qss_format_export_report(report):
 
 
 def _qss_game_map_enum_items(self, context):
-    global _qss_game_map_entries
-    scene = getattr(context, 'scene', None) if context else None
-    game_dir = _qss_abspath(getattr(scene, 'qss_game_dir', '') or '') if scene else ''
-    try:
-        entries = quake_paths.discover_maps(game_dir)
-    except Exception:
-        entries = []
-    _qss_game_map_entries = entries
+    """Return only the in-memory map list; never scan folders/PAKs during redraw."""
+    entries = _qss_game_map_entries
+    query = str(getattr(self, "filter_text", "") or "").strip().casefold()
+    if query:
+        entries = [
+            entry for entry in entries
+            if query in str(entry.get("path", "")).casefold()
+            or query in str(entry.get("source_label", "")).casefold()
+        ]
     if not entries:
-        return [('__NO_MAPS__', 'No BSP maps found', 'This game folder has no loose or PAK maps', 'ERROR', 0)]
+        label = "No maps match this filter" if query else "No BSP maps found"
+        return [('__NO_MAPS__', label, 'Clear the filter or check the selected game folder', 'ERROR', 0)]
     return [
         (
             entry['id'],
@@ -4476,31 +4478,49 @@ class QSS_OT_browse_game_maps(Operator):
     bl_label = "Browse Game Maps"
     bl_description = "Choose a BSP from loose maps or PAK archives in the selected Quake game folder"
 
+    filter_text: StringProperty(
+        name="Filter", description="Filter the cached map list by filename or virtual path",
+        default="", options={"SKIP_SAVE"},
+    )
     map_id: EnumProperty(name="BSP map", items=_qss_game_map_enum_items)
 
     def invoke(self, context, event):
-        entries = quake_paths.discover_maps(context.scene.qss_game_dir)
-        if not entries:
+        global _qss_game_map_entries
+        # Disk/PAK discovery is performed once here. Enum redraws and mouse
+        # hover use the cached list and never touch the archive files.
+        try:
+            _qss_game_map_entries = quake_paths.discover_maps(context.scene.qss_game_dir)
+        except Exception as exc:
+            self.report({'ERROR'}, f"Could not scan the selected game folder: {exc}")
+            return {'CANCELLED'}
+        if not _qss_game_map_entries:
             self.report({'WARNING'}, "No BSP maps found in the selected game folder.")
             return {'CANCELLED'}
-        global _qss_game_map_entries
-        _qss_game_map_entries = entries
-        self.map_id = entries[0]['id']
-        return context.window_manager.invoke_props_dialog(self, width=560)
+        self.filter_text = ""
+        self.map_id = _qss_game_map_entries[0]['id']
+        return context.window_manager.invoke_props_dialog(self, width=620)
 
     def draw(self, context):
         layout = self.layout
-        layout.label(text=f"Maps found: {len(_qss_game_map_entries)}")
+        query = str(self.filter_text or "").casefold()
+        filtered_count = sum(
+            1 for entry in _qss_game_map_entries
+            if not query or query in str(entry.get("path", "")).casefold()
+            or query in str(entry.get("source_label", "")).casefold()
+        )
+        layout.label(text=f"Maps found: {filtered_count} / {len(_qss_game_map_entries)}")
+        layout.prop(self, "filter_text", text="Filter")
         layout.prop(self, "map_id", text="Map")
+        layout.label(text="PAK indexes are cached; moving over entries does not rescan archives.", icon="INFO")
 
     def execute(self, context):
+        # Use the list captured when the dialog opened; no directory rescan here.
         entry = next(
-            (item for item in quake_paths.discover_maps(context.scene.qss_game_dir)
-             if item['id'] == self.map_id),
+            (item for item in _qss_game_map_entries if item['id'] == self.map_id),
             None,
         )
         if entry is None:
-            self.report({'ERROR'}, "That game map is no longer available.")
+            self.report({'ERROR'}, "That cached game-map entry is no longer available. Reopen Browse Maps to refresh it.")
             return {'CANCELLED'}
         try:
             cache_dir = bpy.utils.user_resource('DATAFILES', path=os.path.join('qss', 'maps'), create=True)
@@ -4514,7 +4534,7 @@ class QSS_OT_browse_game_maps(Operator):
                 game_map_path=entry["path"],
             )
             if 'CANCELLED' in result:
-                raise RuntimeError("The QSS BSP importer cancelled the map import.")
+                raise RuntimeError("The SLOPGATE BSP importer cancelled the map import.")
             if 'RUNNING_MODAL' in result:
                 self.report({'INFO'}, "Choose Add or Replace to continue importing the selected map.")
                 return {'FINISHED'}
@@ -4525,6 +4545,58 @@ class QSS_OT_browse_game_maps(Operator):
             return {'FINISHED'}
         except Exception as exc:
             self.report({'ERROR'}, f"Could not import {entry['path']}: {exc}")
+            return {'CANCELLED'}
+
+
+class QSS_OT_extract_game_paks(Operator):
+    bl_idname = "qss.extract_game_paks"
+    bl_label = "Extract All PAKs"
+    bl_description = "Extract each PAK archive into its own versioned SLOPGATE cache folder without modifying the originals"
+
+    _archives = []
+
+    def invoke(self, context, event):
+        try:
+            self.__class__._archives = quake_paths.discover_pak_archives(context.scene.qss_game_dir)
+        except Exception as exc:
+            self.report({'ERROR'}, f"Could not inspect PAK archives: {exc}")
+            return {'CANCELLED'}
+        if not self.__class__._archives:
+            self.report({'WARNING'}, "No valid pakN.pak archives found in the selected game folder.")
+            return {'CANCELLED'}
+        return context.window_manager.invoke_props_dialog(self, width=560)
+
+    def draw(self, context):
+        archives = self.__class__._archives
+        total_files = sum(int(item["entry_count"]) for item in archives)
+        total_bytes = sum(int(item["total_bytes"]) for item in archives)
+        layout = self.layout
+        layout.label(text=f"Archives: {len(archives)}")
+        for item in archives:
+            layout.label(
+                text=f"{item['name']}: {int(item['entry_count'])} files · {int(item['size']) / (1024 * 1024):.1f} MiB",
+                icon="PACKAGE",
+            )
+        layout.label(text=f"Total: {total_files} entries · {total_bytes / (1024 * 1024):.1f} MiB")
+        layout.label(text="Each archive becomes its own folder in Blender's SLOPGATE cache.", icon="INFO")
+
+    def execute(self, context):
+        game_dir = _qss_abspath(context.scene.qss_game_dir or "")
+        try:
+            cache_dir = bpy.utils.user_resource(
+                'DATAFILES', path=os.path.join('qss', 'pak_extracts'), create=True
+            )
+            results = quake_paths.extract_all_paks(game_dir, cache_dir)
+            files = sum(int(item["files_extracted"]) for item in results)
+            skipped = sum(int(item["files_skipped"]) for item in results)
+            output_root = os.path.dirname(results[0]["destination"]) if results else cache_dir
+            self.report(
+                {'INFO'},
+                f"Extracted {files} files from {len(results)} PAKs ({skipped} cached). Folder: {output_root}",
+            )
+            return {'FINISHED'}
+        except Exception as exc:
+            self.report({'ERROR'}, f"PAK extraction failed: {exc}")
             return {'CANCELLED'}
 
 
