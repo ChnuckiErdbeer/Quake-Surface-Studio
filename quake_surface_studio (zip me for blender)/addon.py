@@ -7094,7 +7094,7 @@ class QSS_OT_preview_bsp_lightmaps(Operator):
             return {'CANCELLED'}
 
 
-def _lightmap_sample_luminances(obj, image):
+def _lightmap_sample_luminances(obj, image, face_indices=None):
     """Read only real luxel centers, excluding atlas gutters and empty space."""
     mesh = obj.data
     attrs = _qss_validate_face_domain_attributes(
@@ -7110,7 +7110,10 @@ def _lightmap_sample_luminances(obj, image):
     image.update()
     image.pixels.foreach_get(pixels)
     values = []
+    target_set = None if face_indices is None else {int(index) for index in face_indices}
     for poly_index, _poly in enumerate(mesh.polygons):
+        if target_set is not None and poly_index not in target_set:
+            continue
         if not _qss_safe_collection_item(attrs['qss_lm_has_data'].data, poly_index, 'qss_lm_has_data').value:
             continue
         x0 = int(_qss_safe_collection_item(attrs['qss_lm_atlas_x'].data, poly_index, 'qss_lm_atlas_x').value) * resolution + gutter
@@ -7130,7 +7133,7 @@ def _lightmap_sample_luminances(obj, image):
     return values
 
 
-def _lightmap_face_coverage(obj, image, threshold=1e-8):
+def _lightmap_face_coverage(obj, image, threshold=1e-8, face_indices=None):
     """Summarize how many imported faces receive nonzero sampled bake luxels."""
     mesh = obj.data
     attrs = _qss_validate_face_domain_attributes(
@@ -7147,7 +7150,10 @@ def _lightmap_face_coverage(obj, image, threshold=1e-8):
     image.pixels.foreach_get(pixels)
     total_faces = lit_faces = total_luxels = lit_luxels = 0
     face_max_luminance = 0.0
+    target_set = None if face_indices is None else {int(index) for index in face_indices}
     for poly_index, _poly in enumerate(mesh.polygons):
+        if target_set is not None and poly_index not in target_set:
+            continue
         if not _qss_safe_collection_item(
             attrs['qss_lm_has_data'].data, poly_index, 'qss_lm_has_data'
         ).value:
@@ -8017,6 +8023,7 @@ class QSS_OT_bake_scene_lights(Operator):
             if active_map_collection is not None else None
         )
         material_states = []
+        lightmap_uv_backup = []
         bake_succeeded = False
         progress_wm = context.window_manager
         progress_workspace = getattr(context, 'workspace', None)
@@ -8140,6 +8147,12 @@ class QSS_OT_bake_scene_lights(Operator):
                 light_uv.active_render = True
             except Exception:
                 pass
+            if target_face_indices is not None:
+                lightmap_uv_backup = _qss_mask_unselected_lightmap_uvs(
+                    obj, light_uv, target_face_indices
+                )
+                obj["qss_last_bake_scope"] = str(bake_scope_name)
+                obj["qss_last_bake_target_face_count"] = len(target_face_indices)
 
             for mat in mesh.materials:
                 if mat is None:
@@ -8194,13 +8207,13 @@ class QSS_OT_bake_scene_lights(Operator):
             # Measure the raw Cycles irradiance at actual BSP luxel centres.
             # The atlas is float/Non-Color: unlike an 8-bit byte image it can
             # preserve low irradiance values and calibrated values above 1.0.
-            bake_values = _lightmap_sample_luminances(obj, bake_target)
+            bake_values = _lightmap_sample_luminances(obj, bake_target, target_face_indices)
             raw_bake_mean = (sum(bake_values) / len(bake_values)) if bake_values else 0.0
             raw_image_stats = _image_rgb_statistics(bake_target)
-            raw_face_coverage = _lightmap_face_coverage(obj, bake_target)
+            raw_face_coverage = _lightmap_face_coverage(obj, bake_target, face_indices=target_face_indices)
             obj['qss_last_bake_attempt_face_coverage'] = str(raw_face_coverage)
             source_image = bpy.data.images.get(obj.get('qss_original_lightmap_backup', ''))
-            source_values = _lightmap_sample_luminances(obj, source_image) if source_image else []
+            source_values = _lightmap_sample_luminances(obj, source_image, target_face_indices) if source_image else []
             source_mean = (sum(source_values) / len(source_values)) if source_values else 0.0
             energy_scale = max(0.0, float(scene.qss_light_energy_scale))
             max_energy_after_bake = max((float(o.data.energy) for o in imported_lights), default=0.0)
@@ -8251,12 +8264,32 @@ class QSS_OT_bake_scene_lights(Operator):
             if bool(getattr(scene, 'qss_bake_match_source', True)) and source_mean > 1e-8 and raw_bake_mean > 1e-8:
                 atlas_match_scale = lighting_utils.bake_atlas_match_scale(source_mean, raw_bake_mean)
             post_scale = float(getattr(scene, 'qss_bake_output_scale', 1.0)) * atlas_match_scale
-            for px in range(0, len(baked), 4):
-                baked[px] = max(0.0, baked[px] * post_scale)
-                baked[px + 1] = max(0.0, baked[px + 1] * post_scale)
-                baked[px + 2] = max(0.0, baked[px + 2] * post_scale)
-                baked[px + 3] = 1.0
-            image.pixels.foreach_set(baked)
+            if target_face_indices is None:
+                for px in range(0, len(baked), 4):
+                    baked[px] = max(0.0, baked[px] * post_scale)
+                    baked[px + 1] = max(0.0, baked[px + 1] * post_scale)
+                    baked[px + 2] = max(0.0, baked[px + 2] * post_scale)
+                    baked[px + 3] = 1.0
+                image.pixels.foreach_set(baked)
+            else:
+                # Partial baking never clears or normalizes untouched atlas
+                # regions. Merge only the chosen faces and their reserved gutter.
+                merged = array.array('f', [0.0]) * len(image.pixels)
+                previous_snapshot.pixels.foreach_get(merged)
+                rectangles = _qss_partial_lightmap_rectangles(
+                    obj, image, target_face_indices, padding=bake_margin
+                )
+                changed_pixels = bake_scope_utils.merge_rgba_regions(
+                    merged, baked, int(image.size[0]), int(image.size[1]),
+                    rectangles, factor=post_scale,
+                )
+                if changed_pixels <= 0:
+                    raise bsp.BSPError(
+                        "The selected bake scope did not cover any atlas pixels. "
+                        "No existing lightmap pixels were changed."
+                    )
+                image.pixels.foreach_set(merged)
+                obj["qss_last_bake_partial_pixels"] = int(changed_pixels)
             image.update()
             try:
                 image.pack()
@@ -8264,7 +8297,7 @@ class QSS_OT_bake_scene_lights(Operator):
                 pass
             bake_succeeded = True
             _bake_progress(5, 'Bake validated and atlas updated; restoring Blender scene state')
-            values = _lightmap_sample_luminances(obj, image)
+            values = _lightmap_sample_luminances(obj, image, target_face_indices)
             obj['qss_last_bake_luxel_mean'] = float(sum(values) / max(1, len(values)))
             obj['qss_last_bake_luxel_max'] = float(max(values, default=0.0))
             obj['qss_last_bake_energy_scale'] = float(scene.qss_light_energy_scale)
@@ -8298,8 +8331,12 @@ class QSS_OT_bake_scene_lights(Operator):
             _qss_log('INFO', 'bake', f"Completed: {updated_lights} lights, {len(material_states)} materials, "
                      f"{raw_face_coverage['lit_faces']}/{raw_face_coverage['total_faces']} faces lit; "
                      f"mean={obj['qss_last_bake_luxel_mean']:.5g}, atlas_scale={post_scale:.5g}")
+            scope_note = (
+                f"Partial {bake_scope_name.replace('_', ' ').lower()} · {len(target_face_indices)} faces. "
+                if target_face_indices is not None else "Full map. "
+            )
             self.report({'INFO'},
-                        f"Bake complete: {updated_lights} lights, {len(material_states)} materials, "
+                        f"Bake complete ({scope_note}) {updated_lights} lights, {len(material_states)} materials, "
                         f"{raw_face_coverage['lit_faces']}/{raw_face_coverage['total_faces']} faces lit, "
                         f"{raw_face_coverage['lit_luxels']}/{raw_face_coverage['total_luxels']} raw luxels lit, "
                         f"mean {obj['qss_last_bake_luxel_mean']:.4g}, "
@@ -8375,6 +8412,8 @@ class QSS_OT_bake_scene_lights(Operator):
                 except Exception:
                     pass
             try:
+                _qss_restore_lightmap_uvs(obj, light_uv, lightmap_uv_backup)
+                lightmap_uv_backup = []
                 if old_uv is not None:
                     mesh.uv_layers.active = old_uv
             except Exception:
