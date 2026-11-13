@@ -16002,8 +16002,7 @@ The reported issues were separated by subsystem:
 
 ### Verification and install delivery
 
-- Latest package source commit: 867b1a4e25fe3b368ce4dcdca1b992699fb5918c.
-- Documentation commit: bbfe192600a3bff3727387499e6c4d607dd3e253.
+- Latest package source and README commit used by the installer: bbfe192600a3bff3727387499e6c4d607dd3e253. The preceding runtime integration commit was 867b1a4e25fe3b368ce4dcdca1b992699fb5918c.
 - Version: SLOPGATE 0.21.1.
 - QSS Python push workflow run 43513363267 / job 132188948610 passed Python compilation, 232 standalone unit tests, package assembly and artifact upload.
 - Companion converter GUI PR workflow 43513370688 passed; it is a separate companion tool and does not test Blender GUI interactions.
