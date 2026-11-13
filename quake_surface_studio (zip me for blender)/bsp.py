@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import struct
 from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence
