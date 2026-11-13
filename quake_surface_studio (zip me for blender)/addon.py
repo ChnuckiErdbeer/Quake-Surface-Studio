@@ -10657,6 +10657,13 @@ class QSS_PT_project(Panel):
         import_button = row.row()
         import_button.enabled = game_ready
         import_button.operator(QSS_OT_import_bsp.bl_idname, text="Import BSP", icon="IMPORT")
+        archive_button = row.row()
+        archive_button.enabled = game_ready
+        archive_button.operator(
+            QSS_OT_browse_game_maps.bl_idname,
+            text="Browse Maps",
+            icon="FILE_FOLDER",
+        )
         export_row = row.row(align=True)
         export_row.enabled = _qss_is_map_object(obj) and context.mode == "OBJECT"
         export_row.operator(QSS_OT_export_bsp.bl_idname, text="Export BSP", icon="EXPORT")
