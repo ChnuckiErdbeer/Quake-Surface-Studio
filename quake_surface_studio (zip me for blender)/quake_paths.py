@@ -46,11 +46,12 @@ def discover_game_dirs(quake_root: str) -> list[dict]:
         path = item.path
         has_maps = os.path.isdir(os.path.join(path, "maps"))
         try:
-            has_paks = any(
-                entry.is_file(follow_symlinks=False)
-                and re.fullmatch(r"pak\d+\.pak", entry.name, flags=re.IGNORECASE)
-                for entry in os.scandir(path)
-            )
+            with os.scandir(path) as entries:
+                has_paks = any(
+                    entry.is_file(follow_symlinks=False)
+                    and re.fullmatch(r"pak\d+\.pak", entry.name, flags=re.IGNORECASE)
+                    for entry in entries
+                )
         except OSError:
             has_paks = False
         if has_maps or has_paks:
