@@ -1,13 +1,17 @@
 # SLOPGATE 0.21.1
 
-## 0.21.1 — Mod palette fallback and bake workflow improvements
+## 0.21.1 — Partial baking and responsive PAK workflows
 
-- Palette lookup now searches the selected mod first and then the sibling base-game \`id1\` directory. Within a game directory, loose palette files take precedence over PAK contents, and higher-numbered PAK archives take precedence over lower-numbered archives.
-- The Cycles \`Bake Lightmap\` action can be started from Mesh Edit Mode. SLOPGATE temporarily switches to Object Mode for the full-map bake and restores the previous edit-object selection afterwards. The bake still covers the entire map; it is not limited to selected faces.
-- The existing archive-aware game-map picker is now exposed in the main SLOPGATE panel as \`Browse Maps\`. It lists loose BSPs and BSPs inside Quake PAK archives and extracts an archived BSP to the user-data cache before import.
-- The standard Blender file selector is not yet a virtual PAK filesystem. PAK entries are accessible through SLOPGATE's map picker, but the archive's internal folders are not mounted as native file-browser folders.
-- BSP2 and 2PSB parsing/export, preview-brightness calibration, and lightmap edge-padding/bleed improvements remain unimplemented. The parser still accepts classic BSP29 only.
-- Automated tests and package assembly must pass before this development build is distributed. No interactive Blender 5.2, Cycles/Eevee runtime, or Ironwail test is implied by Python CI.
+- Palette lookup checks the selected mod first and falls back to the sibling base-game id1 directory. Within each game directory, loose palette files take precedence over PAK contents; higher-numbered pakN.pak archives take precedence over lower-numbered archives.
+- The Cycles Bake Lightmap action can be started from Mesh Edit Mode. SLOPGATE temporarily switches to Object Mode for baking and restores the previous edit-object set, selection and active object afterwards.
+- Full Map remains the default bake. The Bake Scope menu additionally supports Selected Faces, Faces Affected by Selected Lights, and the intersection of both filters.
+- Selected-face baking updates only the selected faces' lightmap atlas rectangles and their reserved margin. Pixels belonging to other faces are preserved. It is still a full-scene lighting calculation on those receiver faces, not a selected-face-only scene render.
+- Selected-light baking uses the selected SLOPGATE lights to calculate a direct-light receiver-face mask. Those faces are then re-baked with all active-map lights enabled, so other lamp and indirect contributions on the same faces are retained. The face filter is an approximation based on face normals, light type/cone/range and BSP-geometry line of sight; indirect-only receiver faces are not guaranteed to be included.
+- The existing archive-aware Browse Maps dialog now scans the selected game folder once on opening. Map filtering is performed against the in-memory list, and enum redraw/hover no longer rescans PAK archives. PAK directory indexes are cached by archive path, size and modification time.
+- Extract PAKs extracts each valid pakN.pak into its own versioned folder in Blender's SLOPGATE user-data cache. Original archives are read-only; duplicate virtual paths from different archives remain in separate folders. Re-running extraction reuses unchanged cache folders.
+- The standard Blender file selector is not a virtual PAK filesystem. PAK entries are accessible via Browse Maps, while Extract PAKs provides ordinary folders in SLOPGATE's cache.
+- The mod palette, PAK extraction and partial atlas-merge helpers have standalone regression tests. Automated tests/package assembly do not imply interactive Blender 5.2 or Ironwail runtime validation.
+- BSP2 and 2PSB parsing/export, live-preview brightness calibration, and lightmap edge-padding/bleed improvements remain unimplemented.
 
 ---
 
