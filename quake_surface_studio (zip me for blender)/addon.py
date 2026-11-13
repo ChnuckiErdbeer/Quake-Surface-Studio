@@ -25,7 +25,7 @@ from bpy.types import Operator, Panel, Menu
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
 from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils, map_sync
-from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils
+from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils
 
 
 ADDON_VERSION = (0, 21, 1)
@@ -7683,6 +7683,163 @@ class QSS_OT_quake_direct_bake(Operator):
             print(trace)
             self.report({'ERROR'}, f'Quake direct bake failed: {exc}')
             return {'CANCELLED'}
+
+
+def _qss_selected_face_indices(obj):
+    """Capture polygon indices selected in Edit Mode or mesh polygon selection."""
+    if obj is None or obj.type != "MESH":
+        return []
+    if getattr(obj, "mode", "OBJECT") == "EDIT":
+        try:
+            import bmesh
+            bm = bmesh.from_edit_mesh(obj.data)
+            bm.faces.ensure_lookup_table()
+            bm.faces.index_update()
+            return sorted(face.index for face in bm.faces if face.select)
+        except Exception as exc:
+            raise bsp.BSPError(f"Could not read the current Edit Mode face selection: {exc}") from exc
+    return sorted(poly.index for poly in obj.data.polygons if poly.select)
+
+
+def _qss_selected_lights(context, obj):
+    active_objects = _qss_active_map_objects(context.scene, obj)
+    active_pointers = {int(item.as_pointer()) for item in active_objects}
+    return [
+        item for item in context.selected_objects
+        if item.type == "LIGHT"
+        and int(item.as_pointer()) in active_pointers
+        and item.get("qss_light_role") in {"quake_entity_light", "quake_world_sunlight"}
+    ]
+
+
+def _qss_faces_affected_by_lights(obj, lights, context):
+    """Approximate direct-light receiver faces for selected Quake lamps.
+
+    The returned mask is used only to select which receivers to re-bake. All
+    active-map lights remain enabled during the bake, so other lamps and
+    indirect contributions on those receivers are retained.
+    """
+    if not lights:
+        return []
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+
+    mesh = obj.data
+    if not mesh.polygons:
+        return []
+    world_matrix = obj.matrix_world
+    normal_matrix = world_matrix.to_3x3().inverted().transposed()
+    world_vertices = [world_matrix @ vertex.co for vertex in mesh.vertices]
+    polygons = [list(poly.vertices) for poly in mesh.polygons]
+    tree = BVHTree.FromPolygons(world_vertices, polygons, all_triangles=False, epsilon=0.0)
+    if tree is None:
+        return []
+
+    scene_diagonal = max(
+        1.0,
+        (obj.dimensions.length if hasattr(obj, "dimensions") else 1.0) * 2.0,
+    )
+    affected = set()
+    for poly in mesh.polygons:
+        if not poly.loop_total:
+            continue
+        center = world_matrix @ poly.center
+        normal = (normal_matrix @ poly.normal).normalized()
+        for light_obj in lights:
+            light_data = light_obj.data
+            is_sun = light_data.type == "SUN"
+            if is_sun:
+                ray_to_light = -(light_obj.matrix_world.to_3x3() @ Vector((0.0, 0.0, -1.0)))
+                if ray_to_light.length_squared <= 1e-16:
+                    continue
+                ray_to_light.normalize()
+                distance = scene_diagonal * 100.0
+            else:
+                light_position = light_obj.matrix_world.translation
+                delta = light_position - center
+                distance = delta.length
+                if distance <= 1e-5:
+                    continue
+                ray_to_light = delta / distance
+                cutoff = float(getattr(light_data, "cutoff_distance", 0.0))
+                if bool(getattr(light_data, "use_custom_distance", False)) and cutoff > 0.0:
+                    if distance > cutoff:
+                        continue
+                if light_data.type == "SPOT":
+                    spot_direction = light_obj.matrix_world.to_3x3() @ Vector((0.0, 0.0, -1.0))
+                    if spot_direction.length_squared <= 1e-16:
+                        continue
+                    spot_direction.normalize()
+                    if spot_direction.dot(-ray_to_light) < math.cos(float(light_data.spot_size) * 0.5):
+                        continue
+            if normal.dot(ray_to_light) <= 1e-5:
+                continue
+
+            # Ray origin is nudged off the receiver to avoid self-intersection.
+            ray_origin = center + ray_to_light * 0.02
+            ray_limit = max(0.0, distance - 0.04)
+            if ray_limit > 0.0:
+                hit, _hit_normal, hit_index, _hit_distance = tree.ray_cast(
+                    ray_origin, ray_to_light, ray_limit
+                )
+                if hit is not None and hit_index != poly.index:
+                    continue
+            affected.add(poly.index)
+            break
+    return sorted(affected)
+
+
+def _qss_mask_unselected_lightmap_uvs(obj, uv_layer, face_indices):
+    """Move non-target face islands outside the bake image until the bake ends."""
+    keep = {int(index) for index in face_indices}
+    loop_indices = {
+        int(loop_index)
+        for poly in obj.data.polygons
+        if poly.index in keep
+        for loop_index in poly.loop_indices
+    }
+    backup = []
+    for index, item in enumerate(uv_layer.data):
+        if index in loop_indices:
+            continue
+        backup.append((index, item.uv.copy()))
+        item.uv = (4.0, 4.0)
+    obj.data.update()
+    return backup
+
+
+def _qss_restore_lightmap_uvs(obj, uv_layer, backup):
+    if not backup:
+        return
+    for index, value in backup:
+        if 0 <= index < len(uv_layer.data):
+            uv_layer.data[index].uv = value
+    obj.data.update()
+
+
+def _qss_partial_lightmap_rectangles(obj, image, face_indices, padding=0):
+    mesh = obj.data
+    required = ("qss_lm_atlas_x", "qss_lm_atlas_y", "qss_lm_sample_w", "qss_lm_sample_h")
+    attributes = {}
+    for name in required:
+        attribute = mesh.attributes.get(name)
+        if attribute is None or attribute.domain != "FACE" or len(attribute.data) != len(mesh.polygons):
+            raise bsp.BSPError(f"Face attribute {name} is missing or invalid; re-import the BSP.")
+        attributes[name] = attribute
+    resolution = _qss_lightmap_pixel_scale(obj, image)
+    return bake_scope_utils.face_luxel_rectangles(
+        face_indices,
+        [int(item.value) for item in attributes["qss_lm_atlas_x"].data],
+        [int(item.value) for item in attributes["qss_lm_atlas_y"].data],
+        [int(item.value) for item in attributes["qss_lm_sample_w"].data],
+        [int(item.value) for item in attributes["qss_lm_sample_h"].data],
+        image_width=int(image.size[0]),
+        image_height=int(image.size[1]),
+        resolution=resolution,
+        lightmap_scale=max(1, int(obj.get("qss_lightmap_scale", 1))),
+        gutter=max(0, int(obj.get("qss_lightmap_gutter", 0))) * resolution,
+        padding=max(0, int(padding)),
+    )
 
 
 class QSS_OT_bake_scene_lights(Operator):
