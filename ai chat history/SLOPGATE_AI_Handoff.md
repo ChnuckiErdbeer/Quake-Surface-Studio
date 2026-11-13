@@ -1,6 +1,6 @@
 # SLOPGATE — AI Project Handoff
 
-**Last reviewed:** 2026-11-11  
+**Last reviewed:** 2026-11-13  
 **Purpose:** A compact, maintained project and collaboration brief for future assistant sessions. This is an editorial summary, not a verbatim record.
 
 ## Read this first
@@ -290,3 +290,26 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - Blender 5.2 PointLight API: https://docs.blender.org/api/5.2/bpy.types.PointLight.html
 - TrenchBroom manual: https://trenchbroom.github.io/manual/latest/
 - FGD property conventions reference: https://book.leveldesignbook.com/appendix/resources/formats/fgd
+
+
+## Current source changes — 2026-11-13 (0.21.1 development, not yet packaged)
+
+The user tested 0.21.0 and confirmed that the companion MAP was found, edits to supported light values were synchronized into the exported MAP, and Cycles-baked lightmap changes appeared in the exported BSP.
+
+Source changes now on \`fix/v0.11.1-metadata-style-order-test\` (latest inspected commit: \`4470fccf412a05ef7b7a9275ac75265c028e6d9b\`):
+- \`bsp.py\`: palette search now prioritizes the selected mod, then falls back to the sibling base-game \`id1\`; loose palette files precede PAK resources, and higher-numbered \`pakN.pak\` files precede lower-numbered archives.
+- Added \`tests/test_palette_fallback.py\` for mod fallback, mod overrides, PAK precedence and installation-root lookup. These tests have been authored but no CI result is yet verified.
+- \`QSS_OT_bake_scene_lights\`: the Cycles bake can start in Mesh Edit Mode, temporarily switches to Object Mode, bakes the entire map (not only selected faces), then restores the original edit-object set, selection and active object.
+- The existing loose/PAK-aware map picker is visible in the main SLOPGATE panel as **Browse Maps**. It lists BSP maps in PAKs and extracts an archived map to the user-data cache. This is not a virtual filesystem mounted into Blender's native OS file browser; true folder navigation inside PAK remains a separate UI improvement.
+- Version metadata in \`__init__.py\` and \`addon.py\` has been bumped to 0.21.1. README includes the development notes.
+- No verified install ZIP exists for 0.21.1 yet. Do not offer the historical 0.21.0 ZIP as though it contains these changes.
+
+### Still open from the 2026-11-13 user report
+
+- **BSP2 and 2PSB:** current \`bsp.py\` still accepts classic BSP29 only. Both extended variants need format-aware readers and writers for all widened records and validation/export paths. Do not merely accept their magic/version and do not silently convert on export. The exact compatibility of Quake's 2021 rerelease with community BSP2 must be verified separately: QuakeSpasm's release notes call out Q64 BSP support, which is not automatically synonymous with BSP2/2PSB.
+- **Preview brightness:** current native Blender energy conversion is only an approximation to Quake units; it does not guarantee Quake renderer parity. A distinct live-preview multiplier, independent of bake energy and baked-atlas normalization, remains a possible improvement. No such control has been implemented yet.
+- **Lightmap edge clipping / engine blur:** no fix has been implemented. Investigate a per-face lightmap border/edge-extension or carefully constrained adjacent-face bleed approach, preserving real shadow and orientation discontinuities. Blender atlas UV gutter alone does not solve the engine's per-face lightmap interpolation.
+- **PAK browsing:** current Browse Maps lists all loose and archived BSPs with virtual path/source labels; the native Blender file selector still cannot treat PAK subpaths as real folders. A more complete SLOPGATE virtual folder browser remains future work.
+- **Interactive validation:** the Edit Mode bake change needs Blender 5.2 validation, including multi-object Edit Mode restoration. Palette fallback tests need CI confirmation. No BSP2/2PSB, Eevee/Cycles preview calibration, game-engine lightmap seam or Ironwail runtime test has been performed for 0.21.1.
+
+Keep the older 0.21.0 verified build details as historical. The 0.21.1 source is experimental until CI produces a verified package artifact.
