@@ -15971,3 +15971,55 @@ The reported issues were separated by subsystem:
   - https://ericw-tools.readthedocs.io/en/latest/changelog.html
   - https://github.com/andrei-drexler/ironwail/blob/master/Quakespasm.txt
   - https://quakespasm.sourceforge.net/Quakespasm.html
+
+
+## 2026-11-13 — Selective lightmap baking and responsive PAK workflows (SLOPGATE 0.21.1)
+
+### You
+
+> I never thought it would render only selected faces. But since you said it:
+> That would be a nice feature for preserving time. Also slecting lightrs and
+> only rerender faces lit by them.
+>
+> The old bsp browser was pretty slow. If you can make it snappy and not make the
+> mouse cursor slowed down when hovering over entries it woulkd be fine.
+> Altenatively there could be an option to extract all pak files in the
+> directory.
+>
+> Please always send me an installer link when you updated the addon.
+
+### Assistant — implementation
+
+- Kept Full Map as the default Cycles bake and added a Bake Scope menu with Full Map, Selected Faces, Faces Affected by Selected Lights, and Selected Faces Affected by Selected Lights.
+- Face selection is captured before the operator changes mode. Partial face baking temporarily moves non-target lightmap UV islands outside the target image, while the full BSP geometry remains present for lighting and shadowing. The original UV coordinates are restored in a finally path.
+- Partial results are merged into only the selected face atlas rectangles and their reserved margin. Unselected atlas pixels are restored from the pre-bake snapshot, not cleared or globally rescaled. Partial source-match normalization is calculated from the target face samples.
+- Selected-light scope uses selected imported SLOPGATE lights to compute an approximate direct-light receiver-face mask from surface normals, lamp type/direction/spot cone/cutoff, and BSP geometry line-of-sight. The bake itself keeps all active-map lights enabled, so other lamps and indirect contributions on those receiver faces are recalculated and retained. This is a face-level direct-light approximation; indirect-only receiver faces are not guaranteed to be included.
+- The existing PAK map browser now discovers the map list once on dialog opening. Dynamic enum redraw and hover use only an in-memory list, and a filter narrows the cached results without rescanning directories or PAK files.
+- PAK directory indexes are cached by absolute archive path, size and nanosecond modification time.
+- Added Extract PAKs. Each pakN.pak is extracted into its own versioned user-data cache folder, with archive contents kept separate so duplicate virtual paths from different packages are not overwritten. The original PAKs remain untouched. Repeating extraction reuses unchanged cached folders.
+- Added a pure bake_scope helper module and regression tests for face target masks, top-origin atlas to Blender pixel rectangles, region-only RGBA merge, overlap merging and invalid buffer checks. Expanded PAK extraction tests.
+- The Blender native file selector still does not mount PAK internals as virtual folders. Users can browse maps through the cached SLOPGATE map picker or extract all PAKs to normal folders.
+
+### Verification and install delivery
+
+- Latest package source commit: 867b1a4e25fe3b368ce4dcdca1b992699fb5918c.
+- Documentation commit: bbfe192600a3bff3727387499e6c4d607dd3e253.
+- Version: SLOPGATE 0.21.1.
+- QSS Python push workflow run 43513363267 / job 132188948610 passed Python compilation, 232 standalone unit tests, package assembly and artifact upload.
+- Companion converter GUI PR workflow 43513370688 passed; it is a separate companion tool and does not test Blender GUI interactions.
+- Blender install artifact 14079401997, name Quake-Surface-Studio-v0.21.1-Blender-Install, 264,338 bytes, 45 entries; expires 2027-02-11.
+- SHA-256: e8438593d12616e0a46c72fe7f1426b9c490be3a984c9a870ae250ca699a1378.
+- Artifact download page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43513363267/artifacts/14079401997
+- The ZIP was downloaded locally, passed archive integrity checking, and was verified to contain the installable quake_surface_studio/ package with __init__.py, addon.py, bake_scope.py, PAK path utilities and standalone test files.
+- Interactive Blender 5.2 validation remains outstanding, particularly partial UV isolation, unchanged unselected atlas pixels, selected-light receiver masks, Edit Mode restoration and the large-PAK browser response. Do not claim GUI/runtime testing based on Python CI.
+- The versioned installer ZIP is available to the user as sandbox:/mnt/data/SLOPGATE-v0.21.1-Blender-Install.zip. Always include a verified installer link when sending any new build.
+
+### Next test recommendations
+
+1. In a copy of a real map, select a few separated faces across multiple materials, run Selected Faces, and compare pixels outside those selected face rectangles before/after.
+2. Undo the partial bake and confirm the complete previous atlas returns.
+3. Select one point light, one spot light and (where present) a sun separately. Confirm only the intended direct-receiver faces are updated, while other lamps still contribute on those faces.
+4. Run selected-face plus selected-light intersection on a representative map.
+5. Test in multi-object Edit Mode and verify all previous selected objects and active edit object are restored after both success and a deliberately induced failure.
+6. Open Browse Maps and hover through a large PAK map list; filtering must not trigger filesystem/archive rescans. Test Extract PAKs with duplicated paths across pak0/pak1 and verify the archives are unchanged.
+
