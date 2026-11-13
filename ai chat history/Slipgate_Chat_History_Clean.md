@@ -15914,3 +15914,60 @@ Implemented the first MAP import milestone in SLOPGATE 0.20.9.
 - Final package build commit: 87a1cee7dfc007b177c4b9923e7c2874777e773d. QSS Python workflow run 43006568762 passed compileall, the standalone test suite, package assembly and artifact upload.
 - Final ZIP: artifact 13847848551, 250,878 bytes, 41 entries; SHA-256 65e6bef6f391d2216ebb9c67fd8ace8e6920499161acce08c12b194b2b9f57c7. Downloaded ZIP integrity and package layout verified. Artifact page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43006568762/artifacts/13847848551.
 - New light creation and spot direction/mangle synchronization remain future work. No Blender 5.2 GUI or actual Quake toolchain/engine validation was performed.
+
+
+## 2026-11-13 — 0.21.1 usability and compatibility follow-up
+
+### You
+
+> Ok! Made the test. Map import export seems to work. Changed some light and the changes are also represented in the exported map. When i bake with cycles the changes are also in the bsp.
+>
+> Some other things:
+>
+> Why can i only bake from object mode?
+>
+> when i chose another mod folder than id1 SLOPGATE cant find the palette when importing a map. It should always look in id1 as a fallback should a file be not present in a mod folder.
+>
+> Also would be nice to have pak files represented as folders in the file picker.
+>
+> Ironwail and Remaster both support the bsp2 format. Many mods use them. Should be easy to add support.
+>
+> cycles and eevee still too bright in preview. Why?
+>
+> While the baked lightmaps in blender look pretty good, in the game itself they get intentionally blurred to hide the small resolution. That blur leads sometimes to harsh edges between faces. Seems as if the blurryness kind of needs more space than the face itself leading to the light spot suddely being ripped of at the edge of the face.
+
+### Assistant — findings and response
+
+The user confirmed the 0.21.0 companion-MAP test: a same-basename MAP was recognized, supported light edits appeared in the exported MAP, and Cycles-baked lightmap changes appeared in the exported BSP.
+
+The reported issues were separated by subsystem:
+
+1. **Bake from Edit Mode.** The panel had an explicit Object Mode gate. Cycles baking still needs the object-level mesh/image-target workflow and is not a selected-face-only bake. The new wrapper temporarily switches from Mesh Edit Mode to Object Mode, runs the existing full-map bake, and restores the pre-existing selection/edit-object set afterwards. The UI explains that the entire map is baked.
+2. **Mod palette fallback.** The old palette finder looked inside the selected directory and for an id1 child, but did not search the sibling installation path <quake-root>/id1 when the selected directory was a mod such as <quake-root>/ad. The revised precedence is selected mod first, sibling base-game id1 second. Within each game directory, loose gfx/palette.lmp files take precedence over PAK entries; higher-numbered pakN.pak archives precede lower-numbered ones. An explicitly selected palette file retains priority.
+3. **PAK browsing.** SLOPGATE already had a PAK-aware map-discovery and extraction implementation, but its Browse Game Maps operator had been hidden from the main panel. The existing map picker is now exposed as **Browse Maps**. It lists loose and archived BSP maps and extracts archived BSPs to the user-data cache. This does not mount PAK internals as folders in Blender's native file selector; a richer virtual folder browser remains future work.
+4. **BSP2 / 2PSB.** The live parser and writer still assume classic BSP29. Support requires format-aware record layouts across faces, edges, nodes, leaves, clipnodes, marksurfaces, and associated validators/export paths. Preserve each source format on export; do not merely accept its header or silently convert formats. ericw-tools distinguishes -bsp2 and -2psb; the latter is an earlier RMQ format. Ironwail changelog explicitly lists both. Separately, Quake 2021 rerelease compatibility references Q64 BSP support in QuakeSpasm release notes; Q64 must not be casually equated with community BSP2/2PSB without verification.
+5. **Preview brightness.** SLOPGATE converts compiler-space Quake light magnitudes into approximate Blender energy and cannot guarantee native renderer parity. Cycles/Eevee preview does not use the same source-mean image-atlas normalization that can make a final bake appear closer to the original. A separate live-preview-only brightness control remains a candidate; it has not been implemented.
+6. **Lightmap clipping after engine blur.** Blender atlas UV gutters do not expand each BSP face's own lightmap sample rectangle. The issue likely needs a per-face lightmap edge extension/padding strategy or carefully constrained adjacent-face bleed, while preserving real changes in surface orientation and shadowing. No fix has been implemented; this needs a controlled test map and export-level investigation.
+
+### Source changes made for 0.21.1 development
+
+- Added mod-to-sibling-id1 palette fallback in bsp.py.
+- Refined loose-file/PAK search precedence and added six focused tests in tests/test_palette_fallback.py.
+- Allowed the Cycles Bake Lightmap operator from Mesh Edit Mode by temporarily switching to Object Mode and restoring selection and edit mode.
+- Exposed the existing loose/PAK map picker in the main SLOPGATE panel.
+- Bumped bl_info and ADDON_VERSION to 0.21.1 and added README/handoff notes.
+- Latest source commit before this log append: 4470fccf412a05ef7b7a9275ac75265c028e6d9b; handoff documentation update commit: f781fafff76ccd8f4ac5399c817b5f7447f4d15e.
+- CI status and an installable 0.21.1 ZIP have not been verified. Do not reuse the 0.21.0 archive as a 0.21.1 package.
+- No interactive Blender 5.2 test, actual BSP2/2PSB test, calibrated preview comparison, game-engine lightmap seam test or Ironwail runtime test has been performed.
+
+### Reference material reviewed
+
+- ericw-tools QBSP documentation: -bsp2 creates the newer BSP2 format; -2psb creates the earlier RMQ-compatible BSP2 variant. The docs recommend -bsp2 instead of the deprecated -2psb.
+- ericw-tools changelog documents BSP2 and 2PSB as distinct output variants and bsputil --convert support between them.
+- Ironwail / Quakespasm changelog lists support for both BSP2 and 2PSB.
+- QuakeSpasm's 0.94.0 notes call out Quake 2021 rerelease support and Q64 BSP format support; this is a separate format compatibility claim requiring further verification before implementing a Remaster target.
+- Reference URLs:
+  - https://ericw-tools.readthedocs.io/en/latest/qbsp.html
+  - https://ericw-tools.readthedocs.io/en/latest/changelog.html
+  - https://github.com/andrei-drexler/ironwail/blob/master/Quakespasm.txt
+  - https://quakespasm.sourceforge.net/Quakespasm.html
