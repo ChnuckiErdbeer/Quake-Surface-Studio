@@ -8120,6 +8120,7 @@ class QSS_OT_bake_scene_lights(Operator):
                 # One image is shared by every material. Clearing per material can
                 # erase pixels baked for earlier material slots; target starts blank.
                 scene.render.bake.use_clear = False
+            bake_margin = 0
             if hasattr(scene.render.bake, 'margin'):
                 # Each packed face island has a reserved gutter. Extend the
                 # baked edge pixels into that gutter so rasterization/texture
@@ -11185,8 +11186,10 @@ class QSS_PT_lighting(Panel):
             icon="DOWNARROW_HLT",
         )
         if context.mode == "EDIT_MESH":
-            layout.label(text="Partial bake uses selected faces; full bake restores Edit Mode after completion.", icon="INFO")
-        layout.label(text="Selected-light scope re-bakes the directly affected faces with all map lights active.", icon="INFO")
+            layout.label(text="Selected-face scopes use the current face selection; full bake restores Edit Mode.", icon="INFO")
+        if context.mode == "OBJECT":
+            layout.label(text="For selected-light scopes, keep the BSP active and select the map lights to use as a face filter.", icon="INFO")
+        layout.label(text="Selected-light scopes re-bake affected faces with all map lights active.", icon="INFO")
         if mode == "realtime":
             layout.label(text="Eevee preview selected; baking currently uses the Cycles backend.", icon="INFO")
         if obj.get("qss_last_quake_bake_error"):
