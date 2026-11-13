@@ -65,9 +65,13 @@ def face_luxel_rectangles(
         if sample_w <= 0 or sample_h <= 0:
             continue
         x0 = int(atlas_x[index]) * resolution + gutter - padding
-        y0 = int(atlas_y[index]) * resolution + gutter - padding
         x1 = int(atlas_x[index]) * resolution + gutter + sample_w * scale + padding
-        y1 = int(atlas_y[index]) * resolution + gutter + sample_h * scale + padding
+        top_y0 = int(atlas_y[index]) * resolution + gutter
+        top_y1 = top_y0 + sample_h * scale
+        # BSP atlas attributes use top-left rows; Blender image pixels use
+        # bottom-left rows. Convert before touching pixel buffers.
+        y0 = height - (top_y1 + padding)
+        y1 = height - top_y0 + padding
         x0 = max(0, min(width, x0))
         y0 = max(0, min(height, y0))
         x1 = max(0, min(width, x1))
@@ -105,6 +109,39 @@ def _merged_row_intervals(rectangles, image_width: int, image_height: int):
         yield y, start, end
 
 
+
+def merge_rgba_regions(
+    destination,
+    source,
+    image_width: int,
+    image_height: int,
+    rectangles,
+    factor: float = 1.0,
+):
+    """Copy and scale source RGBA pixels only inside selected rectangles.
+
+    Pixels outside the requested regions are never modified, so a partial bake
+    preserves the rest of the existing lightmap. Overlapping rectangles are
+    merged to prevent a pixel being scaled more than once.
+    """
+    width = int(image_width)
+    height = int(image_height)
+    expected = width * height * 4
+    if width < 0 or height < 0 or len(destination) != expected or len(source) != expected:
+        raise ValueError("RGBA pixel buffers do not match the supplied image dimensions.")
+    scale = max(0.0, float(factor))
+    changed = 0
+    for y, x0, x1 in _merged_row_intervals(rectangles, width, height):
+        offset = (y * width + x0) * 4
+        for _x in range(x0, x1):
+            destination[offset] = max(0.0, float(source[offset]) * scale)
+            destination[offset + 1] = max(0.0, float(source[offset + 1]) * scale)
+            destination[offset + 2] = max(0.0, float(source[offset + 2]) * scale)
+            destination[offset + 3] = 1.0
+            offset += 4
+            changed += 1
+    return changed
+
 def scale_rgba_regions(pixels, image_width: int, image_height: int, rectangles, factor: float):
     """Scale RGB only within selected atlas rectangles; leave other pixels intact.
 
@@ -135,4 +172,5 @@ __all__ = [
     "resolve_target_faces",
     "face_luxel_rectangles",
     "scale_rgba_regions",
+    "merge_rgba_regions",
 ]
