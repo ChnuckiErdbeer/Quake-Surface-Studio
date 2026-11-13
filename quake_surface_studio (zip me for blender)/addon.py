@@ -7616,7 +7616,7 @@ class QSS_OT_quake_direct_bake(Operator):
 class QSS_OT_bake_scene_lights(Operator):
     bl_idname = "qss.bake_scene_lights"
     bl_label = "Bake Imported Lights to Lightmap"
-    bl_description = "Bake imported Quake lights into a fresh shared RGB atlas, with indirect bounce support"
+    bl_description = "Bake the complete map lightmap; temporarily leaves Mesh Edit Mode and restores it afterwards"
     bl_options = {'REGISTER'}
 
     @classmethod
@@ -7633,6 +7633,50 @@ class QSS_OT_bake_scene_lights(Operator):
         return self.execute(context)
 
     def execute(self, context):
+        """Run the full-map bake in Object Mode, then restore the user's mode."""
+        obj = context.object
+        original_mode = getattr(obj, "mode", "OBJECT") if obj is not None else "OBJECT"
+        if original_mode not in {"OBJECT", "EDIT"}:
+            self.report({"ERROR"}, "Bake from Object Mode or Mesh Edit Mode.")
+            return {"CANCELLED"}
+
+        edit_objects = []
+        old_active = context.view_layer.objects.active
+        if original_mode == "EDIT":
+            edit_objects = list(getattr(context, "objects_in_mode", ()) or (obj,))
+            try:
+                context.view_layer.objects.active = obj
+                bpy.ops.object.mode_set(mode="OBJECT")
+            except Exception as exc:
+                self.report({"ERROR"}, f"Could not safely leave Edit Mode for baking: {exc}")
+                return {"CANCELLED"}
+
+        try:
+            return self._execute_object_mode(context)
+        finally:
+            # A lightmap bake covers the complete imported map, not just selected
+            # edit faces. Restore the original edit-object set after all bake
+            # state, selections, and active-object changes have been restored.
+            if original_mode == "EDIT" and obj is not None and obj.name in bpy.data.objects:
+                try:
+                    for selected in list(context.selected_objects):
+                        selected.select_set(False)
+                    restore_objects = [
+                        item for item in edit_objects
+                        if item is not None and item.name in bpy.data.objects
+                    ]
+                    for item in restore_objects:
+                        item.select_set(True)
+                    restore_active = (
+                        old_active if old_active is not None and old_active.name in bpy.data.objects
+                        else obj
+                    )
+                    context.view_layer.objects.active = restore_active
+                    bpy.ops.object.mode_set(mode="EDIT")
+                except Exception as exc:
+                    print(f"SLOPGATE: could not restore Edit Mode after bake: {exc}")
+
+    def _execute_object_mode(self, context):
         obj = context.object
         scene = context.scene
         image = bpy.data.images.get(obj.get('qss_lightmap_image_name', ''))
@@ -10806,8 +10850,10 @@ class QSS_PT_lighting(Panel):
         )
 
         bake = layout.row()
-        bake.enabled = context.mode == "OBJECT" and mode in {"realtime", "cycles"} and obj.get("qss_light_entity_count", 0) > 0
+        bake.enabled = context.mode in {"OBJECT", "EDIT_MESH"} and mode in {"realtime", "cycles"} and obj.get("qss_light_entity_count", 0) > 0
         bake.operator(QSS_OT_bake_scene_lights.bl_idname, text="Bake Lightmap", icon="RENDER_STILL")
+        if context.mode == "EDIT_MESH":
+            layout.label(text="Bakes the entire map, then restores Edit Mode.", icon="INFO")
         if mode == "realtime":
             layout.label(text="Eevee preview selected; baking currently uses the Cycles backend.", icon="INFO")
         if obj.get("qss_last_quake_bake_error"):
