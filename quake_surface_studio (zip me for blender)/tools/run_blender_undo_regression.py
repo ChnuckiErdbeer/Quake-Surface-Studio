@@ -28,7 +28,58 @@ from pathlib import Path
 import bpy
 from bpy.props import FloatProperty, StringProperty
 
-ADDON_ROOT = Path(__file__).resolve().parents[1]
+def find_addon_root():
+    """Find the installed add-on even when Blender runs this text as /run_*.py."""
+    candidates = []
+
+    # Normal case: the script is still in the repository's tools/ directory.
+    try:
+        script_path = Path(__file__).resolve()
+        if len(script_path.parents) > 1:
+            candidates.append(script_path.parents[1])
+    except (NameError, OSError, RuntimeError):
+        pass
+
+    # Blender's enabled add-ons provide their actual module locations.
+    for addon in bpy.context.preferences.addons:
+        module = sys.modules.get(addon.module)
+        module_file = getattr(module, "__file__", None)
+        if module_file:
+            module_path = Path(module_file).resolve()
+            candidates.extend((module_path.parent, module_path.parent.parent))
+
+    # Also inspect standard Blender add-on script directories.
+    try:
+        for scripts_dir in bpy.utils.script_paths(subdir="addons"):
+            base = Path(scripts_dir)
+            if base.is_dir():
+                for child in base.iterdir():
+                    if child.is_dir():
+                        candidates.extend((child, child / "quake_surface_studio"))
+    except Exception:
+        pass
+
+    seen = set()
+    for candidate in candidates:
+        try:
+            root = candidate.resolve()
+            if root in seen:
+                continue
+            seen.add(root)
+            if (root / "bake_scope.py").is_file() and (root / "image_undo.py").is_file():
+                return root
+        except (OSError, RuntimeError):
+            continue
+
+    checked = "\\n".join(str(path) for path in seen)
+    raise RuntimeError(
+        "Could not locate the SLOPGATE add-on source folder. "
+        "Enable/install SLOPGATE in Blender, then run this regression script again. "
+        f"Locations checked:\\n{checked or '(none)'}"
+    )
+
+
+ADDON_ROOT = find_addon_root()
 sys.path.insert(0, str(ADDON_ROOT))
 import bake_scope
 import image_undo
