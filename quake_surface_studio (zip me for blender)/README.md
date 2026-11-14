@@ -1,3 +1,16 @@
+# SLOPGATE 0.21.2
+
+## 0.21.2 — Context-driven selection workflow
+
+- Replaced the Bake Scope dropdown with a single **Only Selected Faces** scene checkbox and one Bake Lightmap action. With the checkbox off, the whole map is baked; with it on, the current Edit Mode face selection is used.
+- Added Object Mode context-menu action **Select Affected Faces** for selected imported SLOPGATE lights. It computes the direct-light receiver mask and switches the active BSP object into Edit Mode with those faces selected.
+- Added Mesh Edit Mode context-menu action **Select Affecting Lights**. It finds imported lights whose direct-light receiver masks intersect the selected faces, then switches to Object Mode with those lights selected.
+- Selected-light matching remains an approximate direct-light mask; it does not guarantee detection of indirect-only contributions.
+- Removed the Extract PAKs operator and button workflow. PAK map browsing remains available.
+- The previous partial-bake implementation still protects unselected atlas pixels, but UV-masking alone does not prove a reduction in Cycles bake time. True receiver-only baking with the complete BSP retained as an occluder is a separate optimization and remains to be implemented/validated. Do not describe the current partial bake as faster.
+- Original/Baked lightmap preview uses emission intentionally; live Eevee/Cycles preview already switches to diffuse materials and disconnects emission. Keep these two preview semantics separate unless a measured fix demonstrates otherwise.
+- Blender context-menu interaction and the Cycles performance improvement have not been runtime-tested in Blender 5.2.
+
 # SLOPGATE 0.21.1
 
 ## 0.21.1 — Partial baking and responsive PAK workflows
