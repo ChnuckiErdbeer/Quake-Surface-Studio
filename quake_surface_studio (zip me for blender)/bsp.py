@@ -640,10 +640,14 @@ def transform_inline_model_position(position, entity: dict[str, str]) -> tuple[f
     if len(origin_values) < 3:
         origin_values = [0.0, 0.0, 0.0]
     try:
-        angle_values = [float(value) for value in str(entity.get("angles", "0 0 0")).replace(",", " ").split()]
+        angle_text = str(entity.get("angles", "")).replace(",", " ").split()
+        if len(angle_text) >= 3:
+            angle_values = [float(value) for value in angle_text[:3]]
+        elif entity.get("angle") is not None:
+            angle_values = [0.0, float(entity.get("angle", 0.0)), 0.0]
+        else:
+            angle_values = [0.0, 0.0, 0.0]
     except (TypeError, ValueError):
-        angle_values = []
-    if len(angle_values) < 3:
         angle_values = [0.0, 0.0, 0.0]
 
     x, y, z = (float(value) for value in position[:3])
@@ -654,7 +658,7 @@ def transform_inline_model_position(position, entity: dict[str, str]) -> tuple[f
     cr, sr = math.cos(roll), math.sin(roll)
     y1, z1 = y * cr - z * sr, y * sr + z * cr
     cp, sp = math.cos(pitch), math.sin(pitch)
-    x2, z2 = x * cp - z1 * sp, x * sp + z1 * cp
+    x2, z2 = x * cp + z1 * sp, -x * sp + z1 * cp
     cy, sy = math.cos(yaw), math.sin(yaw)
     x3, y3 = x2 * cy - y1 * sy, x2 * sy + y1 * cy
     return (
