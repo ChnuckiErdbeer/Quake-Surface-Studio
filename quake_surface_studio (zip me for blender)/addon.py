@@ -28,7 +28,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils
 
 
-ADDON_VERSION = (0, 21, 4)
+ADDON_VERSION = (0, 21, 5)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -1807,7 +1807,7 @@ def _load_quake_image_and_materials(parsed, palette, wad_textures=None, loose_te
 
 
 def _get_or_make_face_attributes(mesh):
-    names = ('qss_bsp_face_id', 'qss_bsp_texinfo_id', 'qss_bsp_miptex_id')
+    names = ('qss_bsp_face_id', 'qss_bsp_texinfo_id', 'qss_bsp_miptex_id', 'qss_bsp_model_id')
     attrs = {}
     for name in names:
         attr = mesh.attributes.get(name)
@@ -3788,6 +3788,15 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
     texinfos = parsed.texinfos()
     faces = parsed.faces()
     planes = parsed.planes()
+    model_records = parsed.models()
+    face_model_ids = parsed.face_model_ids()
+    bsp_entities = bsp.parse_entities_lump(parsed.lumps[bsp.LUMP_ENTITIES])
+    model_entity_indices = dict(
+        (model_index, entity_index)
+        for model_index, entity_index in bsp.parse_inline_model_references(
+            bsp_entities, len(model_records)
+        )
+    )
     entries, materials, material_by_miptex, missing_mat, texture_sources, missing_texture_names = (
         _load_quake_image_and_materials(parsed, palette, wad_textures, loose_textures)
     )
@@ -3797,6 +3806,7 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
     imported_face_ids = []
     imported_texinfo_ids = []
     imported_miptex_ids = []
+    imported_model_ids = []
     imported_materials = []
     imported_vertex_positions = []
 
@@ -3836,6 +3846,7 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
             imported_face_ids.append(face_id)
             imported_texinfo_ids.append(texinfo_id)
             imported_miptex_ids.append(miptex_id)
+            imported_model_ids.append(int(face_model_ids[face_id]))
             imported_materials.append(mat)
         except bsp.BSPError:
             continue
@@ -3883,6 +3894,7 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
         attrs['qss_bsp_face_id'].data[i].value = imported_face_ids[i]
         attrs['qss_bsp_texinfo_id'].data[i].value = imported_texinfo_ids[i]
         attrs['qss_bsp_miptex_id'].data[i].value = imported_miptex_ids[i]
+        attrs['qss_bsp_model_id'].data[i].value = imported_model_ids[i]
     nodraw_faces = sum(
         1 for poly in mesh.polygons
         if surface_policy.is_nodraw_policy(_qss_face_surface_policy(obj, poly.index))
@@ -3901,6 +3913,15 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
     obj['qss_flip_z'] = bool(flip_z)
     obj['qss_imported_face_count'] = len(imported_face_ids)
     obj['qss_total_bsp_faces'] = len(faces)
+    obj['qss_bsp_model_count'] = int(len(model_records))
+    obj['qss_inline_model_entity_map'] = json.dumps({
+        str(model_index): int(entity_index)
+        for model_index, entity_index in model_entity_indices.items()
+    }, sort_keys=True)
+    obj['qss_inline_model_face_counts'] = json.dumps({
+        str(model_index): int(imported_model_ids.count(model_index))
+        for model_index in sorted(set(imported_model_ids))
+    }, sort_keys=True)
     obj['qss_bspx_lump_names'] = ', '.join(sorted(parsed.bspx_lumps.keys()))
     obj['qss_texture_count'] = len(entries)
     obj['qss_nodraw_face_count'] = int(nodraw_faces)
@@ -11459,6 +11480,10 @@ class QSS_PT_stats(Panel):
         geometry.label(text=f"Source BSP faces: {obj.get('qss_total_bsp_faces', len(mesh.polygons))}")
         geometry.label(text=f"Imported mesh: {len(mesh.polygons)} polygons · {len(mesh.vertices)} vertices")
         geometry.label(text=f"Materials: {len(mesh.materials)}")
+        geometry.label(
+            text=f"BSP inline models: {int(obj.get('qss_bsp_model_count', 0))} "
+                 f"· {len(set(int(item.value) for item in mesh.attributes['qss_bsp_model_id'].data)) if mesh.attributes.get('qss_bsp_model_id') else 0} represented"
+        )
         selected_paint_faces = _qss_selected_paint_face_count(context, obj)
         if selected_paint_faces:
             estimate = _qss_estimate_texture_paint_memory(context, obj)
@@ -11487,6 +11512,27 @@ class QSS_PT_stats(Panel):
             memory = int(image.size[0]) * int(image.size[1]) * (16 if image.is_float else 4)
             lighting.label(text=f"Working atlas: {image.size[0]}×{image.size[1]} · ~{memory / (1024 * 1024):.1f} MiB")
         lighting.label(text=f"Generated bake: {'Available' if _qss_has_baked_lightmap(obj) else 'Not baked'}")
+        last_total = obj.get("qss_last_bake_duration_seconds")
+        last_cycles = obj.get("qss_last_bake_cycles_seconds")
+        bake_timing = lighting.box()
+        bake_timing.label(text="LAST CYCLES BAKE", icon="TIME")
+        if last_total is not None:
+            bake_timing.label(
+                text=f"Total: {bake_stats_utils.format_duration(last_total)}"
+            )
+            bake_timing.label(
+                text=f"Cycles: {bake_stats_utils.format_duration(last_cycles)}"
+            )
+        else:
+            bake_timing.label(text="No successful bake timing recorded yet.")
+        last_attempt = obj.get("qss_last_bake_attempt_duration_seconds")
+        if last_attempt is not None and last_total is None:
+            bake_timing.label(
+                text=f"Last attempt: {bake_stats_utils.format_duration(last_attempt)}"
+            )
+            bake_timing.label(
+                text=f"Cycles attempt: {bake_stats_utils.format_duration(obj.get('qss_last_bake_attempt_cycles_seconds'))}"
+            )
         diagnostics = layout.box()
         diagnostics.label(text="EXPORT & DIAGNOSTICS", icon="EXPORT")
         last_export = _qss_last_export_path(obj)
