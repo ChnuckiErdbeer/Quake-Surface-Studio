@@ -396,3 +396,13 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - Important Quake distinction: `angle` (singular) on movers commonly specifies travel direction, not initial model orientation. Do not apply it as a brush geometry rotation. Only explicit three-component `angles` is applied as initial orientation.
 - Current scope corrects initial placement/rotation for imported inline-model faces, but does not yet split each inline model into a separately selectable Blender object, simulate mover travel, or implement full entity-specific animation. Validate against real `func_door`, `func_plat`, `func_train`, and rotating-brush BSP samples, including maps with and without origin brushes.
 - Bake timing now appears persistently in the Lighting section of STATS; users should capture total and Cycles durations on E1M1 for future comparison. No bake settings or quality were changed.
+
+
+### SLOPGATE 0.21.5 verified build
+
+- Implementation commit: `8666f7bdec483fc5aa5815f1d201ebcb31672a83`.
+- QSS Python workflow: run `43579048637`, success. Python compilation passed, **246 standalone tests passed**, package folder assembled, installer artifact uploaded.
+- Installer artifact: `Quake-Surface-Studio-v0.21.5-Blender-Install`, artifact ID `14107855128`, 272,694 bytes, SHA-256 `c21addb5b7045efcb2cff0210be507f98bfa4cf9b151be0628761bb349d22184`, expires 2027-02-12.
+- Downloaded archive was checked with `unzip -t`; no corrupt members.
+- No Blender 5.3 interactive runtime verification has been performed for the new inline-model placement or visible timing panel. User validation remains required, especially for maps containing origin-brush doors/platforms, rotated brush models, and lightmap-resolution rebuilds.
+- Next work should add targeted fixture/sample-map validation for `func_door`, `func_plat`, `func_train`, and `func_rotating`; then consider separating inline models into independently selectable objects only if the combined-mesh workflow proves insufficient.
