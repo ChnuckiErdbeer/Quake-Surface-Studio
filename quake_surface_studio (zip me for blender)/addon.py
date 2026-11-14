@@ -7848,22 +7848,140 @@ def _qss_partial_lightmap_rectangles(obj, image, face_indices, padding=0):
     )
 
 
+class QSS_OT_select_affected_faces(Operator):
+    bl_idname = "qss.select_affected_faces"
+    bl_label = "Select Affected Faces"
+    bl_description = "Select BSP faces directly illuminated by the selected SLOPGATE lights"
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return bool(
+            obj and obj.type == "LIGHT"
+            and obj.get("qss_light_role") in {"quake_entity_light", "quake_world_sunlight"}
+            and any(_qss_is_map_object(item) for item in context.selected_objects)
+        )
+
+    def execute(self, context):
+        lights = [
+            item for item in context.selected_objects
+            if item.type == "LIGHT"
+            and item.get("qss_light_role") in {"quake_entity_light", "quake_world_sunlight"}
+        ]
+        map_obj = next((item for item in context.selected_objects if _qss_is_map_object(item)), None)
+        if map_obj is None or not lights:
+            self.report({"ERROR"}, "Select a SLOPGATE BSP object and one or more imported lights.")
+            return {"CANCELLED"}
+        try:
+            faces = _qss_faces_affected_by_lights(map_obj, lights, context)
+            if not faces:
+                self.report({"WARNING"}, "No directly affected faces were found for the selected lights.")
+                return {"CANCELLED"}
+            for item in list(context.selected_objects):
+                item.select_set(False)
+            map_obj.hide_set(False)
+            map_obj.select_set(True)
+            context.view_layer.objects.active = map_obj
+            if map_obj.mode != "OBJECT":
+                bpy.ops.object.mode_set(mode="OBJECT")
+            bpy.ops.object.mode_set(mode="EDIT")
+            import bmesh
+            bm = bmesh.from_edit_mesh(map_obj.data)
+            bm.faces.ensure_lookup_table()
+            selected = set(faces)
+            for face in bm.faces:
+                face.select_set(face.index in selected)
+            bm.select_flush_mode()
+            bmesh.update_edit_mesh(map_obj.data, loop_triangles=False, destructive=False)
+            self.report({"INFO"}, f"Selected {len(faces)} faces affected by {len(lights)} light(s).")
+            return {"FINISHED"}
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not select affected faces: {exc}")
+            return {"CANCELLED"}
+
+
+class QSS_OT_select_affecting_lights(Operator):
+    bl_idname = "qss.select_affecting_lights"
+    bl_label = "Select Affecting Lights"
+    bl_description = "Select SLOPGATE lights that directly illuminate the selected BSP faces"
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return bool(obj and _qss_is_map_object(obj) and obj.mode == "EDIT")
+
+    def execute(self, context):
+        map_obj = context.active_object
+        try:
+            selected_faces = _qss_selected_face_indices(map_obj)
+            if not selected_faces:
+                self.report({"WARNING"}, "Select one or more BSP faces first.")
+                return {"CANCELLED"}
+            all_faces = set(selected_faces)
+            lights = [
+                item for item in _qss_active_map_objects(context.scene, map_obj)
+                if item.type == "LIGHT"
+                and item.get("qss_light_role") in {"quake_entity_light", "quake_world_sunlight"}
+            ]
+            affecting = []
+            for light_obj in lights:
+                mask = _qss_faces_affected_by_lights(map_obj, [light_obj], context)
+                if all_faces.intersection(mask):
+                    affecting.append(light_obj)
+            if not affecting:
+                self.report({"WARNING"}, "No direct-light contributors were found for the selected faces.")
+                return {"CANCELLED"}
+            bpy.ops.object.mode_set(mode="OBJECT")
+            for item in list(context.selected_objects):
+                item.select_set(False)
+            for light_obj in affecting:
+                light_obj.hide_set(False)
+                light_obj.select_set(True)
+            context.view_layer.objects.active = affecting[0]
+            self.report({"INFO"}, f"Selected {len(affecting)} affecting light(s).")
+            return {"FINISHED"}
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not select affecting lights: {exc}")
+            return {"CANCELLED"}
+
+
+def _qss_object_context_menu(self, context):
+    selected_lights = [
+        item for item in context.selected_objects
+        if item.type == "LIGHT"
+        and item.get("qss_light_role") in {"quake_entity_light", "quake_world_sunlight"}
+    ]
+    map_selected = any(_qss_is_map_object(item) for item in context.selected_objects)
+    if selected_lights and map_selected:
+        self.layout.separator()
+        self.layout.operator(
+            QSS_OT_select_affected_faces.bl_idname,
+            text="Select Affected Faces",
+            icon="FACESEL",
+        )
+
+
+def _qss_edit_mesh_context_menu(self, context):
+    obj = context.active_object
+    if obj and _qss_is_map_object(obj) and _qss_selected_face_indices(obj):
+        self.layout.separator()
+        self.layout.operator(
+            QSS_OT_select_affecting_lights.bl_idname,
+            text="Select Affecting Lights",
+            icon="LIGHT",
+        )
+
+
 class QSS_OT_bake_scene_lights(Operator):
     bl_idname = "qss.bake_scene_lights"
     bl_label = "Bake Imported Lights to Lightmap"
     bl_description = "Bake all faces or restrict the update to selected faces and/or receiver faces affected by selected lights"
     bl_options = {'REGISTER'}
 
-    bake_scope: EnumProperty(
-        name="Bake scope",
-        description="Choose which lightmap face regions to update",
-        items=(
-            ("FULL", "Full Map", "Bake all lightmap faces (existing default workflow)"),
-            ("SELECTED_FACES", "Selected Faces", "Bake only faces selected in Mesh Edit Mode"),
-            ("SELECTED_LIGHTS", "Faces Affected by Selected Lights", "Re-bake faces directly illuminated by selected map lights; all map lights remain active for complete illumination"),
-            ("FACES_AND_LIGHTS", "Selected Faces Affected by Selected Lights", "Bake the intersection of selected faces and faces directly illuminated by selected map lights"),
-        ),
-        default="FULL",
+    only_selected_faces: BoolProperty(
+        name="Only Selected Faces",
+        description="Update only the currently selected BSP faces; leave every other lightmap region untouched",
+        default=False,
     )
 
     @classmethod
@@ -7888,31 +8006,13 @@ class QSS_OT_bake_scene_lights(Operator):
             return {"CANCELLED"}
 
         target_faces = None
-        if self.bake_scope in {"SELECTED_FACES", "FACES_AND_LIGHTS"}:
+        if self.only_selected_faces:
             selected_faces = _qss_selected_face_indices(obj)
             if not selected_faces:
-                self.report({"ERROR"}, "Select one or more BSP faces in Mesh Edit Mode before using this bake scope.")
+                self.report({"ERROR"}, "Select one or more BSP faces in Mesh Edit Mode, or turn off Only Selected Faces.")
                 return {"CANCELLED"}
             target_faces = selected_faces
 
-        if self.bake_scope in {"SELECTED_LIGHTS", "FACES_AND_LIGHTS"}:
-            selected_lights = _qss_selected_lights(context, obj)
-            if not selected_lights:
-                self.report({"ERROR"}, "Select one or more imported SLOPGATE lights as well as the active BSP object.")
-                return {"CANCELLED"}
-            light_faces = _qss_faces_affected_by_lights(obj, selected_lights, context)
-            if not light_faces:
-                self.report({"ERROR"}, "The selected lights have no directly illuminated BSP faces in the current map.")
-                return {"CANCELLED"}
-            target_faces = (
-                light_faces if target_faces is None
-                else sorted(set(target_faces).intersection(light_faces))
-            )
-            if not target_faces:
-                self.report({"ERROR"}, "The selected faces are not directly illuminated by the selected lights.")
-                return {"CANCELLED"}
-
-        scope_label = self.bake_scope
         edit_objects = []
         old_selected = list(context.selected_objects)
         old_active = context.view_layer.objects.active
@@ -10977,13 +11077,6 @@ class QSS_PT_project(Panel):
             text="Browse Maps",
             icon="FILE_FOLDER",
         )
-        extract_button = row.row()
-        extract_button.enabled = game_ready
-        extract_button.operator(
-            QSS_OT_extract_game_paks.bl_idname,
-            text="Extract PAKs",
-            icon="PACKAGE",
-        )
         export_row = row.row(align=True)
         export_row.enabled = _qss_is_map_object(obj) and context.mode == "OBJECT"
         export_row.operator(QSS_OT_export_bsp.bl_idname, text="Export BSP", icon="EXPORT")
@@ -11178,18 +11271,8 @@ class QSS_PT_lighting(Panel):
 
         bake = layout.row(align=True)
         bake.enabled = context.mode in {"OBJECT", "EDIT_MESH"} and mode in {"realtime", "cycles"} and obj.get("qss_light_entity_count", 0) > 0
-        bake.operator(QSS_OT_bake_scene_lights.bl_idname, text="Bake Full Map", icon="RENDER_STILL").bake_scope = "FULL"
-        bake.operator_menu_enum(
-            QSS_OT_bake_scene_lights.bl_idname,
-            "bake_scope",
-            text="Bake Scope",
-            icon="DOWNARROW_HLT",
-        )
-        if context.mode == "EDIT_MESH":
-            layout.label(text="Selected-face scopes use the current face selection; full bake restores Edit Mode.", icon="INFO")
-        if context.mode == "OBJECT":
-            layout.label(text="For selected-light scopes, keep the BSP active and select the map lights to use as a face filter.", icon="INFO")
-        layout.label(text="Selected-light scopes re-bake affected faces with all map lights active.", icon="INFO")
+        bake.operator(QSS_OT_bake_scene_lights.bl_idname, text="Bake Lightmap", icon="RENDER_STILL").only_selected_faces = False
+        bake.operator(QSS_OT_bake_scene_lights.bl_idname, text="Bake Selected", icon="RENDER_STILL").only_selected_faces = True
         if mode == "realtime":
             layout.label(text="Eevee preview selected; baking currently uses the Cycles backend.", icon="INFO")
         if obj.get("qss_last_quake_bake_error"):
@@ -11284,7 +11367,7 @@ class QSS_PT_stats(Panel):
 
 
 CLASSES = (
-    QSS_OT_confirm_import, QSS_OT_import_bsp, QSS_OT_browse_game_maps, QSS_OT_extract_game_paks, QSS_OT_validate_bsp_export,
+    QSS_OT_confirm_import, QSS_OT_import_bsp, QSS_OT_browse_game_maps, QSS_OT_extract_game_paks, QSS_OT_select_affected_faces, QSS_OT_select_affecting_lights, QSS_OT_validate_bsp_export,
     QSS_OT_scan_game_maps, QSS_OT_run_python_tests, QSS_OT_run_map_audit,
     QSS_OT_launch_ironwail, QSS_OT_open_last_export, QSS_OT_test_in_ironwail, QSS_OT_open_config_text,
     QSS_OT_close_active_map, QSS_OT_load_quake_palette, QSS_OT_open_quake_palette,
@@ -11449,6 +11532,8 @@ def register():
         for cls in CLASSES:
             bpy.utils.register_class(cls)
             registered.append(cls)
+        bpy.types.VIEW3D_MT_object_context_menu.append(_qss_object_context_menu)
+        bpy.types.VIEW3D_MT_edit_mesh_context_menu.append(_qss_edit_mesh_context_menu)
 
         initial_config = _qss_load_config()
         initial_root, initial_game_id, initial_game_dir = _qss_choose_initial_game_settings(initial_config)
