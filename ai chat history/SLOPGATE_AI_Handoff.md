@@ -480,3 +480,11 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - QSS Python workflow run `43582521377`, job `132410082968`: success. Python compilation passed; **246 standalone tests passed**; package assembled and artifact uploaded.
 - Installer: `Quake-Surface-Studio-v0.21.9-Blender-Install`, artifact ID `14109270675`, 274,686 bytes, SHA-256 `2c360b775700d67536b317def32c06d62185c9ea28675b4f91372cf308c7f1a2`, expires 2027-02-12. Downloaded ZIP passed `unzip -t`.
 - Runtime Cycles Bake behavior is not verifiable in CI; user's Blender 5.3 test remains the acceptance criterion.
+
+
+### User runtime confirmation — mover lighting fixed (2026-11-14)
+
+- User tested SLOPGATE 0.21.9 in Blender 5.3 and confirms: **lighting on movable objects now works**. This validates the bake-time Light Path / Transparent shadow-ray override for the tested map.
+- Latest bake: total **3m 34.0s**; Cycles **3m 30.0s**; non-Cycles overhead approximately **4.0s**. Compared with prior 0.21.9 test (3m 33.2s / 3m 30s), bake time is effectively unchanged. No evidence of a new performance regression from the shader correction.
+- Treat mover lighting as user-verified for the tested case, not as universal coverage of every Quake mover classname or map setup.
+- Next release-readiness work should prioritize: (1) inline-model/entity fixture coverage and independent object semantics/transform edge cases; (2) audit shadow-casting policy by classname and compare representative maps to ericw; (3) BSP2/2PSB support if included in 1.0 scope; (4) lighting-fidelity gap documentation/tests (radiosity/bounce, dirt, surface emitters, sky/sun, deviance/area sampling, lightstyles); (5) lightmap edge bleed and receiver-only bake efficiency; (6) clean install/upgrade, supported Blender-version matrix, and regression suite on representative maps. Do not make all compiler-fidelity features a hard 1.0 blocker unless the project explicitly promises ericw parity.
