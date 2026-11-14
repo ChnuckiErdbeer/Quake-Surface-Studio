@@ -1690,6 +1690,8 @@ def _qss_apply_surface_policy_to_material(mat):
             mat.surface_render_method = "DITHERED"
         elif hasattr(mat, "blend_method"):
             mat.blend_method = "HASHED"
+        if hasattr(mat, "use_transparent_shadow"):
+            mat.use_transparent_shadow = True
     except Exception:
         pass
     if not mat.use_nodes or mat.node_tree is None:
@@ -8076,7 +8078,13 @@ class QSS_OT_bake_scene_lights(Operator):
             if not selected_faces:
                 self.report({"ERROR"}, "Select one or more BSP faces in Mesh Edit Mode, or turn off Only Selected Faces.")
                 return {"CANCELLED"}
-            target_faces = selected_faces
+            target_faces = [
+                index for index in selected_faces
+                if _qss_face_receives_light(obj, index)
+            ]
+            if not target_faces:
+                self.report({"ERROR"}, "The selected faces are compiler-only nodraw/blocklight surfaces and cannot receive a lightmap.")
+                return {"CANCELLED"}
 
         scope_label = "SELECTED_FACES" if target_faces is not None else "FULL"
         edit_objects = []
