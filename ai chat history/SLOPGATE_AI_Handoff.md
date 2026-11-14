@@ -406,3 +406,9 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - Downloaded archive was checked with `unzip -t`; no corrupt members.
 - No Blender 5.3 interactive runtime verification has been performed for the new inline-model placement or visible timing panel. User validation remains required, especially for maps containing origin-brush doors/platforms, rotated brush models, and lightmap-resolution rebuilds.
 - Next work should add targeted fixture/sample-map validation for `func_door`, `func_plat`, `func_train`, and `func_rotating`; then consider separating inline models into independently selectable objects only if the combined-mesh workflow proves insufficient.
+
+
+### 0.21.6 — bake timing visibility correction
+
+- The user could not find the 0.21.5 timing display because it was placed in the default-collapsed STATS panel. Moved it directly below **Bake Lightmap** in the always-visible Lighting panel, where it shows total and Cycles duration.
+- No bake behavior or quality settings changed. 0.21.6 supersedes the 0.21.5 installer for testing.
