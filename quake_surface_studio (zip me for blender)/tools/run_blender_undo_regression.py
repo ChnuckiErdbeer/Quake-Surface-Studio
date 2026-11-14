@@ -1,13 +1,16 @@
 """Run SLOPGATE's Blender undo/redo integration regression suite.
 
-Recommended invocation (from a terminal):
-    blender --background --factory-startup --python run_blender_undo_regression.py
+Recommended invocation:
+    Open a new empty Blender file (File > New > General), open this script in
+    Blender's Text Editor, then choose Run Script.
 
 The script creates disposable Blender datablocks, drives actual Blender Undo/Redo
 operators through a registered UNDO operator, tests the image journal, runs the
 standalone unittest suite, saves a temporary .blend and opens it in a second
 Blender process. It writes TXT and JSON reports to the system temp directory.
-Do not run from a valuable working file; use --factory-startup as above.
+Run it in a new empty file, never in a valuable working project. A UI context is
+recommended because Blender's Undo/Redo operators may be unavailable in background
+mode; the child save/reopen verification itself runs in a background process.
 """
 from __future__ import annotations
 
@@ -183,8 +186,8 @@ def test_save_reopen(obj, image):
 
 
 def main():
-    if not bpy.app.background:
-        print("NOTE: For a clean, isolated run use --background --factory-startup.")
+    if bpy.app.background:
+        print("NOTE: Blender is in background mode; Undo/Redo operator context may be unavailable.")
     mesh = bpy.data.meshes.new("SLOPGATE_UNDO_TEST_Mesh")
     obj = bpy.data.objects.new("SLOPGATE_UNDO_TEST_Map", mesh)
     bpy.context.scene.collection.objects.link(obj)
