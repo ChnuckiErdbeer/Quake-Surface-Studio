@@ -29,7 +29,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils
 
 
-ADDON_VERSION = (0, 21, 8)
+ADDON_VERSION = (0, 21, 9)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -8484,6 +8484,7 @@ class QSS_OT_bake_scene_lights(Operator):
                 obj["qss_last_bake_target_face_count"] = len(receiver_face_indices)
             obj['qss_last_bake_attempt_receiver_faces'] = int(len(receiver_face_indices))
 
+            bake_shadow_exempt_material_count = 0
             for mat in mesh.materials:
                 if mat is None:
                     continue
@@ -8496,16 +8497,43 @@ class QSS_OT_bake_scene_lights(Operator):
                 if output is None:
                     output = nodes.new('ShaderNodeOutputMaterial')
                 old_surface = [(l.from_node, l.from_socket) for l in links if l.to_socket == output.inputs['Surface']]
-                if str(mat.get("qss_surface_policy", surface_policy.POLICY_RENDER)).upper() == surface_policy.POLICY_NODRAW:
+                temporary_nodes = []
+                is_nodraw = (
+                    str(mat.get("qss_surface_policy", surface_policy.POLICY_RENDER)).upper()
+                    == surface_policy.POLICY_NODRAW
+                )
+                is_inline_shadow_exempt = bool(mat.get("qss_inline_model_no_shadow", False))
+                if is_nodraw:
                     diffuse = nodes.new('ShaderNodeBsdfTransparent')
                     diffuse.name = 'QSS_TEMP_CyclesBake_NodrawTransparent'
+                    bake_surface = diffuse.outputs[0]
+                    temporary_nodes.append(diffuse)
                 else:
-                    # NODRAW_BLOCKER (blocklight) remains opaque to Cycles rays
-                    # but its lightmap UVs are moved out of the bake image.
+                    # Inline mover materials are deliberately special-cased in
+                    # the bake override. The display material's Light Path graph
+                    # is replaced below, so its previous shadow-transparent
+                    # behavior would otherwise be lost during the actual bake.
                     diffuse = nodes.new('ShaderNodeBsdfDiffuse')
                     diffuse.name = 'QSS_TEMP_CyclesBake_Diffuse'
                     diffuse.inputs['Color'].default_value = (1.0, 1.0, 1.0, 1.0)
                     diffuse.inputs['Roughness'].default_value = 1.0
+                    temporary_nodes.append(diffuse)
+                    bake_surface = diffuse.outputs[0]
+                    if is_inline_shadow_exempt:
+                        shadow_transparent = nodes.new('ShaderNodeBsdfTransparent')
+                        shadow_transparent.name = 'QSS_TEMP_CyclesBake_MoverShadowTransparent'
+                        light_path = nodes.new('ShaderNodeLightPath')
+                        light_path.name = 'QSS_TEMP_CyclesBake_MoverLightPath'
+                        mix = nodes.new('ShaderNodeMixShader')
+                        mix.name = 'QSS_TEMP_CyclesBake_MoverShadowMix'
+                        # Shadow rays select Transparent; all other rays use
+                        # the white diffuse bake shader and can receive light.
+                        links.new(light_path.outputs['Is Shadow Ray'], mix.inputs[0])
+                        links.new(diffuse.outputs[0], mix.inputs[1])
+                        links.new(shadow_transparent.outputs[0], mix.inputs[2])
+                        bake_surface = mix.outputs[0]
+                        temporary_nodes.extend((shadow_transparent, light_path, mix))
+                        bake_shadow_exempt_material_count += 1
                 target_node = _find_image_node(mat, 'lightmap')
                 if target_node is None:
                     target_node = nodes.new('ShaderNodeTexImage')
@@ -8521,8 +8549,11 @@ class QSS_OT_bake_scene_lights(Operator):
                 for link in list(links):
                     if link.to_socket == output.inputs['Surface']:
                         links.remove(link)
-                links.new(diffuse.outputs[0], output.inputs['Surface'])
-                material_states.append((mat, output, old_surface, diffuse, target_node, old_target_image))
+                links.new(bake_surface, output.inputs['Surface'])
+                material_states.append((mat, output, old_surface, temporary_nodes, target_node, old_target_image))
+            obj['qss_last_bake_attempt_shadow_exempt_material_count'] = int(
+                bake_shadow_exempt_material_count
+            )
 
             _bake_progress(3, f'Running Cycles diffuse bake ({len(material_states)} materials, {int(image.size[0])}x{int(image.size[1])} atlas)')
             cycles_started_at = time.perf_counter()
@@ -8669,6 +8700,9 @@ class QSS_OT_bake_scene_lights(Operator):
             obj['qss_last_bake_diffuse_bounces'] = int(bake_bounces)
             obj['qss_last_bake_atlas_size'] = int(image.size[0])
             obj['qss_last_bake_receiver_faces'] = int(len(receiver_face_indices))
+            obj['qss_last_bake_shadow_exempt_material_count'] = int(
+                bake_shadow_exempt_material_count
+            )
             if old_previous_snapshot and old_previous_snapshot != previous_snapshot:
                 try:
                     bpy.data.images.remove(old_previous_snapshot)
@@ -8714,7 +8748,7 @@ class QSS_OT_bake_scene_lights(Operator):
             self.report({'ERROR'}, f"Cycles bake failed; atlas and light calibration restored: {exc}")
             return {'CANCELLED'}
         finally:
-            for mat, output, old_surface, diffuse, target_node, old_target_image in material_states:
+            for mat, output, old_surface, temporary_nodes, target_node, old_target_image in material_states:
                 links = mat.node_tree.links
                 for link in list(links):
                     if link.to_socket == output.inputs['Surface']:
@@ -8724,10 +8758,11 @@ class QSS_OT_bake_scene_lights(Operator):
                         links.new(from_socket, output.inputs['Surface'])
                     except Exception:
                         pass
-                try:
-                    mat.node_tree.nodes.remove(diffuse)
-                except Exception:
-                    pass
+                for temporary_node in reversed(temporary_nodes):
+                    try:
+                        mat.node_tree.nodes.remove(temporary_node)
+                    except Exception:
+                        pass
                 target_node.image = old_target_image if old_target_image is not None else image
                 for node in mat.node_tree.nodes:
                     if node.type == 'TEX_IMAGE' and (node.image == image or node.image == bake_target):
@@ -9900,6 +9935,7 @@ def _qss_diagnostics_text(context, obj):
         f'Last bake: raw_mean={obj.get("qss_last_bake_raw_mean", "n/a")} source_mean={obj.get("qss_last_bake_source_mean", "n/a")} atlas_mean={obj.get("qss_last_bake_luxel_mean", "n/a")} max={obj.get("qss_last_bake_luxel_max", "n/a")} normalization={obj.get("qss_last_bake_output_scale", "n/a")}',
         f'Last successful bake timing: total={bake_stats_utils.format_duration(obj.get("qss_last_bake_duration_seconds"))}; Cycles operator={bake_stats_utils.format_duration(obj.get("qss_last_bake_cycles_seconds"))}',
         f'Inline mover shadow policy: faces={obj.get("qss_inline_model_no_shadow_face_count", 0)} classes={obj.get("qss_inline_model_no_shadow_classnames", "")}',
+        f'Last bake mover shadow-transparent materials: {obj.get("qss_last_bake_shadow_exempt_material_count", "n/a")} (attempt: {obj.get("qss_last_bake_attempt_shadow_exempt_material_count", "n/a")})',
         f'Last bake attempt timing: total={bake_stats_utils.format_duration(obj.get("qss_last_bake_attempt_duration_seconds"))}; Cycles operator={bake_stats_utils.format_duration(obj.get("qss_last_bake_attempt_cycles_seconds"))}',
         f'Last successful bake workload: samples={obj.get("qss_last_bake_samples", "n/a")} device={obj.get("qss_last_bake_device", "n/a")} diffuse_bounces={obj.get("qss_last_bake_diffuse_bounces", "n/a")} atlas={obj.get("qss_last_bake_atlas_size", "n/a")}px receiver_faces={obj.get("qss_last_bake_receiver_faces", "n/a")}',
         f'Last attempted bake workload: samples={obj.get("qss_last_bake_attempt_samples", "n/a")} device={obj.get("qss_last_bake_attempt_device", "n/a")} diffuse_bounces={obj.get("qss_last_bake_attempt_diffuse_bounces", "n/a")} atlas={obj.get("qss_last_bake_attempt_atlas_size", "n/a")}px receiver_faces={obj.get("qss_last_bake_attempt_receiver_faces", "n/a")}',
