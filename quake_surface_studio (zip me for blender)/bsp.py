@@ -39,6 +39,7 @@ SIZE_EDGE = 4
 SIZE_SURFEDGE = 4
 SIZE_TEXINFO = 40
 SIZE_FACE = 20
+SIZE_MODEL = 64  # dmodel_t: 9 floats + 7 signed 32-bit integers
 
 MAX_CLASSIC_TEXTURES = 512
 MAX_CLASSIC_TEXINFO = 4096
@@ -182,6 +183,7 @@ class BSP29:
             LUMP_FACES: SIZE_FACE,
             LUMP_EDGES: SIZE_EDGE,
             LUMP_SURFEDGES: SIZE_SURFEDGE,
+            LUMP_MODELS: SIZE_MODEL,
         }
         for lump_id, record_size in fixed.items():
             length = len(self.lumps[lump_id])
@@ -220,6 +222,36 @@ class BSP29:
         # short texinfo, 4 style bytes, int lightofs.
         lump = self.lumps[LUMP_FACES]
         return [struct.unpack_from("<Hhihh4Bi", lump, i) for i in range(0, len(lump), SIZE_FACE)]
+
+    def models(self) -> list[tuple]:
+        """Return dmodel_t records: mins, maxs, origin, headnodes, visleafs, face range."""
+        lump = self.lumps[LUMP_MODELS]
+        return [struct.unpack_from("<9f7i", lump, offset)
+                for offset in range(0, len(lump), SIZE_MODEL)]
+
+    def face_model_ids(self) -> list[int]:
+        """Map each BSP face to its owning inline model index (world model is 0)."""
+        face_count = len(self.faces())
+        model_records = self.models()
+        if not model_records:
+            return [0] * face_count
+        owners: list[Optional[int]] = [None] * face_count
+        for model_index, model in enumerate(model_records):
+            first_face, num_faces = int(model[14]), int(model[15])
+            if first_face < 0 or num_faces < 0 or first_face + num_faces > face_count:
+                raise BSPError(
+                    f"BSP model {model_index} has an invalid face range "
+                    f"({first_face}, {num_faces}) for {face_count} faces."
+                )
+            for face_id in range(first_face, first_face + num_faces):
+                if owners[face_id] is not None and owners[face_id] != model_index:
+                    raise BSPError(
+                        f"BSP face {face_id} is assigned to overlapping models "
+                        f"{owners[face_id]} and {model_index}."
+                    )
+                owners[face_id] = model_index
+        # Tolerate unclaimed faces from non-conforming compilers as world geometry.
+        return [0 if owner is None else int(owner) for owner in owners]
 
     def face_vertex_indices(self, face: tuple, edges=None, surfedges=None) -> list[int]:
         if edges is None:
@@ -579,6 +611,57 @@ def read_wad2_textures(path: str) -> dict[str, MipTexture]:
         textures.setdefault(header_name.lower(), MipTexture(blob, header_name, width, height))
     return textures
 
+
+
+def parse_inline_model_references(entities: Sequence[dict[str, str]], model_count: int) -> list[tuple[int, int]]:
+    """Return (inline_model_index, entity_index) for valid entity model '*n' keys."""
+    result = []
+    for entity_index, entity in enumerate(entities):
+        match = re.fullmatch(r"\s*\*(\d+)\s*", str(entity.get("model", "")))
+        if not match:
+            continue
+        model_index = int(match.group(1))
+        if 0 < model_index < int(model_count):
+            result.append((model_index, entity_index))
+    return result
+
+
+def transform_inline_model_position(position, entity: dict[str, str]) -> tuple[float, float, float]:
+    """Apply a Quake brush entity's initial origin/angles to one model-local point.
+
+    This mirrors WinQuake's entity transform order: translate, yaw about Z,
+    negative pitch about Y, then roll about X. The result remains in Quake
+    coordinates; Blender axis reflection and unit conversion happen afterward.
+    """
+    try:
+        origin_values = [float(value) for value in str(entity.get("origin", "0 0 0")).replace(",", " ").split()]
+    except (TypeError, ValueError):
+        origin_values = []
+    if len(origin_values) < 3:
+        origin_values = [0.0, 0.0, 0.0]
+    try:
+        angle_values = [float(value) for value in str(entity.get("angles", "0 0 0")).replace(",", " ").split()]
+    except (TypeError, ValueError):
+        angle_values = []
+    if len(angle_values) < 3:
+        angle_values = [0.0, 0.0, 0.0]
+
+    x, y, z = (float(value) for value in position[:3])
+    pitch, yaw, roll = (math.radians(value) for value in angle_values[:3])
+
+    # OpenGL post-multiplies the Quake entity rotations, so column vectors
+    # experience roll (X), negative pitch (Y), then yaw (Z).
+    cr, sr = math.cos(roll), math.sin(roll)
+    y1, z1 = y * cr - z * sr, y * sr + z * cr
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    x2, z2 = x * cp - z1 * sp, x * sp + z1 * cp
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    x3, y3 = x2 * cy - y1 * sy, x2 * sy + y1 * cy
+    return (
+        x3 + origin_values[0],
+        y3 + origin_values[1],
+        z2 + origin_values[2],
+    )
 
 
 def parse_entities_lump(entities_lump: bytes) -> list[dict[str, str]]:
