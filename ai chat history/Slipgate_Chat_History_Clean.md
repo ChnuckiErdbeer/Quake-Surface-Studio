@@ -16079,3 +16079,69 @@ The reported issues were separated by subsystem:
 4. Test Only Selected Faces checkbox, empty selection handling, full-map bake, Undo and untouched-atlas pixel preservation.
 5. Continue delivering a verified install ZIP for each build, with exact commit, test status and SHA-256.
 
+
+
+## 2026-11-14 — Blender 5.3 field test, bake crash, context menu and nodraw (SLOPGATE 0.21.3)
+
+### You
+
+> My blender version is now updated to 5.3. Addon loads without problems.
+>
+> Edit mode, Select affecting lights context menu seems to work as intended. It
+> takes a few seconds but does as it should. Sadly the other way around i cant
+> find the context menu entry. :/
+>
+> Fallback to id1 seems to work!!
+>
+> Baking doesnt work:
+>
+> Python: Traceback (most recent call last):
+>   File
+> "/home/chnucki/.var/app/org.blender.Blender/config/blender/5.3/scripts/addons/
+> quake_surface_studio/addon.py", line 7946, in invoke
+>     return self.execute(context)
+>            ~~~~~~~~~~~~^^^^^^^^^
+>   File
+> "/home/chnucki/.var/app/org.blender.Blender/config/blender/5.3/scripts/addons/
+> quake_surface_studio/addon.py", line 7979, in execute
+>     context, target_face_indices=target_faces, bake_scope_name=scope_label
+>                                                                ^^^^^^^^^^^
+> NameError: name 'scope_label' is not defined
+>
+> Preview lights are still to bright but i agree that its not because of the
+> emission input. It switches to diffuse on eevvee and cycles preview.
+>
+> You didnt implement the nodraw handnling did you?
+
+### Assistant — inspection findings
+
+- Confirmed Object Mode menu predicate required the BSP mesh to also be selected. This did not fit the requested workflow of selecting only lights. The lights are already contained in a per-map child collection, so map ownership can be resolved from their collection membership.
+- Confirmed bake crash: the earlier Bake Scope dropdown refactor changed to a Boolean checkbox but retained the call passing \`scope_label\`; its assignment had been removed.
+- Confirmed nodraw: no integration existed. \`surface_policy.py\` was present as an unused standalone classifier; material creation, previews, and bake loops did not consult it.
+- Confirmed live Eevee/Cycles preview already uses Principled diffuse Base Color and disconnects Emission. Original/Baked preview intentionally uses Emission to reproduce Quake's original lightmap without adding scene illumination. Brightness issue is not an Emission-slot bug.
+
+### Implementation in SLOPGATE 0.21.3
+
+- Fixed bake scope crash by defining \`scope_label\` from whether Only Selected Faces has a target list.
+- Changed **Select Affected Faces** visibility and execution to resolve the BSP map from selected imported light objects' owner collection. The BSP need not be selected alongside the lights. The operator switches to that BSP and selects affected faces in Edit Mode.
+- Integrated the surface classifier into material factory. Imported materials now store \`qss_surface_policy\`.
+- Nodraw and compiler-only textures are transparent in the material node graph and use Dithered transparency where available, including Blender 5.3. This applies to Original/Baked and live preview paths.
+- Trigger/clip/playerclip/monsterclip/origin/hint/skip/hintskip/null/nodraw/bevel/areaportal and matching variants are invisible, don't receive lightmaps, and are omitted from the Quake Direct ray-occlusion BVH.
+- \`blocklight\` is handled separately: invisible and not a lightmap receiver, but still a light blocker. In Cycles baking it uses an opaque temporary diffuse surface while its lightmap UVs are masked outside the bake target; in Quake Direct it remains in the BVH.
+- Cycles uses a temporary Transparent BSDF for non-blocking nodraw materials; the original material node graph is restored by existing bake cleanup.
+- Selected-only bake validates surface policy and rejects a selection containing only nodraw/blocklight surfaces.
+- Added four standalone classifier tests in \`tests/test_surface_policy.py\`.
+- The preview energy scale is not recalibrated in this build; existing live preview is diffuse, and the remaining brightness discrepancy needs separate calibration.
+
+### Build verification and installer
+
+- Version: SLOPGATE 0.21.3.
+- Source + README commit packaged: \`214f63b0d24ae5da113f58d872770ca40d35d08d\`.
+- QSS Python push workflow \`43569530862\`, job \`132370658801\`: passed Python compilation, 236 standalone tests, package assembly and artifact upload.
+- QSS PR workflow \`43569522588\` passed; converter GUI PR workflow \`43569534704\` passed but only validates the companion utility.
+- Blender install artifact ID \`14103795855\`, size 267,737 bytes, 46 ZIP entries, expires 2027-02-12.
+- SHA-256: \`c13f6308ea2d30e01c238dde330dadc8a332b51d122efb5e56753ab436c2e966\`.
+- Artifact page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43569530862/artifacts/14103795855
+- Downloaded installer path: \`sandbox:/mnt/data/SLOPGATE-v0.21.3-Blender-Install.zip\`. Local ZIP archive integrity and expected package modules were verified.
+- Interactive Blender 5.3 test of 0.21.3 remains the user's next step. Do not claim nodraw or Cycles bake was runtime-tested here.
+
