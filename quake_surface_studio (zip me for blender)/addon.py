@@ -24,7 +24,7 @@ from bpy.props import StringProperty, FloatProperty, FloatVectorProperty, BoolPr
 from bpy.types import Operator, Panel, Menu
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
-from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils, map_sync
+from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils, map_sync, surface_policy
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils
 
 
@@ -7796,6 +7796,29 @@ def _qss_partial_lightmap_rectangles(obj, image, face_indices, padding=0):
     )
 
 
+def _qss_map_for_selected_lights(context, lights):
+    """Resolve the single imported BSP that owns all selected SLOPGATE lights."""
+    lights = list(lights or ())
+    if not lights:
+        return None
+    selected_maps = [
+        item for item in getattr(context, "selected_objects", ())
+        if _qss_is_map_object(item)
+    ]
+    for root in _qss_scene_map_collections(getattr(context, "scene", None)):
+        members = _qss_collection_objects(root)
+        if all(light in members for light in lights):
+            maps = [item for item in members if _qss_is_map_object(item)]
+            if len(maps) == 1:
+                return maps[0]
+    # Compatibility fallback for legacy scenes with no root collection.
+    if len(selected_maps) == 1:
+        members = _qss_active_map_objects(context.scene, selected_maps[0])
+        if all(light in members for light in lights):
+            return selected_maps[0]
+    return None
+
+
 class QSS_OT_select_affected_faces(Operator):
     bl_idname = "qss.select_affected_faces"
     bl_label = "Select Affected Faces"
@@ -7803,12 +7826,14 @@ class QSS_OT_select_affected_faces(Operator):
 
     @classmethod
     def poll(cls, context):
-        obj = context.active_object
-        return bool(
-            obj and obj.type == "LIGHT"
-            and obj.get("qss_light_role") in {"quake_entity_light", "quake_world_sunlight"}
-            and any(_qss_is_map_object(item) for item in context.selected_objects)
-        )
+        if getattr(context, "mode", "OBJECT") != "OBJECT":
+            return False
+        lights = [
+            item for item in getattr(context, "selected_objects", ())
+            if item.type == "LIGHT"
+            and item.get("qss_light_role") in {"quake_entity_light", "quake_world_sunlight"}
+        ]
+        return bool(lights and _qss_map_for_selected_lights(context, lights))
 
     def execute(self, context):
         lights = [
@@ -7816,9 +7841,9 @@ class QSS_OT_select_affected_faces(Operator):
             if item.type == "LIGHT"
             and item.get("qss_light_role") in {"quake_entity_light", "quake_world_sunlight"}
         ]
-        map_obj = next((item for item in context.selected_objects if _qss_is_map_object(item)), None)
+        map_obj = _qss_map_for_selected_lights(context, lights)
         if map_obj is None or not lights:
-            self.report({"ERROR"}, "Select a SLOPGATE BSP object and one or more imported lights.")
+            self.report({"ERROR"}, "Select SLOPGATE lights belonging to one imported map. The BSP object does not need to be selected.")
             return {"CANCELLED"}
         try:
             faces = _qss_faces_affected_by_lights(map_obj, lights, context)
@@ -7899,8 +7924,7 @@ def _qss_object_context_menu(self, context):
         if item.type == "LIGHT"
         and item.get("qss_light_role") in {"quake_entity_light", "quake_world_sunlight"}
     ]
-    map_selected = any(_qss_is_map_object(item) for item in context.selected_objects)
-    if selected_lights and map_selected:
+    if selected_lights and _qss_map_for_selected_lights(context, selected_lights) is not None:
         self.layout.separator()
         self.layout.operator(
             QSS_OT_select_affected_faces.bl_idname,
@@ -7962,6 +7986,7 @@ class QSS_OT_bake_scene_lights(Operator):
                 return {"CANCELLED"}
             target_faces = selected_faces
 
+        scope_label = "SELECTED_FACES" if target_faces is not None else "FULL"
         edit_objects = []
         old_selected = list(context.selected_objects)
         old_active = context.view_layer.objects.active
