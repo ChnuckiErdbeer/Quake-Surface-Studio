@@ -292,39 +292,52 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - FGD property conventions reference: https://book.leveldesignbook.com/appendix/resources/formats/fgd
 
 
-## Current source and install baseline — 2026-11-14 (SLOPGATE 0.21.2)
+## Current source and install baseline — 2026-11-14 (SLOPGATE 0.21.3)
 
-The user tested 0.21.0 and confirmed companion MAP discovery, light edits synchronized to exported MAP, and Cycles-baked lighting synchronized to exported BSP.
+### User's Blender 5.3 feedback on 0.21.2
 
-### Implemented in 0.21.2
+- User upgraded to Blender 5.3; SLOPGATE 0.21.2 loads without errors.
+- Mesh Edit Mode **Select Affecting Lights** context action works as intended (takes a few seconds).
+- Object Mode **Select Affected Faces** entry was missing.
+- Cycles Bake failed with \`NameError: name 'scope_label' is not defined\` in the execute wrapper.
+- User confirmed mod palette fallback works.
+- Nodraw handling was not integrated before this version; only the standalone classifier existed.
+- Live Eevee/Cycles previews remain too bright, but the user agrees this is not caused by the Emission socket. Source shows live modes already use diffuse Base Color and disconnect emission. Brightness calibration remains open.
 
-- Replaced the Bake Scope dropdown with one scene checkbox, **Only Selected Faces**, and one Bake Lightmap action. Unchecked means full-map bake; checked means use current BSP face selection in Mesh Edit Mode.
-- Added Object Mode right-click context-menu action **Select Affected Faces** for selected imported SLOPGATE lights. It calculates the direct-light receiver mask and switches the BSP object to Edit Mode with those faces selected.
-- Added Mesh Edit Mode right-click context-menu action **Select Affecting Lights**. It tests imported lights against selected faces and switches to Object Mode with matching lights selected.
-- Context-menu callbacks are removed during add-on cleanup/reload to avoid duplicate menu entries.
-- Removed the Extract PAKs operator/button workflow. PAK-aware Browse Maps remains.
-- Existing partial bake still isolates UVs and merges only target atlas regions, preserving unselected pixels. **This does not establish faster Cycles baking.** The user reported selected-face bake duration remained close to full-map duration. UV masking alone is not receiver-geometry filtering. True performance optimization requires baking a temporary selected-face receiver mesh while keeping the complete BSP geometry as an occluder/lighting contributor; that redesign is NOT implemented.
-- Preview distinction verified in source: Original/Baked modes intentionally multiply albedo by lightmap and feed Principled Emission to reproduce the Quake lightmap without adding Blender illumination. Live Eevee/Cycles modes already use diffuse Base Color and disconnect emission, so actual Blender lights illuminate the material. Do not blindly switch Original/Baked to diffuse; that can double-illuminate. Bright preview root cause remains to be measured.
-- Interactive Blender 5.2 context-menu and bake tests have not been run by the assistant.
+### Implemented in 0.21.3
 
-### Latest verified install build
+- Fixed undefined bake \`scope_label\`: it is now computed from the Only Selected Faces checkbox after resolving selection and before entering the Object Mode bake path.
+- Fixed Object Mode **Select Affected Faces** context menu and operator. Selected SLOPGATE lights are resolved to their owning imported BSP by membership in its map collection hierarchy; the BSP itself no longer needs to be selected. The operation switches to the resolved map and selects affected faces in Edit Mode.
+- Integrated \`surface_policy.py\` into material factory, Original/Baked preview, live Eevee/Cycles preview, Cycles bake material override, and Quake Direct bake.
+- Compiler-only nodraw surfaces (trigger, clip/playerclip/monsterclip, origin, hint, skip/hintskip, null, nodraw, bevel, areaportal and supported name variants) are rendered transparent in Blender.
+- Nodraw surfaces do not receive lightmaps and do not block Quake Direct visibility rays.
+- \`blocklight\` is deliberately special: it is transparent to the camera and does not receive a lightmap, but remains opaque in Cycles bake and stays in the Quake Direct BVH as a light blocker.
+- For the Cycles bake, non-blocking nodraw materials temporarily use Transparent BSDF. Blocklight uses opaque diffuse during the bake while its lightmap UVs are placed outside the bake target; full BSP geometry remains available as an occluder.
+- Selected-face bake input is checked for receiver policy. Selecting only nodraw/blocklight faces is rejected with an explanatory message.
+- Added \`tests/test_surface_policy.py\` with four tests for compiler-only names, blocklight semantics, safe non-matches and policy behavior.
+- User-facing preview distinction unchanged: Original/Baked use albedo × lightmap into Emission to show Quake lightmaps without extra Blender lighting. Live modes use diffuse. Do not alter the Original/Baked path to diffuse as that can double-light it.
+
+### Latest verified installer
 
 - Branch: \`fix/v0.11.1-metadata-style-order-test\`
-- Version: \`0.21.2\`
-- Build/source commit: \`4ea772c5068e373bcb38bb397efe807a8fa0e1bf\`
-- Follow-up comment-only source commit: \`88e38b4fb8abce54704360b5b25b55305091c8fe\`; installer built from the preceding commit includes all functional changes and version metadata.
-- QSS Python workflow run: \`43537033763\`, job \`132268411787\`, passed Python compilation, 232 standalone tests, package assembly and artifact upload.
-- Artifact ID: \`14090296445\`, name \`Quake-Surface-Studio-v0.21.2-Blender-Install\`, 264,768 bytes; expires 2027-02-12.
-- SHA-256: \`d2e168089a930d8eac260dd6aad6564567188c182557b6832765e2becbca0109\`.
-- Artifact page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43537033763/artifacts/14090296445
-- Downloaded ZIP available in this session as \`/mnt/data/SLOPGATE-v0.21.2-Blender-Install.zip\`. Artifact SHA is reported by GitHub Actions.
-- Automated suite does not validate Blender context menus, actual Cycles performance, UV receiver filtering, or viewport material appearance.
+- Version: \`0.21.3\`
+- Source + README commit packaged: \`214f63b0d24ae5da113f58d872770ca40d35d08d\`
+- QSS Python push workflow run: \`43569530862\`, job \`132370658801\`, success. Python compilation, 236 standalone tests, package assembly and artifact upload passed.
+- QSS PR workflow run \`43569522588\` and converter GUI PR run \`43569534704\` also passed; converter workflow is companion-tool validation, not Blender GUI validation.
+- Artifact ID: \`14103795855\`, \`Quake-Surface-Studio-v0.21.3-Blender-Install\`, 267,737 bytes, 46 ZIP entries, expires 2027-02-12.
+- SHA-256: \`c13f6308ea2d30e01c238dde330dadc8a332b51d122efb5e56753ab436c2e966\`.
+- Artifact page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43569530862/artifacts/14103795855
+- Downloaded ZIP: \`/mnt/data/SLOPGATE-v0.21.3-Blender-Install.zip\`. ZIP integrity passed; package root is \`quake_surface_studio/\`; required modules and the new classifier tests are present.
+- Installer link must be given whenever sending a build: \`sandbox:/mnt/data/SLOPGATE-v0.21.3-Blender-Install.zip\`.
 
-### Required next implementation/test work
+### Runtime validation still needed
 
-1. **True selective bake acceleration:** implement a receiver-only temporary mesh containing only selected BSP faces, while retaining the full original BSP as a non-receiver occluder. Ensure only receiver luxels are sampled. Preserve materials, UVs, normal transforms, world-space transforms, all map lights, indirect contribution strategy, atlas merging and cleanup on failure. Benchmark full map vs one face on same map. If Cycles still traverses all faces, don't claim speed-up.
-2. Test context menus in Blender 5.2: selected imported lights + selected map object, select affected faces, reverse-select lights, and confirm mode/selection transitions. Check map collections and multi-map scenes.
-3. Investigate bright preview by measuring actual mode transition and render engine. Original/Baked emission is intentional; live Eevee/Cycles already diffuse.
-4. Test the checkbox from Object and Edit Mode, including empty selection, full map, undo and pixel preservation.
-5. Continue sending a verified installer ZIP/link for every new installable build, with exact version, commit, tests and digest. Do not call CI a Blender runtime test.
-
+- User should verify 0.21.3 in Blender 5.3: right-click a selected imported light in Object Mode without selecting the BSP; **Select Affected Faces** should now appear and switch to Edit Mode.
+- Retry Cycles bake in 5.3; the undefined-name crash is fixed in source. Test full bake and Only Selected Faces, including a selection that includes nodraw faces.
+- Test trigger/clip/etc. as invisible in Eevee Material Preview, Cycles and render; confirm these faces do not receive light or cast shadows.
+- Test blocklight is invisible and receives no lightmap, but still blocks light.
+- No interactive Blender runtime tests of 0.21.3 have been performed by the assistant. Automated CI does not prove menu display, shader transparency, bake success or renderer output.
+- Selected-face bake still does not use a receiver-only temporary mesh; it preserves the remaining atlas but Cycles still evaluates the complete BSP mesh. The user previously observed no substantial bake time reduction. Do not claim faster baking.
+- Live-preview brightness calibration remains unresolved. The live preview path is already diffuse; Quake-to-Blender energy conversion needs a calibrated separate adjustment.
+- Keep BSP2/2PSB, lightmap edge bleed and true receiver-only bake performance as separate future milestones.
+- Always deliver a verified ZIP link for every updated installable build, stating version, exact commit, automated test status and artifact digest.
