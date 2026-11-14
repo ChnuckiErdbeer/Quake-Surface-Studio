@@ -653,3 +653,14 @@ The gutter pass addresses atlas filtering/bleed inside Blender and makes per-fac
 - The journal stores operation transitions: before/after snapshots only for images changed by that operation. Undo restores the transition's before side; redo restores its after side.
 - This deliberately avoids replaying stale snapshots for unrelated images. A Texture Paint stroke on texture A therefore remains intact when a later lighting operation edits image B.
 - History length follows Blender's configured undo-step preference (with a safe bound); temporary snapshot files are pruned when branches are discarded, history expires, the add-on is disabled or a .blend is loaded.
+
+## SLOPGATE 0.21.12 — undo regression runner and luxel block edge pass — 2026-11-14
+
+- Added `tools/run_blender_undo_regression.py`, a one-command Blender integration runner. It creates disposable test datablocks and drives a real `REGISTER, UNDO` operator through Blender Undo/Redo; checks stacked operations, rollback, unrelated image edits, redo-branch invalidation, generated images, edge-block canonicalization at 1x/2x/4x, and .blend save/reopen in a child Blender process. It writes TXT and JSON reports to the system temp directory.
+- The runner is compiled by CI but has **not** yet been executed inside Blender 5.3 in this development environment. Its simulated unrelated Texture Paint pixel edit checks journal isolation, not an actual mouse-driven native paint stroke.
+- Added `collapse_rgba_luxel_blocks` to `bake_scope.py`. For supersampled Cycles lightmaps, each face-local luxel block is now reduced to its geometric centre sample (four-pixel bilinear centre for even block sizes) and made uniform before face-local gutter dilation. This aligns the editable preview block with the one luxel value exported to BSP and removes within-luxel raster softness. Gutter pixels and other face cores are not touched.
+- The Cycles bake records the number of canonicalized luxel blocks in `qss_last_bake_luxel_blocks_canonicalized`.
+- Pure-Python regression tests cover 1x/2x/4x block consistency, centre sampling, unchanged gutters, and invalid partial blocks.
+- Verification: GitHub Actions QSS Python tests passed for commit `5bff5ce624643b720a46c46516f82adb80fce2f2` before the version bump. A fresh package build is required for the final `0.21.12` commit.
+- Limitation: this pass targets softness caused by variation inside supersampled luxel blocks in the Blender lightmap atlas. It does not claim to solve engine-side face-edge clipping/bleed; verify a compiled map in Ironwail before calling that separate issue resolved.
+
