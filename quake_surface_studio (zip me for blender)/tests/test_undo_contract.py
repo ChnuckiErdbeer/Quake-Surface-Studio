@@ -47,19 +47,28 @@ class UndoContractTests(unittest.TestCase):
             with self.subTest(operator=class_name):
                 self.assertIn("UNDO", _operator_flags(self.source, class_name))
 
-    def test_image_pixel_and_paint_mode_operations_do_not_push_global_undo(self):
-        # Direct Python image.pixels.foreach_set() writes and paint-mode
-        # transitions need explicit image snapshots/native paint undo instead.
+    def test_image_mutation_operators_use_coherent_global_undo(self):
         for class_name in (
             "QSS_OT_quake_direct_bake",
             "QSS_OT_bake_scene_lights",
-            "QSS_OT_activate_lightmap_paint",
-            "QSS_OT_activate_paint",
             "QSS_OT_undo_last_bake",
             "QSS_OT_restore_original_lightmap",
+            "QSS_OT_change_lightmap_resolution",
+        ):
+            with self.subTest(operator=class_name):
+                self.assertIn("UNDO", _operator_flags(self.source, class_name))
+
+    def test_paint_mode_transitions_stay_out_of_the_global_undo_stack(self):
+        for class_name in (
+            "QSS_OT_activate_lightmap_paint",
+            "QSS_OT_activate_paint",
         ):
             with self.subTest(operator=class_name):
                 self.assertNotIn("UNDO", _operator_flags(self.source, class_name))
+
+    def test_image_undo_handlers_are_registered_and_removed(self):
+        self.assertIn("image_undo.register(bpy)", self.source)
+        self.assertIn("image_undo.unregister(bpy)", self.source)
 
 
 if __name__ == "__main__":

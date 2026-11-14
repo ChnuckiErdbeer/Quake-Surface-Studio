@@ -142,6 +142,66 @@ def merge_rgba_regions(
             changed += 1
     return changed
 
+def dilate_rgba_gutters(pixels, image_width: int, image_height: int, core_rectangles, padding: int = 0):
+    """Extend each face's own edge texels into its reserved atlas gutter.
+
+    Coordinates are bottom-up pixel rectangles (x0, y0, x1, y1), with the
+    upper bounds exclusive. Padding is in working-image pixels. Core texels
+    are never changed, and gutter pixels copy the nearest texel inside the
+    same face rectangle; adjacent islands are never blended.
+    """
+    width, height = int(image_width), int(image_height)
+    expected = width * height * 4
+    if width <= 0 or height <= 0 or len(pixels) != expected:
+        raise ValueError("RGBA pixel buffer does not match the supplied image dimensions.")
+    pad = int(padding)
+    if pad < 0:
+        raise ValueError("Gutter padding cannot be negative.")
+    if pad == 0:
+        return 0
+
+    regions = []
+    for rectangle in core_rectangles:
+        if len(rectangle) != 4:
+            raise ValueError("Each face core rectangle must contain four coordinates.")
+        x0, y0, x1, y1 = (int(value) for value in rectangle)
+        x0, x1 = max(0, x0), min(width, x1)
+        y0, y1 = max(0, y0), min(height, y1)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        expanded = (
+            max(0, x0 - pad), max(0, y0 - pad),
+            min(width, x1 + pad), min(height, y1 + pad),
+        )
+        regions.append(((x0, y0, x1, y1), expanded))
+
+    # A packed layout must reserve enough space for both one-sided gutters.
+    # Fail closed rather than allowing one face to overwrite another.
+    for index, (_core_a, rect_a) in enumerate(regions):
+        ax0, ay0, ax1, ay1 = rect_a
+        for _core_b, rect_b in regions[index + 1:]:
+            bx0, by0, bx1, by1 = rect_b
+            if ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1:
+                raise ValueError("Expanded lightmap face gutters overlap; atlas packing needs more padding.")
+
+    changed = 0
+    for (x0, y0, x1, y1), (ex0, ey0, ex1, ey1) in regions:
+        for y in range(ey0, ey1):
+            source_y = min(y1 - 1, max(y0, y))
+            for x in range(ex0, ex1):
+                if x0 <= x < x1 and y0 <= y < y1:
+                    continue
+                source_x = min(x1 - 1, max(x0, x))
+                source_offset = (source_y * width + source_x) * 4
+                target_offset = (y * width + x) * 4
+                pixels[target_offset] = pixels[source_offset]
+                pixels[target_offset + 1] = pixels[source_offset + 1]
+                pixels[target_offset + 2] = pixels[source_offset + 2]
+                pixels[target_offset + 3] = pixels[source_offset + 3]
+                changed += 1
+    return changed
+
+
 def scale_rgba_regions(pixels, image_width: int, image_height: int, rectangles, factor: float):
     """Scale RGB only within selected atlas rectangles; leave other pixels intact.
 
@@ -173,4 +233,5 @@ __all__ = [
     "face_luxel_rectangles",
     "scale_rgba_regions",
     "merge_rgba_regions",
+    "dilate_rgba_gutters",
 ]

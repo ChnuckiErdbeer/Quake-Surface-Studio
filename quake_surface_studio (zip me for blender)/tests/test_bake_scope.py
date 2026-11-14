@@ -90,5 +90,64 @@ class SelectiveBakeScopeTests(unittest.TestCase):
             bake_scope.merge_rgba_regions([0.0], [0.0], 2, 2, [(0, 0, 1, 1)], 1.0)
 
 
+class AtlasGutterDilationTests(unittest.TestCase):
+    def test_gutter_copies_nearest_edge_texel_including_corners(self):
+        pixels = array.array("f", [0.0, 0.0, 0.0, 1.0] * 25)
+        width = height = 5
+        colors = {
+            (1, 1): (1.0, 0.0, 0.0, 1.0),
+            (2, 1): (0.0, 1.0, 0.0, 1.0),
+            (1, 2): (0.0, 0.0, 1.0, 1.0),
+            (2, 2): (1.0, 1.0, 1.0, 1.0),
+        }
+        for (x, y), color in colors.items():
+            offset = (y * width + x) * 4
+            pixels[offset:offset + 4] = array.array("f", color)
+        changed = bake_scope.dilate_rgba_gutters(
+            pixels, width, height, [(1, 1, 3, 3)], padding=1
+        )
+        self.assertEqual(changed, 12)
+        def color_at(x, y):
+            offset = (y * width + x) * 4
+            return tuple(pixels[offset:offset + 4])
+        self.assertEqual(color_at(0, 0), colors[(1, 1)])
+        self.assertEqual(color_at(3, 0), colors[(2, 1)])
+        self.assertEqual(color_at(0, 3), colors[(1, 2)])
+        self.assertEqual(color_at(3, 3), colors[(2, 2)])
+        self.assertEqual(color_at(4, 4), (0.0, 0.0, 0.0, 1.0))
+
+    def test_separate_faces_fill_only_their_own_reserved_gutters(self):
+        pixels = array.array("f", [0.0, 0.0, 0.0, 1.0] * 40)
+        width, height = 8, 5
+        for y in range(1, 3):
+            for x in range(1, 3):
+                offset = (y * width + x) * 4
+                pixels[offset:offset + 4] = array.array("f", (1.0, 0.0, 0.0, 1.0))
+            for x in range(5, 7):
+                offset = (y * width + x) * 4
+                pixels[offset:offset + 4] = array.array("f", (0.0, 0.0, 1.0, 1.0))
+        bake_scope.dilate_rgba_gutters(
+            pixels, width, height, [(1, 1, 3, 3), (5, 1, 7, 3)], padding=1
+        )
+        left = pixels[(1 * width + 3) * 4:(1 * width + 3) * 4 + 4]
+        right = pixels[(1 * width + 4) * 4:(1 * width + 4) * 4 + 4]
+        self.assertEqual(tuple(left), (1.0, 0.0, 0.0, 1.0))
+        self.assertEqual(tuple(right), (0.0, 0.0, 1.0, 1.0))
+
+    def test_rejects_overlapping_expanded_gutters(self):
+        pixels = array.array("f", [0.0, 0.0, 0.0, 1.0] * 49)
+        with self.assertRaisesRegex(ValueError, "gutters overlap"):
+            bake_scope.dilate_rgba_gutters(
+                pixels, 7, 7, [(1, 1, 3, 3), (4, 1, 6, 3)], padding=1
+            )
+
+    def test_zero_padding_is_a_no_op(self):
+        pixels = array.array("f", [0.25, 0.5, 0.75, 1.0] * 4)
+        self.assertEqual(
+            bake_scope.dilate_rgba_gutters(pixels, 2, 2, [(0, 0, 2, 2)], padding=0),
+            0,
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

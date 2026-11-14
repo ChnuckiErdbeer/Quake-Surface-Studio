@@ -26,10 +26,10 @@ from bpy.types import Operator, Panel, Menu
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
 from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils, map_sync, surface_policy
-from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils
+from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils, image_undo
 
 
-ADDON_VERSION = (0, 21, 9)
+ADDON_VERSION = (0, 21, 11)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -2102,6 +2102,25 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
                         rgba[index + 2] = values[2]
                         rgba[index + 3] = 1.0
 
+    core_rectangles = []
+    effective_scale = scale * resolution
+    for rec in records:
+        ax, ay = placements[rec['face_id']]
+        core_width = rec['width'] * effective_scale
+        core_height = rec['height'] * effective_scale
+        core_x = (ax + gutter) * resolution
+        core_top_y = (ay + gutter) * resolution
+        core_bottom_y = image_size - core_top_y - core_height
+        core_rectangles.append((
+            core_x, core_bottom_y,
+            core_x + core_width, core_bottom_y + core_height,
+        ))
+    # Fill reserved per-face gutters from that face's own edge luxels.
+    bake_scope_utils.dilate_rgba_gutters(
+        rgba, image_size, image_size, core_rectangles,
+        padding=gutter * resolution,
+    )
+
     image = bpy.data.images.new(
         name=f"QSS_Lightmap_{os.path.basename(obj.get('qss_source_path', 'map'))}",
         width=image_size, height=image_size, alpha=True, float_buffer=True
@@ -4002,6 +4021,7 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
     )
 
     obj['qss_object_role'] = 'quake_bsp29'
+    image_undo.ensure_object(obj)
     obj['qss_source_path'] = os.path.abspath(source_path)
     obj['qss_game_dir'] = os.path.abspath(game_dir) if game_dir else ''
     obj['qss_palette_file'] = os.path.abspath(palette_file) if palette_file else ''
@@ -7836,9 +7856,9 @@ class QSS_OT_quake_direct_bake(Operator):
     bl_idname = 'qss.quake_direct_bake'
     bl_label = 'Bake Quake Direct Lighting'
     bl_description = 'Evaluate ericw-tools direct light attenuation at every BSP luxel and write a static RGB atlas'
-    # This operator writes the image pixel buffer directly. Blender's global
-    # operator undo does not reliably snapshot Python foreach_set() image edits;
-    # use explicit lightmap snapshots/restore instead.
+    # ImageUndoJournal restores direct pixel-buffer writes alongside Blender's
+    # normal mesh/material undo state, keeping this one Ctrl+Z operation.
+    bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
     def poll(cls, context):
@@ -7848,12 +7868,19 @@ class QSS_OT_quake_direct_bake(Operator):
 
     def execute(self, context):
         obj = context.object
+        transaction = None
+        image = bpy.data.images.get(obj.get('qss_lightmap_image_name', ''))
         try:
+            if image is None:
+                raise bsp.BSPError("The active map's lightmap atlas is missing.")
+            transaction = image_undo.begin(obj, [image])
             stats = _qss_run_ericw_direct_bake(context, obj)
             try:
                 _set_lighting_preview(context, obj, 'baked')
             except Exception as preview_error:
                 self.report({'WARNING'}, f'Bake completed but preview switch failed: {preview_error}')
+            image_undo.commit(obj, [image], transaction)
+            transaction = None
             unsupported_note = f"; unsupported: {', '.join(stats['unsupported'])}" if stats['unsupported'] else ''
             self.report({'INFO'},
                         f"Quake direct bake: {stats['lit']}/{stats['luxels']} luxels lit; "
@@ -7861,6 +7888,11 @@ class QSS_OT_quake_direct_bake(Operator):
                         f"source match ×{stats['normalization']:.3g}{unsupported_note}")
             return {'FINISHED'}
         except Exception as exc:
+            if transaction is not None:
+                try:
+                    image_undo.rollback(obj, transaction, bpy.data.images.get)
+                except Exception:
+                    pass
             trace = traceback.format_exc()
             obj['qss_last_quake_bake_error'] = str(exc)
             obj['qss_last_quake_bake_traceback'] = trace[-16000:]
@@ -8178,7 +8210,7 @@ class QSS_OT_bake_scene_lights(Operator):
     bl_idname = "qss.bake_scene_lights"
     bl_label = "Bake Imported Lights to Lightmap"
     bl_description = "Bake all faces or restrict the update to selected faces and/or receiver faces affected by selected lights"
-    bl_options = {'REGISTER'}
+    bl_options = {'REGISTER', 'UNDO'}
 
     only_selected_faces: BoolProperty(
         name="Only Selected Faces",
@@ -8235,10 +8267,29 @@ class QSS_OT_bake_scene_lights(Operator):
                 self.report({"ERROR"}, f"Could not safely leave Edit Mode for baking: {exc}")
                 return {"CANCELLED"}
 
+        transaction = None
+        image = bpy.data.images.get(obj.get("qss_lightmap_image_name", "")) if obj is not None else None
         try:
-            return self._execute_object_mode(
+            if image is not None:
+                transaction = image_undo.begin(obj, [image])
+            result = self._execute_object_mode(
                 context, target_face_indices=target_faces, bake_scope_name=scope_label
             )
+            if transaction is not None:
+                if "FINISHED" in result:
+                    image_undo.commit(obj, [image], transaction)
+                else:
+                    image_undo.rollback(obj, transaction, bpy.data.images.get)
+                transaction = None
+            return result
+        except Exception:
+            if transaction is not None:
+                try:
+                    image_undo.rollback(obj, transaction, bpy.data.images.get)
+                except Exception:
+                    pass
+                transaction = None
+            raise
         finally:
             # A lightmap bake covers the complete imported map, not just selected
             # edit faces. Restore the original edit-object set after all bake
@@ -8639,6 +8690,17 @@ class QSS_OT_bake_scene_lights(Operator):
             # claim that Blender's inverse-square lights reproduce every Quake luxel.
             baked = array.array('f', [0.0]) * (int(bake_target.size[0]) * int(bake_target.size[1]) * 4)
             bake_target.pixels.foreach_get(baked)
+            # Re-dilate each receiver from its own core luxels. This makes
+            # padding deterministic across Cycles versions and partial bakes.
+            core_rectangles = _qss_partial_lightmap_rectangles(
+                obj, image, receiver_face_indices, padding=0
+            )
+            obj['qss_last_bake_gutter_pixels_filled'] = int(
+                bake_scope_utils.dilate_rgba_gutters(
+                    baked, int(image.size[0]), int(image.size[1]),
+                    core_rectangles, padding=bake_margin,
+                )
+            )
             # The bake already contains the selected live-light scale.
             # Normalize only the baked image to the source atlas mean; never
             # feed this image multiplier back into the imported scene lights.
@@ -8697,10 +8759,8 @@ class QSS_OT_bake_scene_lights(Operator):
             obj['qss_baked_lightmap_image_name'] = image.name
             old_painted_bake = bpy.data.images.get(obj.get("qss_painted_baked_lightmap", ""))
             if old_painted_bake is not None:
-                try:
-                    bpy.data.images.remove(old_painted_bake, do_unlink=True)
-                except Exception:
-                    pass
+                old_painted_bake.use_fake_user = True
+                old_painted_bake["qss_retired_painted_bake"] = True
             obj["qss_painted_baked_lightmap"] = ""
             obj['qss_last_bake_backup'] = previous_snapshot.name
             obj['qss_bake_material_count'] = len(material_states)
@@ -8714,10 +8774,8 @@ class QSS_OT_bake_scene_lights(Operator):
                 bake_shadow_exempt_material_count
             )
             if old_previous_snapshot and old_previous_snapshot != previous_snapshot:
-                try:
-                    bpy.data.images.remove(old_previous_snapshot)
-                except Exception:
-                    pass
+                old_previous_snapshot.use_fake_user = True
+                old_previous_snapshot["qss_retired_bake_snapshot"] = True
             bake_elapsed_seconds = max(0.0, time.perf_counter() - bake_started_at)
             obj['qss_last_bake_duration_seconds'] = float(bake_elapsed_seconds)
             obj['qss_last_bake_cycles_seconds'] = (
@@ -8874,6 +8932,7 @@ class QSS_OT_undo_last_bake(Operator):
     bl_idname = 'qss.undo_last_bake'
     bl_label = 'Undo Last Bake'
     bl_description = 'Restore the lightmap atlas exactly as it was immediately before the last Cycles bake'
+    bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
     def poll(cls, context):
@@ -8888,15 +8947,22 @@ class QSS_OT_undo_last_bake(Operator):
         if target is None or backup is None:
             self.report({'ERROR'}, 'The pre-bake snapshot is missing.')
             return {'CANCELLED'}
+        transaction = image_undo.begin(obj, [target])
         try:
             _copy_image_pixels(backup, target)
-            bpy.data.images.remove(backup)
+            # Keep the image ID alive so redo can restore the same snapshot.
+            backup.use_fake_user = True
+            backup["qss_retired_bake_snapshot"] = True
             obj['qss_last_bake_backup'] = ''
             obj['qss_lightmap_source'] = 'pre_bake_atlas'
             obj['qss_lightmap_gradient_baked'] = False
+            image_undo.commit(obj, [target], transaction)
+            transaction = None
             self.report({'INFO'}, 'Restored the atlas to its pre-bake state.')
             return {'FINISHED'}
         except Exception as exc:
+            if transaction is not None:
+                image_undo.rollback(obj, transaction, bpy.data.images.get)
             self.report({'ERROR'}, f'Could not undo bake: {exc}')
             return {'CANCELLED'}
 
@@ -8905,6 +8971,7 @@ class QSS_OT_restore_original_lightmap(Operator):
     bl_idname = 'qss.restore_original_lightmap'
     bl_label = 'Restore Imported BSP Lightmaps'
     bl_description = 'Restore the original RGB lightmap atlas extracted at BSP import'
+    bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
     def poll(cls, context):
@@ -8919,17 +8986,23 @@ class QSS_OT_restore_original_lightmap(Operator):
         if target is None or backup is None:
             self.report({'ERROR'}, 'The original imported lightmap snapshot is missing.')
             return {'CANCELLED'}
+        transaction = image_undo.begin(obj, [target])
         try:
             _copy_image_pixels(backup, target)
             last_backup = bpy.data.images.get(obj.get('qss_last_bake_backup', ''))
             if last_backup is not None:
-                bpy.data.images.remove(last_backup)
+                last_backup.use_fake_user = True
+                last_backup["qss_retired_bake_snapshot"] = True
             obj['qss_last_bake_backup'] = ''
             obj['qss_lightmap_source'] = 'original_bsp_lightmaps'
             obj['qss_lightmap_gradient_baked'] = False
+            image_undo.commit(obj, [target], transaction)
+            transaction = None
             self.report({'INFO'}, 'Restored original BSP lightmaps.')
             return {'FINISHED'}
         except Exception as exc:
+            if transaction is not None:
+                image_undo.rollback(obj, transaction, bpy.data.images.get)
             self.report({'ERROR'}, f'Could not restore source lightmaps: {exc}')
             return {'CANCELLED'}
 
@@ -10765,16 +10838,15 @@ def _qss_rebuild_map_lightmap_resolution(obj, resolution):
     for name in old_names:
         image = bpy.data.images.get(name) if name else None
         if image is not None and image.users == 0:
-            try:
-                bpy.data.images.remove(image, do_unlink=True)
-            except Exception:
-                pass
+            image.use_fake_user = True
+            image["qss_retired_resolution_image"] = True
 
 
 class QSS_OT_change_lightmap_resolution(Operator):
     bl_idname = "qss.change_lightmap_resolution"
     bl_label = "Change Lightmap Resolution"
     bl_description = "Rebuild the active map's working lightmap atlas at a different resolution"
+    bl_options = {'REGISTER', 'UNDO'}
     resolution: EnumProperty(
         name="Working resolution",
         items=(("1", "1× · Original", "Original packed atlas resolution"),
@@ -11875,6 +11947,7 @@ def _unregister_qss_classes():
 
 
 def _cleanup_previous_registration():
+    image_undo.unregister(bpy)
     _qss_restore_focus_clip_session()
     _qss_remove_context_menus()
     for session in tuple(_qss_edit_overlay_sessions.values()):
@@ -12107,6 +12180,7 @@ def register():
                 )
             finally:
                 _qss_config_update_depth = False
+        image_undo.register(bpy)
     except Exception:
         # Blender can leave a partially registered add-on behind when register()
         # raises. Roll back everything created in this attempt before propagating.

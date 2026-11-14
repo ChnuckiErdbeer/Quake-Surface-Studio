@@ -600,3 +600,37 @@ Post-1.0: BSP2/2PSB support, expanded BSP dialect compatibility and any format-s
 - Profile Cycles only after a repeatable baseline and quality metric exist.
 - Complete special shadow modes only to the degree required for real BSP29 mod compatibility; document any unsupported special keys.
 - 1.0 RC remains classic Quake 1 BSP29 only. BSP2/2PSB and other dialects remain post-1.0.
+
+---
+
+## SLOPGATE 0.21.11 — undo journal and lightmap gutter pass — 2026-11-14
+
+### Implemented in source
+
+- Version metadata synchronized to 0.21.11 in both the add-on module and Blender manifest.
+- Added image_undo.py, a session-local image-pixel journal synchronized to Blender's native global undo/redo.
+  - Each journaled map edit captures pre-edit and post-edit pixels for the image datablocks it mutates.
+  - The map object carries an undo-state token; Blender restores that token with its normal undo state.
+  - undo_post and redo_post handlers restore the matching compressed float-image snapshot only when that token changes.
+  - Ordinary Texture Paint strokes and paint-mode/target transitions do not change the token, leaving native Texture Paint stroke history alone.
+  - The journal is bounded to 96 states per map and cleared on add-on unregister or file load; Blender undo itself is session-local.
+- Enabled one native Ctrl+Z/redo entry for Quake Direct bake, Cycles bake, Undo Last Bake, Restore Imported BSP Lightmaps and Change Lightmap Resolution. Direct image-buffer writes are restored by the journal; mesh/material/object state remains handled by Blender.
+- Bake/resolution cleanup now retains old generated snapshot image datablocks as fake-user history images rather than deleting IDs that a Blender redo state may need.
+- Added explicit per-face atlas gutter dilation:
+  - Each lightmapped face core rectangle is identified from atlas metadata.
+  - Its reserved gutter is filled from its own nearest edge luxels, including corners.
+  - Adjacent face islands are never blended; overlapping expanded gutters fail closed.
+  - The pass runs when the imported lightmap atlas is built and after a Cycles bake, including partial bakes.
+  - Core luxel samples are unchanged, so BSP export values still come from the face interior.
+- Added pure-Python regression tests for the image undo/redo journal and face-gutter dilation.
+
+### Important limitation still under investigation
+
+The gutter pass addresses atlas filtering/bleed inside Blender and makes per-face padding deterministic. It does not yet prove that the separate in-game edge clipping reported for engine-side lightmap blur is solved. Classic BSP29 does not expose a simple per-face padding field; any engine-side fix must preserve the exact texinfo projection and avoid inventing light from an adjacent face with a different normal, light occlusion or material. That part needs a controlled compiled map and Ironwail comparison before changing export samples.
+
+### Verification boundary
+
+- Standalone unit tests and Python syntax checks can verify the journal state machine and pure atlas-dilation logic.
+- Actual Ctrl+Z/redo behavior with Blender 5.3 still needs GUI validation for bake, Undo Last Bake, source restore, resolution changes, detach faces, Texture Paint strokes, lightmap paint strokes, map switching and save/reopen.
+- The Blender undo_post/redo_post callbacks are implemented but have not been exercised inside a running Blender process in this environment.
+- The atlas gutter change needs a visual comparison at 1x, 2x and 4x resolution, plus a compiled Ironwail test for the in-game blur/crop issue.
