@@ -7004,7 +7004,8 @@ class QSS_OT_activate_lightmap_paint(Operator):
         )
         layout.alert = False
 
-    bl_options = {'REGISTER', 'UNDO'}
+    # Entering Texture Paint changes mode/targets; it is not an undoable map edit.
+    # Keeping this out of Blender's global undo stack avoids stale image-canvas states.
 
     @classmethod
     def poll(cls, context):
@@ -7835,7 +7836,9 @@ class QSS_OT_quake_direct_bake(Operator):
     bl_idname = 'qss.quake_direct_bake'
     bl_label = 'Bake Quake Direct Lighting'
     bl_description = 'Evaluate ericw-tools direct light attenuation at every BSP luxel and write a static RGB atlas'
-    bl_options = {'REGISTER', 'UNDO'}
+    # This operator writes the image pixel buffer directly. Blender's global
+    # operator undo does not reliably snapshot Python foreach_set() image edits;
+    # use explicit lightmap snapshots/restore instead.
 
     @classmethod
     def poll(cls, context):
