@@ -2468,7 +2468,7 @@ def _build_enhanced_lightmap_payload(
     # out of the classic BSP29 fallback: classic renderers derive their
     # lightmap rectangle from texinfo and cannot express this extra per-face rim.
     edge_padding_marker = bytes(parsed.bspx_lumps.get('SLPG_LMPAD', b''))
-    if edge_padding_marker not in (b'', b'\\x01'):
+    if edge_padding_marker not in (b'', b'\x01'):
         raise bsp.BSPError(
             f"Unsupported SLOPGATE lightmap edge-padding marker version: {edge_padding_marker!r}."
         )
@@ -2490,7 +2490,7 @@ def _build_enhanced_lightmap_payload(
             else:
                 edge_padding_skipped_faces += 1
         if edge_padded_faces:
-            edge_padding_marker = b'\\x01'
+            edge_padding_marker = b'\x01'
             _qss_log(
                 "INFO", "lightmap_export",
                 f"Added half-luxel edge support to {edge_padded_faces} enhanced face lightmaps; "
