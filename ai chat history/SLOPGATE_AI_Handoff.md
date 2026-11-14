@@ -460,3 +460,15 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - Installer: `Quake-Surface-Studio-v0.21.8-Blender-Install`, artifact ID `14107953631`, 274,236 bytes, SHA-256 `72a15281c51a8bdb98bba18990f0b54b9f05d0afd42cee91b1dc10244ad6fc5c`, expires 2027-02-12. Downloaded ZIP passed `unzip -t`.
 - UI changes: bake timing/workload moved to STATS; standalone LAST BAKE box removed. Copy Stats to Clipboard added in EXPORT & DIAGNOSTICS, copying the full text diagnostic report.
 - Shadow policy change is source/CI verified only; Blender 5.3 runtime bake behavior has not been exercised in this environment. User must validate against a map with doors/platforms before treating the lighting correction as confirmed.
+
+
+### SLOPGATE 0.21.9 — bake-time mover shadow correction
+
+- User tested 0.21.8 and confirmed moving brush objects still block light. Reported bake: total 3m 33.2s; Cycles 3m 29s (about 4.2s overhead).
+- Root cause in source: the bake operator temporarily replaces every material Surface with a plain Diffuse BSDF. This bypasses the persistent inline mover material's Light Path -> Mix Shader -> Transparent shadow-ray branch. Thus 0.21.8's display material graph could not affect the actual bake.
+- 0.21.9 updates the temporary bake material override. For materials tagged `qss_inline_model_no_shadow`, the temporary bake surface is now a Mix Shader: Light Path Is Shadow Ray selects Transparent BSDF; all other rays use the temporary white Diffuse BSDF. This keeps the mover's own surface available to receive diffuse lighting while preventing it from occluding shadow rays during the bake.
+- Nodraw remains fully transparent under the existing policy; blocklight/NODRAW_BLOCKER behavior remains opaque; normal world materials continue using the standard diffuse bake override.
+- Temporary Light Path, Transparent, Mix and Diffuse nodes are tracked per material and removed in the bake `finally` cleanup; the original Surface links are restored.
+- Records count of mover-tagged materials that received the bake-time shadow override in object stats/diagnostics.
+- Blender documentation confirms Light Path exposes Is Shadow Ray in Cycles; transparent shader pass-through is a supported shader behavior. References: Blender 5.3 Light Path manual and Cycles baking manual. Runtime verification in Blender 5.3 remains necessary.
+- Next user validation: bake a map with func_door/func_plat/func_train entities and compare static world light behind them to ericw. Confirm movers themselves still receive light and their display materials are restored after bake.
