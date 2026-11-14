@@ -371,3 +371,16 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - Implement and test this against maps containing `func_door`, `func_plat` / lifts, `func_train` and rotating brush entities. Until then, avoid a broad transform patch to the flattened mesh because it could break direct-light BVHs, face selection, map sync, UV/lightmap rebuild and export.
 - Keep this as a separate feature milestone from bake timing. The user's comment about initial positions is plausible for origin-brush models, but it is not a generic rule that all movers start elsewhere.
 
+
+
+### Latest verified installer — 0.21.4 bake timing telemetry
+
+- Latest handoff/documentation branch head: `a0508d30927d902f6186649f79e66f3458644eef`.
+- Exact source + README commit packaged: `8de54e1e942839d1e09c203281e7ca56477dd680` (the final timing clean-up code is in parent `b2d001aba990c95f0b3d80370a3558ed8e931af5`; version tuple is `0.21.4`).
+- QSS Python push workflow run: `43576192956`, job `132390846731`, success. Python compilation passed; **239 standalone tests passed**; package assembly and artifact upload passed.
+- QSS PR workflow on the latest handoff commit `a0508d3`: run `43576198933`, success. Companion converter GUI PR workflow also passed; it validates the separate converter tool, not Blender runtime behavior.
+- Installer: `Quake-Surface-Studio-v0.21.4-Blender-Install`, artifact ID `14106388181`, 269,450 bytes, 48 ZIP entries, expires 2027-02-12.
+- SHA-256: `54b68d04cc522203e43f77a1d511b14704c8e893078db37c98509c6ee71f5698`.
+- Downloaded ZIP was tested: no corrupt member; correct `quake_surface_studio/__init__.py` package root; `bake_stats.py` and `tests/test_bake_stats.py` are present.
+- GitHub artifact page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43576192956/artifacts/14106388181
+- Blender 5.3 runtime retest of the new timing display is still user-side. The reported 0.21.3 Bake/selection/nodraw runtime feedback remains as recorded above.
