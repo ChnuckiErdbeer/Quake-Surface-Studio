@@ -29,7 +29,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils
 
 
-ADDON_VERSION = (0, 21, 5)
+ADDON_VERSION = (0, 21, 6)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -11472,6 +11472,26 @@ class QSS_PT_lighting(Panel):
         bake.enabled = context.mode in {"OBJECT", "EDIT_MESH"} and mode in {"realtime", "cycles"} and obj.get("qss_light_entity_count", 0) > 0
         bake.prop(context.scene, "qss_bake_only_selected_faces", text="Only Selected Faces")
         bake.operator(QSS_OT_bake_scene_lights.bl_idname, text="Bake Lightmap", icon="RENDER_STILL")
+        bake_timing = layout.box()
+        bake_timing.label(text="LAST BAKE", icon="TIME")
+        last_total = obj.get("qss_last_bake_duration_seconds")
+        if last_total is not None:
+            bake_timing.label(
+                text=f"Total: {bake_stats_utils.format_duration(last_total)}"
+            )
+            bake_timing.label(
+                text=f"Cycles: {bake_stats_utils.format_duration(obj.get('qss_last_bake_cycles_seconds'))}"
+            )
+        else:
+            bake_timing.label(text="No successful bake timing recorded yet.")
+        last_attempt = obj.get("qss_last_bake_attempt_duration_seconds")
+        if last_attempt is not None and last_total is None:
+            bake_timing.label(
+                text=f"Last attempt: {bake_stats_utils.format_duration(last_attempt)}"
+            )
+            bake_timing.label(
+                text=f"Cycles attempt: {bake_stats_utils.format_duration(obj.get('qss_last_bake_attempt_cycles_seconds'))}"
+            )
         if mode == "realtime":
             layout.label(text="Eevee preview selected; baking currently uses the Cycles backend.", icon="INFO")
         if obj.get("qss_last_quake_bake_error"):
@@ -11551,27 +11571,6 @@ class QSS_PT_stats(Panel):
             memory = int(image.size[0]) * int(image.size[1]) * (16 if image.is_float else 4)
             lighting.label(text=f"Working atlas: {image.size[0]}×{image.size[1]} · ~{memory / (1024 * 1024):.1f} MiB")
         lighting.label(text=f"Generated bake: {'Available' if _qss_has_baked_lightmap(obj) else 'Not baked'}")
-        last_total = obj.get("qss_last_bake_duration_seconds")
-        last_cycles = obj.get("qss_last_bake_cycles_seconds")
-        bake_timing = lighting.box()
-        bake_timing.label(text="LAST CYCLES BAKE", icon="TIME")
-        if last_total is not None:
-            bake_timing.label(
-                text=f"Total: {bake_stats_utils.format_duration(last_total)}"
-            )
-            bake_timing.label(
-                text=f"Cycles: {bake_stats_utils.format_duration(last_cycles)}"
-            )
-        else:
-            bake_timing.label(text="No successful bake timing recorded yet.")
-        last_attempt = obj.get("qss_last_bake_attempt_duration_seconds")
-        if last_attempt is not None and last_total is None:
-            bake_timing.label(
-                text=f"Last attempt: {bake_stats_utils.format_duration(last_attempt)}"
-            )
-            bake_timing.label(
-                text=f"Cycles attempt: {bake_stats_utils.format_duration(obj.get('qss_last_bake_attempt_cycles_seconds'))}"
-            )
         diagnostics = layout.box()
         diagnostics.label(text="EXPORT & DIAGNOSTICS", icon="EXPORT")
         last_export = _qss_last_export_path(obj)
