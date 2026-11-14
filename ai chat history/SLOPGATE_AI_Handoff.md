@@ -384,3 +384,15 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - Downloaded ZIP was tested: no corrupt member; correct `quake_surface_studio/__init__.py` package root; `bake_stats.py` and `tests/test_bake_stats.py` are present.
 - GitHub artifact page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43576192956/artifacts/14106388181
 - Blender 5.3 runtime retest of the new timing display is still user-side. The reported 0.21.3 Bake/selection/nodraw runtime feedback remains as recorded above.
+
+
+## User feedback and next milestone — 2026-11-14
+
+- User confirms the last E1M1 Cycles bake took roughly 5–7 minutes; an older build reportedly baked E1M1 in about 90 seconds. These are user-observed approximate times, not controlled benchmarks.
+- User could not find the new duration statistic. Root cause: 0.21.4 added timings to the completion report and Save Lighting Diagnostics text, but not the persistent STATS panel. Corrected in 0.21.5: Lighting > STATS now shows last successful total duration and Cycles operator duration directly after baking.
+- User's next main priority is BSP inline brush-model support. Bake optimization is welcome if a concrete bottleneck is identified, but must not reduce bake quality/settings or risk the inline-model milestone.
+- 0.21.5 parses BSP29 `dmodel_t` (64-byte) records, validates face ownership ranges, maps each face to a model ID, and resolves entity `model "*n"` references.
+- Inline-model face geometry is transformed by the referenced entity's compiled `origin` and explicit three-component `angles` for display. A combined map mesh is retained to minimize disruption to current editing, lighting and export paths. Original model-local coordinates remain used for texture UVs/lightmap atlas creation; model metadata is stored so lightmap resolution rebuild can invert the entity transform.
+- Important Quake distinction: `angle` (singular) on movers commonly specifies travel direction, not initial model orientation. Do not apply it as a brush geometry rotation. Only explicit three-component `angles` is applied as initial orientation.
+- Current scope corrects initial placement/rotation for imported inline-model faces, but does not yet split each inline model into a separately selectable Blender object, simulate mover travel, or implement full entity-specific animation. Validate against real `func_door`, `func_plat`, `func_train`, and rotating-brush BSP samples, including maps with and without origin brushes.
+- Bake timing now appears persistently in the Lighting section of STATS; users should capture total and Cycles durations on E1M1 for future comparison. No bake settings or quality were changed.
