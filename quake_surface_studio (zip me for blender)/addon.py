@@ -1164,6 +1164,7 @@ def _install_lightmap_nodes(mat, image):
             if link.to_socket == output.inputs['Surface']:
                 links.remove(link)
         links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
+    _qss_apply_surface_policy_to_material(mat)
 
 
 def _rebuild_lightmap_preview(obj, image_override=None):
@@ -1250,6 +1251,7 @@ def _install_realtime_light_nodes(mat):
         if link.to_socket == output.inputs['Surface']:
             links.remove(link)
     links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
+    _qss_apply_surface_policy_to_material(mat)
 
 
 def _set_black_preview_world(scene, obj):
@@ -1675,6 +1677,70 @@ def _load_wad_texture_index(wad_paths):
     return textures, loaded_paths, failures
 
 
+def _qss_apply_surface_policy_to_material(mat):
+    """Make Quake compiler-only surfaces invisible in every preview/render mode."""
+    if mat is None:
+        return
+    policy = str(mat.get("qss_surface_policy", surface_policy.POLICY_RENDER)).upper()
+    if not surface_policy.is_nodraw_policy(policy):
+        return
+    mat.diffuse_color = (0.0, 0.0, 0.0, 0.0)
+    try:
+        if hasattr(mat, "surface_render_method"):
+            mat.surface_render_method = "DITHERED"
+        elif hasattr(mat, "blend_method"):
+            mat.blend_method = "HASHED"
+    except Exception:
+        pass
+    if not mat.use_nodes or mat.node_tree is None:
+        return
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    output = next((node for node in nodes if node.type == "OUTPUT_MATERIAL" and node.is_active_output), None)
+    if output is None:
+        output = next((node for node in nodes if node.type == "OUTPUT_MATERIAL"), None)
+    if output is None:
+        output = nodes.new("ShaderNodeOutputMaterial")
+    transparent = next(
+        (node for node in nodes
+         if node.type == "BSDF_TRANSPARENT" and node.get("qss_role") == "surface_policy_nodraw"),
+        None,
+    )
+    if transparent is None:
+        transparent = nodes.new("ShaderNodeBsdfTransparent")
+        transparent.name = "QSS_NODRAW_Transparent"
+        transparent.label = "Quake nodraw / compiler-only surface"
+        transparent["qss_role"] = "surface_policy_nodraw"
+    for link in list(links):
+        if link.to_socket == output.inputs["Surface"]:
+            links.remove(link)
+    links.new(transparent.outputs["BSDF"], output.inputs["Surface"])
+    try:
+        mat.update_tag()
+    except Exception:
+        pass
+
+
+def _qss_face_surface_policy(obj, polygon_index):
+    """Return the Quake policy stored on a polygon's source-texture material."""
+    mesh = getattr(obj, "data", None)
+    if mesh is None or polygon_index < 0 or polygon_index >= len(mesh.polygons):
+        return surface_policy.POLICY_RENDER
+    material_index = int(mesh.polygons[polygon_index].material_index)
+    if material_index < 0 or material_index >= len(mesh.materials):
+        return surface_policy.POLICY_RENDER
+    material = mesh.materials[material_index]
+    if material is None:
+        return surface_policy.POLICY_RENDER
+    return str(material.get("qss_surface_policy", surface_policy.POLICY_RENDER)).upper()
+
+
+def _qss_face_receives_light(obj, polygon_index):
+    return surface_policy.policy_receives_light(
+        _qss_face_surface_policy(obj, polygon_index)
+    )
+
+
 def _make_material(name, texture_id, texture_name, image):
     mat = bpy.data.materials.new(name=name)
     mat.use_nodes = True
@@ -1683,8 +1749,10 @@ def _make_material(name, texture_id, texture_name, image):
     mat['qss_texture_name'] = texture_name or name
     mat['qss_export_name'] = (texture_name or name)[:15]
     mat['qss_is_new_texture'] = False
+    mat['qss_surface_policy'] = surface_policy.classify_texture(texture_name or name)
     if image:
         _set_material_image(mat, image)
+    _qss_apply_surface_policy_to_material(mat)
     return mat
 
 
@@ -3813,6 +3881,14 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
         attrs['qss_bsp_face_id'].data[i].value = imported_face_ids[i]
         attrs['qss_bsp_texinfo_id'].data[i].value = imported_texinfo_ids[i]
         attrs['qss_bsp_miptex_id'].data[i].value = imported_miptex_ids[i]
+    nodraw_faces = sum(
+        1 for poly in mesh.polygons
+        if surface_policy.is_nodraw_policy(_qss_face_surface_policy(obj, poly.index))
+    )
+    blocklight_faces = sum(
+        1 for poly in mesh.polygons
+        if _qss_face_surface_policy(obj, poly.index) == surface_policy.POLICY_NODRAW_BLOCKER
+    )
 
     obj['qss_object_role'] = 'quake_bsp29'
     obj['qss_source_path'] = os.path.abspath(source_path)
@@ -3825,6 +3901,8 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
     obj['qss_total_bsp_faces'] = len(faces)
     obj['qss_bspx_lump_names'] = ', '.join(sorted(parsed.bspx_lumps.keys()))
     obj['qss_texture_count'] = len(entries)
+    obj['qss_nodraw_face_count'] = int(nodraw_faces)
+    obj['qss_blocklight_face_count'] = int(blocklight_faces)
     obj['qss_texture_sources'] = str(texture_sources)
     obj['qss_texture_embedded_count'] = int(texture_sources.get('embedded', 0))
     obj['qss_texture_wad_count'] = int(texture_sources.get('wad', 0))
