@@ -430,3 +430,12 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - Records both successful and attempted bake workload where possible. This is intended to distinguish a Cycles-time regression from a change in workload or SLOPGATE setup overhead.
 - No sample count, bounce, device, or other bake quality/performance setting is changed by this telemetry.
 - Source-level observation: the current bake path enforces a minimum of 96 Cycles samples (`scene.cycles.samples = max(96, old_cycles['samples'])`). This could be relevant to the reported time difference if older builds used fewer samples, but there is no verified historical settings comparison. Do not lower it without a quality comparison and user approval.
+
+
+### SLOPGATE 0.21.7 verified installer — current recommended test build
+
+- Source/version commit: `6010fc0c93a6077f51f3c7a9ae36f01b9eed8970` (version 0.21.7).
+- QSS Python workflow: run `43579307417`, job `132400401974`, success. Python compilation passed; **246 standalone tests passed**; package assembly and artifact upload passed.
+- Installer artifact: `Quake-Surface-Studio-v0.21.7-Blender-Install`, artifact ID `14107189855`, 273,039 bytes, SHA-256 `229ce48691919e3c5004c2b239460961a7c60f32b499fb2b85ec9653bc037dd3`, expires 2027-02-12.
+- Downloaded archive passed `unzip -t`; source checks confirm version 0.21.7, visible LAST BAKE panel, workload telemetry, BSP face-model metadata, inline transforms, and inverse lightmap rebuild transform are included.
+- User should use 0.21.7 rather than 0.21.5/0.21.6 for the next Blender 5.3 test.
