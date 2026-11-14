@@ -1,4 +1,13 @@
-# SLOPGATE 0.21.10
+# SLOPGATE 0.21.11
+
+## 0.21.11 — undo-safe lightmap commits and per-face atlas edge padding
+
+- Cycles and Quake Direct bakes write into new image datablocks and switch the map/material image references only after success. The previous atlas remains intact as the pre-bake state.
+- Cycles bake, Quake Direct bake, Undo / Redo Last Bake and Restore Imported BSP Lightmaps participate in Blender's global undo stack through image-ID reference changes. Texture Paint strokes remain on Blender's native paint undo history; paint-mode entry does not add a competing global undo step.
+- The lightmap atlas extends each face's sampled edge luxels through its own packed rectangle and gutter on import and after Cycles baking. This avoids cross-face gutter contamination without changing atlas size, the 2-pixel base gutter or Cycles margin settings.
+- Partial bakes extend and merge only selected face allocations. Export luxel centres and BSP lightmap sample layout remain unchanged.
+- Adds pure-Python coverage for face isolation, resolution scaling, out-of-bounds allocations and undo operator/data contracts.
+- Blender 5.3 runtime verification is still required for actual Ctrl+Z/Ctrl+Shift+Z behavior, paint-stroke history, bake seams and save/reopen.
 
 ## 0.21.5 — visible bake timing and BSP inline-model placement
 

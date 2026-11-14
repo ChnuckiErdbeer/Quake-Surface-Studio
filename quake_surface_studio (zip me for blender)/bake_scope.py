@@ -168,9 +168,92 @@ def scale_rgba_regions(pixels, image_width: int, image_height: int, rectangles, 
     return changed
 
 
+def dilate_luxel_islands(
+    pixels, image_width: int, image_height: int, islands, *,
+    resolution: int = 1, lightmap_scale: int = 1, gutter: int = 0,
+) -> int:
+    """Pad each face's atlas allocation from its own sampled luxel centres.
+
+    An island is (atlas_x, atlas_y, sample_width, sample_height), with atlas
+    coordinates at the top-left of the reserved rectangle in base-atlas pixels.
+    Every scaled luxel block and its gutter is filled from the nearest luxel
+    centre. This prevents renderer margin dilation from copying adjacent faces.
+    """
+    import math
+
+    width, height = int(image_width), int(image_height)
+    factor, base_scale, base_gutter = int(resolution), int(lightmap_scale), int(gutter)
+    if width <= 0 or height <= 0:
+        raise ValueError("Atlas dimensions must be positive.")
+    if factor < 1 or base_scale < 1 or base_gutter < 0:
+        raise ValueError("Resolution and scale must be positive; gutter cannot be negative.")
+    if len(pixels) != width * height * 4:
+        raise ValueError("RGBA pixel buffer does not match the supplied atlas dimensions.")
+    block, pad = base_scale * factor, base_gutter * factor
+    centre_offset = (block - 1) * 0.5
+    seen, changed = set(), 0
+
+    def sample_bilinear(x, y):
+        x = min(max(float(x), 0.0), width - 1.0)
+        y = min(max(float(y), 0.0), height - 1.0)
+        x0, y0 = int(math.floor(x)), int(math.floor(y))
+        x1, y1 = min(width - 1, x0 + 1), min(height - 1, y0 + 1)
+        fx, fy = x - x0, y - y0
+        values = []
+        for channel in range(4):
+            a = float(pixels[(y0 * width + x0) * 4 + channel])
+            b = float(pixels[(y0 * width + x1) * 4 + channel])
+            c = float(pixels[(y1 * width + x0) * 4 + channel])
+            d = float(pixels[(y1 * width + x1) * 4 + channel])
+            values.append((a * (1-fx) + b * fx) * (1-fy) + (c * (1-fx) + d * fx) * fy)
+        return tuple(values)
+
+    for island in islands:
+        if len(island) != 4:
+            raise ValueError("Each lightmap island must contain x, y, width and height.")
+        atlas_x, atlas_y, sample_w, sample_h = (int(v) for v in island)
+        if atlas_x < 0 or atlas_y < 0:
+            raise ValueError("Lightmap island coordinates cannot be negative.")
+        if sample_w <= 0 or sample_h <= 0:
+            continue
+        identity = (atlas_x, atlas_y, sample_w, sample_h)
+        if identity in seen:
+            continue
+        seen.add(identity)
+
+        tile_x0, tile_y0 = atlas_x * factor, atlas_y * factor
+        content_x0, content_y0 = tile_x0 + pad, tile_y0 + pad
+        tile_x1 = tile_x0 + sample_w * block + 2 * pad
+        tile_y1 = tile_y0 + sample_h * block + 2 * pad
+        if tile_x1 > width or tile_y1 > height:
+            raise ValueError("Lightmap island allocation lies outside the image.")
+
+        samples = []
+        for sy in range(sample_h):
+            y_top = content_y0 + sy * block + centre_offset
+            y_bottom = height - 1.0 - y_top
+            for sx in range(sample_w):
+                x = content_x0 + sx * block + centre_offset
+                samples.append(sample_bilinear(x, y_bottom))
+
+        for y_top in range(tile_y0, tile_y1):
+            sy = int(math.floor((y_top - (content_y0 + centre_offset)) / block + 0.5))
+            sy = min(sample_h - 1, max(0, sy))
+            y_bottom = height - 1 - y_top
+            for x in range(tile_x0, tile_x1):
+                sx = int(math.floor((x - (content_x0 + centre_offset)) / block + 0.5))
+                sx = min(sample_w - 1, max(0, sx))
+                rgba = samples[sy * sample_w + sx]
+                offset = (y_bottom * width + x) * 4
+                pixels[offset:offset + 4] = rgba
+                changed += 1
+    return changed
+
+
 __all__ = [
     "resolve_target_faces",
     "face_luxel_rectangles",
     "scale_rgba_regions",
     "merge_rgba_regions",
+    "dilate_luxel_islands",
 ]

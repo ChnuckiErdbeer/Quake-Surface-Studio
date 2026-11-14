@@ -600,3 +600,24 @@ Post-1.0: BSP2/2PSB support, expanded BSP dialect compatibility and any format-s
 - Profile Cycles only after a repeatable baseline and quality metric exist.
 - Complete special shadow modes only to the degree required for real BSP29 mod compatibility; document any unsupported special keys.
 - 1.0 RC remains classic Quake 1 BSP29 only. BSP2/2PSB and other dialects remain post-1.0.
+
+
+## SLOPGATE 0.21.11 implementation pass — 2026-11-14
+
+The user requested implementation of Ctrl+Z/Ctrl+Shift+Z handling and the reported lightmap edge/blur issue, with classic BSP29 as the 1.0 target.
+
+- Synchronized version metadata: addon constant and package bl_info both report 0.21.11 (the previous addon constant was stale at 0.21.9 while package metadata reported 0.21.10).
+- Reworked Cycles baking to commit into a new image datablock. The active atlas is not overwritten in place; on success, material lightmap nodes and the map's current-atlas ID switch to the newly baked datablock. The previous atlas is retained as the pre-bake image. Failed bakes leave the previous lightmap pixels untouched.
+- Reworked Quake Direct CPU baking with the same copy-and-swap contract.
+- Cycles bake, Quake Direct bake, Undo / Redo Last Bake and Restore Imported BSP Lightmaps now have Blender global UNDO flags. Last-bake undo/redo swaps image IDs instead of copying pixel buffers.
+- Paint-mode activation operators remain outside the global undo stack so they do not compete with Blender's native Texture Paint stroke history.
+- Added deterministic per-face atlas edge extension. Each luxel's sampled colour is extended through its own packed block and gutter on import and after Cycles baking. Partial bakes touch only selected face allocations. Atlas dimensions, the two-pixel base gutter, Cycles margin settings and exported luxel centres remain unchanged.
+- Added pure-Python tests for edge-padding isolation, scaled gutters, out-of-bounds allocations, image-ID bake/restore undo contracts and paint-mode undo boundaries.
+- Static tests cannot establish Blender's runtime undo behavior or Cycles rasterization. The first Blender 5.3 test should perform bake → Ctrl+Z → verify pre-bake atlas → Ctrl+Shift+Z → verify baked atlas; then test Undo / Redo Last Bake, Restore Imported BSP Lightmaps → Ctrl+Z, paint stroke → Ctrl+Z/Ctrl+Shift+Z, and a partial bake. Compare the same map's face boundaries against the prior build.
+
+### Remaining 1.0 work after this pass
+
+- Validate the new image-ID undo path in Blender 5.3 with repeated bake/undo/redo and save/reopen.
+- Verify lightmap edges on E1M1 and a seam-reproducing map in Original, Baked, Texture Paint, save/reopen and BSP export states.
+- Continue auditing destructive operations (face detach, painted-texture toggles, lightmap-resolution rebuild and MAP synchronization) for multi-datablock undo consistency.
+- Preview brightness calibration and Cycles profiling remain open; no sample-count or quality reductions were made.
