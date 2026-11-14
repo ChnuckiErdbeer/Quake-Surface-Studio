@@ -341,3 +341,33 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - Live-preview brightness calibration remains unresolved. The live preview path is already diffuse; Quake-to-Blender energy conversion needs a calibrated separate adjustment.
 - Keep BSP2/2PSB, lightmap edge bleed and true receiver-only bake performance as separate future milestones.
 - Always deliver a verified ZIP link for every updated installable build, stating version, exact commit, automated test status and artifact digest.
+
+
+## User feedback and source update — 2026-11-14 (0.21.4 timing)
+
+### Runtime feedback on 0.21.3 in Blender 5.3
+
+- User confirms **Select Affected Faces** now works.
+- User confirms Cycles bake is back and working, but subjectively feels slower. No measured before/after duration is available yet.
+- User confirms trigger and clip faces are no longer visible.
+- The user asked whether blocklight is a Quake feature. It is not in the classic Quake 1 / ericw-tools QBSP special-texture list checked for this handoff. The existing SLOPGATE `blocklight` policy is a compatibility/custom texture-name classification, not standard Quake semantics. Do not describe it as a required Quake feature. Do not silently remove its existing behavior without deciding whether compatibility should be preserved or the classification should be disabled.
+- User reports doors, elevators and other moving brush objects render incorrectly in the imported map. The importer currently flattens every BSP face into one static mesh and does not map BSP29 `models` lump face ranges to entity `model "*n"` references. This is a real architecture gap, not just a question of showing a mover's animated position.
+
+### Bake timing added in 0.21.4
+
+- Added pure formatter `bake_stats.py` and unit tests `tests/test_bake_stats.py`.
+- Cycles bake records both total operation duration (setup, bake, atlas processing and scene restoration) and time inside Blender's `bpy.ops.object.bake(type='DIFFUSE')`.
+- Timings are included in the completion report and `Save Lighting Diagnostics`; failed attempts retain separate attempt timing fields.
+- Rebuilding the lightmap atlas clears the old timing fields.
+- No bake settings, samples, bounce counts, receiver geometry or Cycles shader behavior were changed.
+- Automated tests and ZIP packaging must be verified for the final commit. No interactive Blender bake timing measurement is available in the assistant environment yet.
+
+### Moving brush entity diagnosis — next implementation milestone
+
+- Quake BSP29 separates brush models in its `models` lump using `firstface` and `numfaces`; brush entities refer to inline models with entity key `model "*n"`.
+- SLOPGATE currently imports all face ranges into one static map mesh and ignores those entity-to-model associations.
+- For entities compiled with an `origin` brush, QBSP rebases the brush geometry around the model origin and writes the previous center into the entity's `origin` key. A display/importer that ignores that transform can place a door, platform or rotating brush at the wrong location.
+- The correct model is to preserve worldspawn geometry as the static world and import each inline brush model as a separate child object with its entity origin and initial orientation applied. Retain source BSP face IDs, texinfo/miptex metadata and original local coordinates so texture projection, lightmap sampling and export remain correct. Do not apply mover travel distance or guess a later animation position; the imported placement should be its compiled initial/entity placement.
+- Implement and test this against maps containing `func_door`, `func_plat` / lifts, `func_train` and rotating brush entities. Until then, avoid a broad transform patch to the flattened mesh because it could break direct-light BVHs, face selection, map sync, UV/lightmap rebuild and export.
+- Keep this as a separate feature milestone from bake timing. The user's comment about initial positions is plausible for origin-brush models, but it is not a generic rule that all movers start elsewhere.
+
