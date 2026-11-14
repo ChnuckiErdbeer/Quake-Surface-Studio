@@ -1,4 +1,12 @@
-# SLOPGATE 0.21.3
+# SLOPGATE 0.21.4
+
+## 0.21.4 — bake duration diagnostics
+
+- Records elapsed time for the full Cycles lightmap bake operation, including setup and scene restoration, and separately records the time spent inside Blender's Cycles bake operator.
+- Adds both durations to the bake completion message and **Save Lighting Diagnostics** report. Failed attempts retain separate total and Cycles-operation timings where the operator was reached.
+- Timing is measured with a monotonic performance counter; a previous bake's timing is cleared when the working lightmap atlas is rebuilt.
+- The duration fields are diagnostic measurements only; no bake settings, render samples, bounce counts or receiver geometry are changed by this feature.
+- This release has automated Python tests and packaging validation; Blender 5.3 GUI/runtime bake behavior still relies on the user's runtime check.
 
 ## 0.21.3 — Blender 5.3 fixes and Quake nodraw surfaces
 
