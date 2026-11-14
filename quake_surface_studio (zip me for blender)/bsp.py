@@ -641,12 +641,10 @@ def transform_inline_model_position(position, entity: dict[str, str]) -> tuple[f
         origin_values = [0.0, 0.0, 0.0]
     try:
         angle_text = str(entity.get("angles", "")).replace(",", " ").split()
-        if len(angle_text) >= 3:
-            angle_values = [float(value) for value in angle_text[:3]]
-        elif entity.get("angle") is not None:
-            angle_values = [0.0, float(entity.get("angle", 0.0)), 0.0]
-        else:
-            angle_values = [0.0, 0.0, 0.0]
+        angle_values = (
+            [float(value) for value in angle_text[:3]]
+            if len(angle_text) >= 3 else [0.0, 0.0, 0.0]
+        )
     except (TypeError, ValueError):
         angle_values = [0.0, 0.0, 0.0]
 
