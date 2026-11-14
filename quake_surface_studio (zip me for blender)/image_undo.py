@@ -299,12 +299,9 @@ class ImageUndoJournal:
             if handler_list is not None and callback not in handler_list:
                 handler_list.append(callback)
         self._handlers = handlers
-        for obj in bpy_module.data.objects:
-            try:
-                if str(obj.get("qss_object_role", "")) == "quake_bsp29":
-                    self.ensure_object(obj)
-            except Exception:
-                pass
+        # Do not enumerate bpy.data.objects during add-on registration. Blender
+        # exposes a restricted _RestrictData proxy in this phase; object access
+        # is safe from load_post and from normal operator/undo callbacks.
 
     def unregister(self, bpy_module=None):
         target = bpy_module or self._bpy
