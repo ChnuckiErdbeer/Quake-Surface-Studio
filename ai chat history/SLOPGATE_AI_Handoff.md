@@ -559,3 +559,44 @@ Post-1.0: BSP2/2PSB support, expanded BSP dialect compatibility and any format-s
   - Texture Paint introduction: https://docs.blender.org/manual/en/5.3/sculpt_paint/texture_paint/introduction.html
   - Blender 5.3 Texture Paint Undo/Redo release note: https://developer.blender.org/docs/release_notes/5.3/sculpt/
 
+
+---
+
+## SLOPGATE 0.21.10 implementation pass — 2026-11-14
+
+### Changes made on the active development branch
+
+- Bumped add-on version to 0.21.10.
+- Replaced the importer's classname-only inline brush shadow exemption with bsp.inline_model_shadow_policy(entity), resolved from each compiled BSP entity's model "*n" reference. All inline brush models now default to non-shadow-casting regardless of classname; _shadow 1 opts into full shadow casting and _shadow -1 disables it. This should cover custom secret-door classnames.
+- _shadowself, _shadowworldonly, and _switchableshadow are detected and reported as special policy values, but currently fall back conservatively to no shadow. Exact semantics need source-model/hit-model-aware ray filtering and are not claimed as implemented.
+- Fixed inverse inline-model transforms so a scalar angle is ignored as initial rotation, matching the forward transform and Quake's meaning of scalar angle as mover travel direction. Three-component angles still controls initial rotation.
+- Undo boundary audit found a likely contributor to the user's erratic Ctrl+Z: QSS_OT_quake_direct_bake had UNDO while it writes pixels directly with image.pixels.foreach_set(). Blender's global operator undo does not reliably snapshot such Python image-buffer mutations. Removed global UNDO from that operation; keep explicit pre-bake image snapshots/Undo Last Bake as the image recovery mechanism.
+- Also removed global UNDO from QSS_OT_activate_lightmap_paint: it is a mode/paint-target transition and should not create an unrelated global undo step that competes with Texture Paint's native stroke history.
+- Added Blender global undo to reversible scene/material/mesh toggles (toggle_textures, toggle_source_lightmaps, toggle_painted_textures, toggle_painted_lightmaps) and confirmed map close, which changes scene datablocks/visibility.
+- Added static undo-contract tests plus BSP unit tests for custom classname default shadow policy, _shadow 1/-1, special shadow keys and scalar angle semantics.
+- README and version updated to 0.21.10.
+
+### Build verification
+
+- GitHub Actions QSS Python tests run: 43587762733, commit b9986cdcc8b088bf75de4b3e1c176af546843874; success.
+- Test count: **253 passed** in 2.739 seconds.
+- Installer artifact: Quake-Surface-Studio-v0.21.10-Blender-Install, artifact ID 14110794745, 277,401 bytes, SHA-256 67b55f9d86d618014ed8140dbba5e7ae6b005d0b0e444902da0b290e36a55aba; ZIP integrity checked successfully. Runtime Blender behavior is not covered by CI.
+
+### 1.0 RC work estimates (engineering time, not elapsed calendar time)
+
+1. **Ctrl+Z/redo consistency — 5–10 engineering days for audit + first complete pass; 2–4 weeks if image/paint operations need a true transaction/snapshot architecture.** Current 0.21.10 patch removes two unsafe undo pushes and adds undo to reversible scene toggles. Still need Blender 5.3 interaction tests for: face detach, entering/exiting both paint modes, texture paint strokes, lightmap paint strokes, undo/redo after a stroke, bake/Undo Last Bake, restore source lightmap, toggles, map close/reopen and save/reopen. Define which operations are true edits versus mode/context transitions. Never add UNDO indiscriminately to direct pixel-buffer writers.
+2. **Preview brightness calibration — 3–6 days.** Source/Baked preview is a material emission multiplication of albedo and lightmap; Eevee/Cycles live preview uses separate approximate scene lights. Capture matched material/light samples from one test map, separate color-management vs light-energy causes, calibrate each preview path independently, and add regression measurements. User needs to validate the result visually.
+3. **Lightmap seam/blur defect — 4–8 days for diagnosis and likely fix, potentially 2 weeks if UV/atlas/export assumptions are involved.** Existing atlas uses 2-pixel gutters, closest interpolation, centered luxel UVs and Cycles EXTEND margin. Do not increase blur/margin blindly. Reproduce with a map showing adjacent face edges; inspect UVs, atlas pixels and exported per-face samples at 1x/2x/4x resolution. Test import, bake, paint, save/reopen and BSP export.
+4. **Cycles bake performance — 3–5 days profiling, then 5–10 days for a demonstrated optimization.** Cycles is about 98% of reported time (3m30 of 3m34). Benchmark controlled map/device/sample/atlas/material/lights cases, measure bake stage and GPU/CPU utilization. Current bake enforces at least 96 samples and 2 default diffuse bounces. Do not reduce quality silently; expose any speed/quality tradeoff.
+5. **Generic brush shadow policy — 2–4 days to finish default and _shadow 1/-1 behavior plus map validation; another 5–10 days for exact _shadowself, _shadowworldonly, _switchableshadow.** 0.21.10 now handles any inline model classname for the common default and full-shadow cases. Special modes require model-aware ray filters or bake-only visibility proxies; switchable shadows also require style/channel semantics.
+6. **Lighting fidelity gap audit — 5–10 days to inventory/compare and document; feature additions depend on chosen scope.** Build controlled ericw reference maps for direct falloff, sky/sun, colored light, light styles, minlight, dirt, bounce, surface emitters, two-sided surfaces and texture policies. Prioritize issues that materially change ordinary BSP29 maps. Full ericw parity is not a 1.0 promise.
+7. **Regression map suite and release hardening — 5–8 days.** Maintain a small deterministic BSP29 fixture plus representative real maps, verify import/export round trips, texture/WAD behavior, face metadata, inline entities, lightmap preservation, clean install/upgrade and Blender 5.3 save/reopen. Prepare known-limitations docs, release notes and rollback package.
+
+### Recommended critical path
+
+- First user test of 0.21.10: secret door default shadow behavior, explicit _shadow 1, ordinary doors/platforms, and Ctrl+Z/redo sequences involving paint-mode entry, painting strokes, detaching faces and toggles.
+- Then fix any reproduced undo inconsistency before broadening other work.
+- In parallel, reproduce the preview brightness and seam issues with a shared test map and exact screenshots/diagnostics.
+- Profile Cycles only after a repeatable baseline and quality metric exist.
+- Complete special shadow modes only to the degree required for real BSP29 mod compatibility; document any unsupported special keys.
+- 1.0 RC remains classic Quake 1 BSP29 only. BSP2/2PSB and other dialects remain post-1.0.
