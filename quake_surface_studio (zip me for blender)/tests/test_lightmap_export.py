@@ -134,5 +134,77 @@ class LightmapExportTests(unittest.TestCase):
             )
 
 
+    def test_half_luxel_edge_padding_adds_resampled_rim(self):
+        source = bytes(
+            channel
+            for value in (0, 100, 200, 255)
+            for channel in (value, value, value)
+        )
+        record = {"shift": 4, "width": 2, "height": 2, "s_min": 0, "t_min": 16, "rgb": source}
+
+        padded, did_pad = lightmap_export.add_half_luxel_edge_padding(record)
+
+        self.assertTrue(did_pad)
+        self.assertEqual((padded["width"], padded["height"]), (4, 4))
+        self.assertEqual(len(padded["rgb"]), 4 * 4 * 3)
+        red = list(padded["rgb"][0::3])
+        self.assertEqual(red, [
+            0, 50, 100, 100,
+            100, 139, 178, 178,
+            200, 228, 255, 255,
+            200, 228, 255, 255,
+        ])
+        self.assertEqual((padded["s_min"], padded["t_min"]), (-8.0, 8.0))
+        self.assertEqual(record["rgb"], source)
+
+    def test_half_luxel_edge_padding_offsets_explicit_decoupled_vectors(self):
+        record = {
+            "shift": 4, "width": 2, "height": 1,
+            "lmvecs": (1.0, 0.0, 0.0, -4.0, 0.0, 1.0, 0.0, 8.0),
+            "rgb": bytes((10, 20, 30, 40, 50, 60)),
+        }
+        padded, did_pad = lightmap_export.add_half_luxel_edge_padding(record)
+        self.assertTrue(did_pad)
+        self.assertEqual((padded["width"], padded["height"]), (4, 3))
+        self.assertEqual(padded["lmvecs"], (1.0, 0.0, 0.0, -3.5, 0.0, 1.0, 0.0, 8.5))
+
+    def test_half_luxel_edge_padding_offsets_classic_luxel_grid_origin(self):
+        faces = [(0, 0, 0, 3, 0, 0, 255, 255, 255, 0)]
+        texinfos = [(2.0, 0.0, 0.0, 8.0, 0.0, 4.0, 0.0, 16.0, 0, 0)]
+        record = {
+            "shift": 3, "width": 2, "height": 1,
+            "s_min": 16, "t_min": 32, "rgb": bytes(6),
+        }
+        padded, did_pad = lightmap_export.add_half_luxel_edge_padding(record)
+        self.assertTrue(did_pad)
+        self.assertEqual((padded["s_min"], padded["t_min"]), (12.0, 28.0))
+        offsets = (100).to_bytes(4, "little")
+        data = lightmap_export.build_decoupled_lightmap_data(
+            faces, texinfos, {0: padded}, offsets
+        )
+        values = struct.unpack_from("<HHI8f", data, 0)
+        self.assertEqual(values[:3], (4, 3, 100))
+        self.assertAlmostEqual(values[3], 0.25)
+        self.assertAlmostEqual(values[6], -0.5)
+        self.assertAlmostEqual(values[10], -1.5)
+
+    def test_half_luxel_edge_padding_skips_dimensions_over_engine_limit(self):
+        record = {
+            "shift": 4, "width": 255, "height": 1,
+            "s_min": 0, "t_min": 0, "rgb": bytes(255 * 3),
+        }
+        padded, did_pad = lightmap_export.add_half_luxel_edge_padding(record)
+        self.assertFalse(did_pad)
+        self.assertEqual(padded, record)
+
+    def test_half_luxel_edge_padding_rejects_invalid_rgb_length(self):
+        with self.assertRaisesRegex(ValueError, "needs 6"):
+            lightmap_export.add_half_luxel_edge_padding({
+                "shift": 4, "width": 2, "height": 1,
+                "s_min": 0, "t_min": 0, "rgb": bytes(3),
+            })
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

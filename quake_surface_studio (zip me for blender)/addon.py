@@ -29,7 +29,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils, image_undo
 
 
-ADDON_VERSION = (0, 21, 11)
+ADDON_VERSION = (0, 21, 13)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -2463,6 +2463,45 @@ def _build_enhanced_lightmap_payload(
                 record['t_min'] = base_t_min
         face_records[face_id] = record
 
+    # Enhanced BSPX faces get a half-luxel rim so linear filtering has
+    # samples just outside the polygon boundary. This is deliberately kept
+    # out of the classic BSP29 fallback: classic renderers derive their
+    # lightmap rectangle from texinfo and cannot express this extra per-face rim.
+    edge_padding_marker = bytes(parsed.bspx_lumps.get('SLPG_LMPAD', b''))
+    if edge_padding_marker not in (b'', b'\\x01'):
+        raise bsp.BSPError(
+            f"Unsupported SLOPGATE lightmap edge-padding marker version: {edge_padding_marker!r}."
+        )
+    edge_padded_faces = 0
+    edge_padding_skipped_faces = 0
+    if not edge_padding_marker:
+        for padded_face_id, padded_record in tuple(face_records.items()):
+            try:
+                updated_record, did_pad = lightmap_export_utils.add_half_luxel_edge_padding(
+                    padded_record
+                )
+            except ValueError as exc:
+                raise bsp.BSPError(
+                    f"Could not add enhanced lightmap edge support to face {padded_face_id}: {exc}"
+                ) from exc
+            face_records[padded_face_id] = updated_record
+            if did_pad:
+                edge_padded_faces += 1
+            else:
+                edge_padding_skipped_faces += 1
+        if edge_padded_faces:
+            edge_padding_marker = b'\\x01'
+            _qss_log(
+                "INFO", "lightmap_export",
+                f"Added half-luxel edge support to {edge_padded_faces} enhanced face lightmaps; "
+                f"{edge_padding_skipped_faces} oversized faces left unchanged."
+            )
+    else:
+        _qss_log(
+            "INFO", "lightmap_export",
+            "Enhanced face lightmaps already contain the SLOPGATE edge-support rim; not adding it again."
+        )
+
     try:
         extension = lightmap_export_utils.build_lightmap_extension_data(
             len(faces), face_records, len(classic_lighting)
@@ -2490,6 +2529,8 @@ def _build_enhanced_lightmap_payload(
         'LMSTYLE': extension['LMSTYLE'],
         'RGBLIGHTING': bytes(rgb),
     }
+    if edge_padding_marker:
+        bspx['SLPG_LMPAD'] = edge_padding_marker
     return bytes(lighting), bsp.build_lit_file(bytes(rgb)), bspx
 
 

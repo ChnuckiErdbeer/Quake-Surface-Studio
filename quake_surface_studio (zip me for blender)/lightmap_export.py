@@ -381,6 +381,95 @@ def build_decoupled_lightmap_data(faces, texinfos, face_records, face_offsets):
     return bytes(output)
 
 
+def add_half_luxel_edge_padding(record: Mapping[str, Any],
+                                 max_dimension: int = MAX_SURFACE_LUXELS) -> tuple[dict[str, Any], bool]:
+    """Add a half-luxel support rim for linear filtering at a face boundary.
+
+    The output grid is two samples wider and taller. New output sample (x, y)
+    resamples the original grid at (x - 0.5, y - 0.5), clamped to the face
+    bounds. The projection origin is shifted by +0.5 luxel on both axes, so a
+    face edge maps between the rim sample and the first interior sample.
+
+    Returns (record, padded). Oversized faces are returned unchanged with
+    padded=False rather than exceeding the per-surface dimension limit.
+    """
+    if not isinstance(record, Mapping):
+        raise ValueError("Lightmap face record must be a mapping")
+    width = int(record.get("width", 0))
+    height = int(record.get("height", 0))
+    rgb = bytes(record.get("rgb", b""))
+    if width < 1 or height < 1:
+        raise ValueError("Lightmap face dimensions must be positive")
+    if len(rgb) != width * height * 3:
+        raise ValueError(
+            f"RGB data has {len(rgb)} bytes but the {width}x{height} face grid needs {width * height * 3}"
+        )
+    max_dimension = int(max_dimension)
+    if max_dimension < 1:
+        raise ValueError("Maximum lightmap dimension must be positive")
+    if width + 2 > max_dimension or height + 2 > max_dimension:
+        return dict(record), False
+
+    if "lmvecs" in record:
+        lmvecs = tuple(float(value) for value in record["lmvecs"])
+        if len(lmvecs) != 8 or not all(math.isfinite(value) for value in lmvecs):
+            raise ValueError("Decoupled lightmap vectors must contain eight finite values")
+        shifted = list(lmvecs)
+        shifted[3] += 0.5
+        shifted[7] += 0.5
+    else:
+        try:
+            shift = int(record["shift"])
+            s_min = float(record["s_min"])
+            t_min = float(record["t_min"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Classic lightmap record needs shift, s_min and t_min") from exc
+        if shift < 0 or shift > 4:
+            raise ValueError(f"Invalid lightmap shift for edge padding: {shift}")
+        if not math.isfinite(s_min) or not math.isfinite(t_min):
+            raise ValueError("Lightmap grid origins must be finite")
+        half_spacing = (1 << shift) * 0.5
+        shifted = None
+        shifted_s_min = s_min - half_spacing
+        shifted_t_min = t_min - half_spacing
+
+    padded = bytearray((width + 2) * (height + 2) * 3)
+    out_width = width + 2
+    out_height = height + 2
+    for out_y in range(out_height):
+        source_y = min(max(out_y - 0.5, 0.0), float(height - 1))
+        y0 = int(math.floor(source_y))
+        y1 = min(y0 + 1, height - 1)
+        fy = source_y - y0
+        for out_x in range(out_width):
+            source_x = min(max(out_x - 0.5, 0.0), float(width - 1))
+            x0 = int(math.floor(source_x))
+            x1 = min(x0 + 1, width - 1)
+            fx = source_x - x0
+            indices = (
+                (y0 * width + x0) * 3,
+                (y0 * width + x1) * 3,
+                (y1 * width + x0) * 3,
+                (y1 * width + x1) * 3,
+            )
+            dst = (out_y * out_width + out_x) * 3
+            for channel in range(3):
+                top = rgb[indices[0] + channel] * (1.0 - fx) + rgb[indices[1] + channel] * fx
+                bottom = rgb[indices[2] + channel] * (1.0 - fx) + rgb[indices[3] + channel] * fx
+                value = top * (1.0 - fy) + bottom * fy
+                padded[dst + channel] = max(0, min(255, int(math.floor(value + 0.5))))
+
+    result = dict(record)
+    result["width"] = out_width
+    result["height"] = out_height
+    result["rgb"] = bytes(padded)
+    if shifted is not None:
+        result["lmvecs"] = tuple(shifted)
+    else:
+        result["s_min"] = shifted_s_min
+        result["t_min"] = shifted_t_min
+    return result, True
+
 def build_lightmap_extension_data(
     face_count: int,
     face_records: Mapping[int, Mapping[str, Any]],

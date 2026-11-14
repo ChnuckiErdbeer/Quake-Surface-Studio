@@ -664,3 +664,61 @@ The gutter pass addresses atlas filtering/bleed inside Blender and makes per-fac
 - Verification: GitHub Actions QSS Python tests passed for final source commit `31e37386b6312945964c3d1bd972fb576c8fc9eb` (compileall, standalone suite, package assembly and upload). Final package artifact `Quake-Surface-Studio-v0.21.12-Blender-Install` SHA-256: `b52070532b8eeec0540dda7a6c617bf07cdbe28ce49d92707d861199a52128ef`. The Blender integration runner itself still requires execution in a real Blender UI session.
 - Limitation: this pass targets softness caused by variation inside supersampled luxel blocks in the Blender lightmap atlas. It does not claim to solve engine-side face-edge clipping/bleed; verify a compiled map in Ironwail before calling that separate issue resolved.
 
+## 2026-11-14 — Lightmap face-edge filtering work (SLOPGATE 0.21.13)
+
+The user has paused undo/redo investigation. Do not spend further time on global
+undo testing unless the user reports a reproducible issue while testing other
+features.
+
+### Findings
+
+- The earlier `collapse_rgba_luxel_blocks` change addresses softness *inside*
+  supersampled luxel blocks. It does not solve lightmap filtering at BSP face
+  boundaries.
+- Atlas gutters are not automatically part of a face's exported BSP lightmap
+  sample rectangle.
+- The classic BSP29 renderer path derives each face's lightmap extent from its
+  texinfo projection. The inspected Ironwail path packs that exact per-face
+  extent and has no observed `DECOUPLED_LM` handling. A separate per-face
+  border cannot be represented in that classic fallback without changing
+  texture mapping or requiring engine support.
+- `DECOUPLED_LM` is a BSPX extension with explicit per-face dimensions and
+  world-to-lightmap vectors. Engines that implement it can use independently
+  expanded sample grids. The inspected ezQuake renderer applies the conventional
+  half-texel offset when converting those coordinates to texture UVs.
+- Support for `DECOUPLED_LM` in the user's Quake rerelease target is not
+  confirmed. Do not claim that this change fixes the rerelease or Ironwail
+  until the user tests the Enhanced export in the actual engines.
+
+### 0.21.13 implementation
+
+- Added `lightmap_export.add_half_luxel_edge_padding`. It builds a one-sample
+  rim around an eligible face grid by half-luxel resampling with edge clamping,
+  increases dimensions by two, and shifts the per-face projection origin by
+  +0.5 luxel on S and T. For classic-derived records this is represented by
+  moving `s_min` and `t_min` outward by half the selected luxel spacing; for
+  explicit decoupled records the two vector intercepts are increased by 0.5.
+- Integrated this rim only into the Enhanced `DECOUPLED_LM` sample payload.
+  The vanilla BSP29 fallback remains unchanged.
+- Added the `SLPG_LMPAD` BSPX marker (version byte 1) so importing and
+  re-exporting an already padded SLOPGATE BSP does not repeatedly add rims.
+- Faces whose width or height would exceed the per-face 256-luxel limit are
+  left unchanged. The export log reports padded and skipped counts.
+- Added pure-Python tests for sample interpolation, dimensions, classic and
+  explicit projection offsets, maximum dimensions and invalid RGB buffers.
+- Version metadata and README updated to 0.21.13.
+
+### Required manual validation
+
+1. Export a copy with **Enhanced** mode (not Classic) and inspect the resulting
+   BSPX `DECOUPLED_LM` plus `SLPG_LMPAD` entries.
+2. Compare the troublesome edge in the Quake rerelease. Confirm whether that
+   engine actually consumes `DECOUPLED_LM`; if it ignores the extension, the
+   classic fallback is intentionally unchanged.
+3. Open the same map in Ironwail. Expect no edge-rim change from this Enhanced
+   extension unless a future engine-side/format-specific path is added.
+4. Check ordinary face interiors for any visible half-luxel softening and
+   verify that no sample-grid overflow occurs on large faces.
+5. Blender GUI baking, rerelease runtime, and Ironwail runtime have not been
+   tested by the assistant.
+
