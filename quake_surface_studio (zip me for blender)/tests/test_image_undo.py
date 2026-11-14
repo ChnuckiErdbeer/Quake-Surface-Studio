@@ -101,6 +101,7 @@ class ImageUndoJournalTests(unittest.TestCase):
 
     def test_native_paint_between_operations_survives_undo_of_unrelated_image_edit(self):
         image_b = FakeImage("QSS_Painted_Texture_B", [0.1, 0.2, 0.3, 1.0] * 4)
+        self.images[image_b.name] = image_b
         first = self.journal.begin(self.obj, [self.image])
         self.image.pixels.foreach_set([0.7, 0.7, 0.7, 1.0] * 4)
         self.journal.commit(self.obj, [self.image], first)
