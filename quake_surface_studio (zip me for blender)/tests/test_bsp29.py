@@ -239,3 +239,68 @@ class FaceWindingTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
+
+
+class InlineBrushModelTests(unittest.TestCase):
+    def test_models_parse_face_ranges_and_face_ownership(self):
+        parsed = make_test_bsp()
+        face = parsed.lumps[bsp.LUMP_FACES]
+        model0 = struct.pack(
+            '<9f7i', 0, 0, 0, 64, 64, 64, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 1
+        )
+        model1 = struct.pack(
+            '<9f7i', -16, -16, -16, 16, 16, 16, 0, 0, 0,
+            0, 0, 0, 0, 0, 1, 1
+        )
+        lumps = list(parsed.lumps)
+        lumps[bsp.LUMP_FACES] = face + face
+        lumps[bsp.LUMP_MODELS] = model0 + model1
+        rebuilt = bsp.BSP29(parsed.write(lumps))
+        self.assertEqual(len(rebuilt.models()), 2)
+        self.assertEqual(rebuilt.face_model_ids(), [0, 1])
+
+    def test_model_face_range_rejects_out_of_bounds(self):
+        parsed = make_test_bsp()
+        bad_model = struct.pack(
+            '<9f7i', 0, 0, 0, 64, 64, 64, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 2
+        )
+        lumps = list(parsed.lumps)
+        lumps[bsp.LUMP_MODELS] = bad_model
+        rebuilt = bsp.BSP29(parsed.write(lumps))
+        with self.assertRaises(bsp.BSPError):
+            rebuilt.face_model_ids()
+
+    def test_inline_model_entity_references(self):
+        entities = [
+            {'classname': 'worldspawn', 'model': '*0'},
+            {'classname': 'func_door', 'model': '*1'},
+            {'classname': 'func_plat', 'model': '*2'},
+            {'classname': 'light', 'model': '*3'},
+            {'classname': 'func_train', 'model': 'not-an-inline-model'},
+        ]
+        self.assertEqual(
+            bsp.parse_inline_model_references(entities, 3),
+            [(1, 1), (2, 2)]
+        )
+
+    def test_inline_model_origin_and_yaw_transform(self):
+        point = bsp.transform_inline_model_position(
+            (10, 0, 0), {'origin': '100 200 300', 'angles': '0 90 0'}
+        )
+        for actual, expected in zip(point, (100, 210, 300)):
+            self.assertAlmostEqual(actual, expected, places=6)
+
+    def test_inline_model_rotation_and_origin_defaults(self):
+        self.assertEqual(
+            bsp.transform_inline_model_position((1, 2, 3), {}),
+            (1.0, 2.0, 3.0)
+        )
+        point = bsp.transform_inline_model_position(
+            (0, 1, 0), {'origin': '5 6 7', 'angles': '0 0 90'}
+        )
+        for actual, expected in zip(point, (5, 6, 8)):
+            self.assertAlmostEqual(actual, expected, places=6)
+
+
