@@ -25,10 +25,10 @@ from bpy.types import Operator, Panel, Menu
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
 from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils, map_sync, surface_policy
-from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils
+from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils
 
 
-ADDON_VERSION = (0, 21, 3)
+ADDON_VERSION = (0, 21, 4)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -8162,6 +8162,9 @@ class QSS_OT_bake_scene_lights(Operator):
             self.report({'ERROR'}, "Bake output scale is 0. Set it above 0 before baking.")
             return {'CANCELLED'}
 
+        bake_started_at = time.perf_counter()
+        cycles_duration_seconds = None
+
         # Use a new float atlas. The source atlas is never the bake target, so it
         # remains recoverable if Cycles fails or a material bake is incomplete.
         bake_target = bpy.data.images.new(
@@ -8391,11 +8394,16 @@ class QSS_OT_bake_scene_lights(Operator):
                 material_states.append((mat, output, old_surface, diffuse, target_node, old_target_image))
 
             _bake_progress(3, f'Running Cycles diffuse bake ({len(material_states)} materials, {int(image.size[0])}x{int(image.size[1])} atlas)')
-            with context.temp_override(
-                object=obj, active_object=obj, selected_objects=[obj],
-                selected_editable_objects=[obj]
-            ):
-                bake_result = bpy.ops.object.bake(type='DIFFUSE')
+            cycles_started_at = time.perf_counter()
+            try:
+                with context.temp_override(
+                    object=obj, active_object=obj, selected_objects=[obj],
+                    selected_editable_objects=[obj]
+                ):
+                    bake_result = bpy.ops.object.bake(type='DIFFUSE')
+            finally:
+                cycles_duration_seconds = max(0.0, time.perf_counter() - cycles_started_at)
+                obj['qss_last_bake_attempt_cycles_seconds'] = float(cycles_duration_seconds)
             obj['qss_last_bake_attempt_operator_result'] = ','.join(sorted(bake_result))
             _bake_progress(4, 'Cycles bake returned; validating sampled luxels and atlas coverage')
             if 'FINISHED' not in bake_result:
@@ -8530,6 +8538,12 @@ class QSS_OT_bake_scene_lights(Operator):
                     bpy.data.images.remove(old_previous_snapshot)
                 except Exception:
                     pass
+            bake_elapsed_seconds = max(0.0, time.perf_counter() - bake_started_at)
+            obj['qss_last_bake_duration_seconds'] = float(bake_elapsed_seconds)
+            obj['qss_last_bake_cycles_seconds'] = (
+                float(cycles_duration_seconds) if cycles_duration_seconds is not None else 0.0
+            )
+            obj['qss_last_bake_attempt_duration_seconds'] = float(bake_elapsed_seconds)
             _qss_log('INFO', 'bake', f"Completed: {updated_lights} lights, {len(material_states)} materials, "
                      f"{raw_face_coverage['lit_faces']}/{raw_face_coverage['total_faces']} faces lit; "
                      f"mean={obj['qss_last_bake_luxel_mean']:.5g}, atlas_scale={post_scale:.5g}")
@@ -8544,7 +8558,9 @@ class QSS_OT_bake_scene_lights(Operator):
                         f"mean {obj['qss_last_bake_luxel_mean']:.4g}, "
                         f"max {obj['qss_last_bake_luxel_max']:.4g}, "
                         f"raw mean {raw_bake_mean:.4g}, source mean {source_mean:.4g}, "
-                        f"atlas scale {post_scale:.4g}, {bake_bounces} diffuse bounces. "
+                        f"atlas scale {post_scale:.4g}, {bake_bounces} diffuse bounces; "
+                        f"total {bake_stats_utils.format_duration(bake_elapsed_seconds)} "
+                        f"(Cycles {bake_stats_utils.format_duration(cycles_duration_seconds)}). "
                         "Switches to Baked Lightmaps preview.")
         except Exception as exc:
             try:
@@ -8562,6 +8578,15 @@ class QSS_OT_bake_scene_lights(Operator):
             self.report({'ERROR'}, f"Cycles bake failed; atlas and light calibration restored: {exc}")
             return {'CANCELLED'}
         finally:
+            try:
+                final_attempt_duration = max(0.0, time.perf_counter() - bake_started_at)
+                obj['qss_last_bake_attempt_duration_seconds'] = float(final_attempt_duration)
+                if bake_succeeded:
+                    obj['qss_last_bake_duration_seconds'] = float(final_attempt_duration)
+                    if cycles_duration_seconds is not None:
+                        obj['qss_last_bake_cycles_seconds'] = float(cycles_duration_seconds)
+            except Exception:
+                pass
             for mat, output, old_surface, diffuse, target_node, old_target_image in material_states:
                 links = mat.node_tree.links
                 for link in list(links):
@@ -9737,6 +9762,8 @@ def _qss_diagnostics_text(context, obj):
         f'Light energy scale: {getattr(context.scene, "qss_light_energy_scale", -1)}',
         f'Source-match calibration: {obj.get("qss_light_energy_calibration", 1.0)}',
         f'Last bake: raw_mean={obj.get("qss_last_bake_raw_mean", "n/a")} source_mean={obj.get("qss_last_bake_source_mean", "n/a")} atlas_mean={obj.get("qss_last_bake_luxel_mean", "n/a")} max={obj.get("qss_last_bake_luxel_max", "n/a")} normalization={obj.get("qss_last_bake_output_scale", "n/a")}',
+        f'Last successful bake timing: total={bake_stats_utils.format_duration(obj.get("qss_last_bake_duration_seconds"))}; Cycles operator={bake_stats_utils.format_duration(obj.get("qss_last_bake_cycles_seconds"))}',
+        f'Last bake attempt timing: total={bake_stats_utils.format_duration(obj.get("qss_last_bake_attempt_duration_seconds"))}; Cycles operator={bake_stats_utils.format_duration(obj.get("qss_last_bake_attempt_cycles_seconds"))}',
         f'Last attempted bake: scale={obj.get("qss_last_bake_attempt_scale", "n/a")} max_lamp_energy={obj.get("qss_last_bake_attempt_max_lamp_energy", "n/a")} sampled_luxels={obj.get("qss_last_bake_attempt_sample_count", "n/a")} sampled_mean={obj.get("qss_last_bake_attempt_raw_mean", "n/a")} image_stats={obj.get("qss_last_bake_attempt_image_stats", "n/a")}',
         f'Last attempted face coverage (raw bake): {obj.get("qss_last_bake_attempt_face_coverage", "n/a")}',
         f'Last Cycles bake operator result: {obj.get("qss_last_bake_attempt_operator_result", "n/a")}',
@@ -10493,6 +10520,8 @@ def _qss_rebuild_map_lightmap_resolution(obj, resolution):
         "qss_last_bake_energy_scale", "qss_last_bake_output_scale",
         "qss_last_bake_raw_mean", "qss_last_bake_source_mean",
         "qss_last_bake_calibration", "qss_last_bake_bounces",
+        "qss_last_bake_duration_seconds", "qss_last_bake_cycles_seconds",
+        "qss_last_bake_attempt_duration_seconds", "qss_last_bake_attempt_cycles_seconds",
     ):
         if key in obj:
             del obj[key]
