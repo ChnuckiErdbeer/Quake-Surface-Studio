@@ -321,3 +321,46 @@ class InlineBrushModelTests(unittest.TestCase):
             self.assertAlmostEqual(actual, expected, places=6)
 
 
+
+
+    def test_inline_model_shadow_defaults_off_for_any_custom_classname(self):
+        self.assertEqual(
+            bsp.inline_model_shadow_policy({
+                'classname': 'mod_secret_door', 'model': '*1'
+            }),
+            'none'
+        )
+
+    def test_inline_model_shadow_key_enables_full_shadow_casting(self):
+        self.assertEqual(
+            bsp.inline_model_shadow_policy({
+                'classname': 'mod_secret_door', 'model': '*1', '_shadow': '1'
+            }),
+            'all'
+        )
+
+    def test_inline_model_shadow_minus_one_disables_shadow_casting(self):
+        self.assertEqual(
+            bsp.inline_model_shadow_policy({
+                'classname': 'func_detail', 'model': '*1', '_shadow': '-1'
+            }),
+            'none'
+        )
+
+    def test_inline_model_special_shadow_modes_are_preserved_as_policy(self):
+        self.assertEqual(
+            bsp.inline_model_shadow_policy({'_shadowself': '1'}), 'self'
+        )
+        self.assertEqual(
+            bsp.inline_model_shadow_policy({'_shadowworldonly': '1'}), 'world_only'
+        )
+        self.assertEqual(
+            bsp.inline_model_shadow_policy({'_switchableshadow': '1'}), 'switchable'
+        )
+
+    def test_inline_model_single_angle_is_not_initial_rotation_in_inverse(self):
+        point = bsp.inverse_transform_inline_model_position(
+            (10, 0, 0), {'origin': '0 0 0', 'angle': '90'}
+        )
+        for actual, expected in zip(point, (10, 0, 0)):
+            self.assertAlmostEqual(actual, expected, places=6)
