@@ -304,11 +304,11 @@ class InlineBrushModelTests(unittest.TestCase):
             self.assertAlmostEqual(actual, expected, places=6)
 
 
-    def test_inline_model_scalar_angle_is_yaw(self):
+    def test_inline_model_scalar_angle_is_mover_travel_not_orientation(self):
         point = bsp.transform_inline_model_position(
             (10, 0, 0), {'origin': '0 0 0', 'angle': '90'}
         )
-        for actual, expected in zip(point, (0, 10, 0)):
+        for actual, expected in zip(point, (10, 0, 0)):
             self.assertAlmostEqual(actual, expected, places=6)
 
 
