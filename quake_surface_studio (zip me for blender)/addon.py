@@ -8578,15 +8578,6 @@ class QSS_OT_bake_scene_lights(Operator):
             self.report({'ERROR'}, f"Cycles bake failed; atlas and light calibration restored: {exc}")
             return {'CANCELLED'}
         finally:
-            try:
-                final_attempt_duration = max(0.0, time.perf_counter() - bake_started_at)
-                obj['qss_last_bake_attempt_duration_seconds'] = float(final_attempt_duration)
-                if bake_succeeded:
-                    obj['qss_last_bake_duration_seconds'] = float(final_attempt_duration)
-                    if cycles_duration_seconds is not None:
-                        obj['qss_last_bake_cycles_seconds'] = float(cycles_duration_seconds)
-            except Exception:
-                pass
             for mat, output, old_surface, diffuse, target_node, old_target_image in material_states:
                 links = mat.node_tree.links
                 for link in list(links):
@@ -8680,6 +8671,15 @@ class QSS_OT_bake_scene_lights(Operator):
                     progress_workspace.status_text_set(None)
                 except Exception:
                     pass
+            try:
+                final_attempt_duration = max(0.0, time.perf_counter() - bake_started_at)
+                obj['qss_last_bake_attempt_duration_seconds'] = float(final_attempt_duration)
+                if bake_succeeded:
+                    obj['qss_last_bake_duration_seconds'] = float(final_attempt_duration)
+                    if cycles_duration_seconds is not None:
+                        obj['qss_last_bake_cycles_seconds'] = float(cycles_duration_seconds)
+            except Exception:
+                pass
 
         if bake_succeeded:
             try:
