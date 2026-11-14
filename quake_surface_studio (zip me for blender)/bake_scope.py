@@ -202,6 +202,83 @@ def dilate_rgba_gutters(pixels, image_width: int, image_height: int, core_rectan
     return changed
 
 
+
+def collapse_rgba_luxel_blocks(
+    pixels,
+    image_width: int,
+    image_height: int,
+    core_rectangles,
+    block_size: int,
+):
+    """Make every supersampled Quake luxel block hold one centre-sampled value.
+
+    Cycles renders into a higher-resolution working atlas. A Quake lightmap,
+    however, stores one value per luxel. Retaining small per-pixel variations
+    inside a luxel block makes the Blender preview look softer than the data
+    that will be written back to BSP. This reduces each block at its geometric
+    centre (bilinear 2x2 centre for even-sized blocks) and replicates that
+    value across the block.
+
+    Rectangles are bottom-up core pixel bounds with exclusive upper limits.
+    Gutters and pixels outside the supplied face cores are never modified.
+    Returns the number of luxel blocks processed.
+    """
+    width, height = int(image_width), int(image_height)
+    block = int(block_size)
+    expected = width * height * 4
+    if width <= 0 or height <= 0 or len(pixels) != expected:
+        raise ValueError("RGBA pixel buffer does not match the supplied image dimensions.")
+    if block < 1:
+        raise ValueError("Luxel block size must be at least one pixel.")
+
+    regions = []
+    for rectangle in core_rectangles:
+        if len(rectangle) != 4:
+            raise ValueError("Each face core rectangle must contain four coordinates.")
+        x0, y0, x1, y1 = (int(value) for value in rectangle)
+        if x0 < 0 or y0 < 0 or x1 > width or y1 > height or x1 <= x0 or y1 <= y0:
+            raise ValueError("A face core rectangle lies outside the image or is empty.")
+        if (x1 - x0) % block or (y1 - y0) % block:
+            raise ValueError("Face core dimensions must be exact multiples of the luxel block size.")
+        regions.append((x0, y0, x1, y1))
+
+    for index, rect_a in enumerate(regions):
+        ax0, ay0, ax1, ay1 = rect_a
+        for rect_b in regions[index + 1:]:
+            bx0, by0, bx1, by1 = rect_b
+            if ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1:
+                raise ValueError("Face core rectangles overlap; atlas metadata is inconsistent.")
+
+    centre = ((block - 1) // 2, block // 2)
+    processed = 0
+    for x0, y0, x1, y1 in regions:
+        for by in range(y0, y1, block):
+            for bx in range(x0, x1, block):
+                # An even-sized block has its exact centre between four pixels.
+                # Averaging those four is a bilinear point sample at that centre;
+                # it is deliberately not an average of the whole block.
+                sample = [0.0, 0.0, 0.0, 0.0]
+                sample_count = 0
+                for sy in set(centre):
+                    for sx in set(centre):
+                        offset = ((by + sy) * width + bx + sx) * 4
+                        for channel in range(4):
+                            sample[channel] += float(pixels[offset + channel])
+                        sample_count += 1
+                inverse_count = 1.0 / sample_count
+                sample = [value * inverse_count for value in sample]
+                for py in range(by, by + block):
+                    offset = (py * width + bx) * 4
+                    for _px in range(bx, bx + block):
+                        pixels[offset] = sample[0]
+                        pixels[offset + 1] = sample[1]
+                        pixels[offset + 2] = sample[2]
+                        pixels[offset + 3] = sample[3]
+                        offset += 4
+                processed += 1
+    return processed
+
+
 def scale_rgba_regions(pixels, image_width: int, image_height: int, rectangles, factor: float):
     """Scale RGB only within selected atlas rectangles; leave other pixels intact.
 
@@ -234,4 +311,5 @@ __all__ = [
     "scale_rgba_regions",
     "merge_rgba_regions",
     "dilate_rgba_gutters",
+    "collapse_rgba_luxel_blocks",
 ]
