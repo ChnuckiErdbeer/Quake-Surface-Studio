@@ -7946,7 +7946,7 @@ class QSS_OT_bake_scene_lights(Operator):
         return self.execute(context)
 
     def execute(self, context):
-        """Run the full or partial map bake in Object Mode, restoring user state."""
+        """Bake the whole map or selected receiver faces, then restore Blender selection and mode."""
         obj = context.object
         original_mode = getattr(obj, "mode", "OBJECT") if obj is not None else "OBJECT"
         if original_mode not in {"OBJECT", "EDIT"}:
