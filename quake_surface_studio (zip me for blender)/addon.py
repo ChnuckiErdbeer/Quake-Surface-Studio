@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import array
 import hashlib
+import json
 from functools import lru_cache
 import math
 import os
@@ -3818,6 +3819,13 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
             if any(v < 0 or v >= len(vertices) for v in vertex_ids):
                 continue
             positions = [vertices[v] for v in vertex_ids]
+            model_id = int(face_model_ids[face_id])
+            entity_index = model_entity_indices.get(model_id)
+            model_entity = (
+                bsp_entities[entity_index]
+                if entity_index is not None and 0 <= entity_index < len(bsp_entities)
+                else None
+            )
             plane_id = int(face[0])
             if plane_id < 0 or plane_id >= len(planes):
                 raise bsp.BSPError(f"BSP face {face_id} references invalid plane {plane_id}.")
@@ -3834,7 +3842,14 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
             # BSP positions remain in raw Quake units in imported_vertex_positions
             # for texinfo/lightmap maths. Blender mesh coordinates are converted
             # to metres (1 Quake unit ~= 1 inch) for usable viewport navigation.
-            mesh_vertices.extend(_quake_to_blender_position(p, unit_scale, flip_z) for p in positions)
+            display_positions = (
+                [bsp.transform_inline_model_position(p, model_entity) for p in positions]
+                if model_entity is not None else positions
+            )
+            mesh_vertices.extend(
+                _quake_to_blender_position(p, unit_scale, flip_z)
+                for p in display_positions
+            )
             mesh_faces.append(list(range(start, start + len(positions))))
             imported_vertex_positions.append(positions)
             texinfo_id = face[4]
@@ -3917,6 +3932,11 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
     obj['qss_inline_model_entity_map'] = json.dumps({
         str(model_index): int(entity_index)
         for model_index, entity_index in model_entity_indices.items()
+    }, sort_keys=True)
+    obj['qss_inline_model_entities'] = json.dumps({
+        str(model_index): bsp_entities[entity_index]
+        for model_index, entity_index in model_entity_indices.items()
+        if 0 <= entity_index < len(bsp_entities)
     }, sort_keys=True)
     obj['qss_inline_model_face_counts'] = json.dumps({
         str(model_index): int(imported_model_ids.count(model_index))
@@ -10501,12 +10521,31 @@ def _qss_rebuild_map_lightmap_resolution(obj, resolution):
     face_ids = [int(item.value) for item in face_ids_attr.data]
     texinfo_ids = [int(item.value) for item in texinfo_attr.data]
     positions_by_face = []
+    model_ids_attr = mesh.attributes.get("qss_bsp_model_id")
+    try:
+        inline_model_entities = json.loads(obj.get("qss_inline_model_entities", "{}"))
+    except (TypeError, ValueError):
+        inline_model_entities = {}
     for poly in mesh.polygons:
+        model_id = (
+            int(model_ids_attr.data[poly.index].value)
+            if model_ids_attr is not None and poly.index < len(model_ids_attr.data)
+            else 0
+        )
+        model_entity = inline_model_entities.get(str(model_id))
         positions = []
         for vertex_index in poly.vertices:
             co = mesh.vertices[vertex_index].co
             z = -float(co.z) if flip_z else float(co.z)
-            positions.append((float(co.x) / unit_scale, float(co.y) / unit_scale, z / unit_scale))
+            world_position = (
+                float(co.x) / unit_scale,
+                float(co.y) / unit_scale,
+                z / unit_scale,
+            )
+            positions.append(
+                bsp.inverse_transform_inline_model_position(world_position, model_entity)
+                if isinstance(model_entity, dict) else world_position
+            )
         positions_by_face.append(positions)
     source_lit_path = os.path.splitext(source_path)[0] + ".lit"
     source_lit_rgb, _ = bsp.resolve_rgb_lighting(parsed.bspx_lumps, parsed.lumps[bsp.LUMP_LIGHTING], source_lit_path)
