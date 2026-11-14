@@ -1,10 +1,10 @@
 bl_info = {
-    "name": "Quake Surface Studio",
+    "name": "SLOPGATE",
     "author": "OpenAI",
-    "version": (0, 11, 0),
+    "version": (0, 21, 12),
     "blender": (3, 6, 0),
-    "location": "View3D > Sidebar > Quake",
-    "description": "Paint Quake BSP29 textures and lightmaps; preview entity lights and BSPX RGB lighting",
+    "location": "View3D > Sidebar > SLOPGATE",
+    "description": "Quake BSP editing, texture painting, lighting, map audits and engine integration",
     "category": "Import-Export",
 }
 

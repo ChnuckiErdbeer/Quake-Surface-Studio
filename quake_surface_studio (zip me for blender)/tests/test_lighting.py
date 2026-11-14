@@ -53,6 +53,16 @@ class LightingHelpersTests(unittest.TestCase):
         combined = lighting.combine_style_samples(mono, rgb, 0, 2, [0, 2, 255])
         self.assertEqual(combined, [(10, 0, 30), (20, 0, 40)])
 
+    def test_combine_style_samples_respects_face_style_slot_order(self):
+        # For a face with styles [2, 0], the first sample plane is style 2,
+        # even though style 0 is numerically lower. Weights expose slot swaps.
+        mono = bytes((0, 0, 0, 0))
+        rgb = bytes((10, 0, 0, 20, 0, 0, 0, 0, 30, 0, 0, 40))
+        combined = lighting.combine_style_samples(
+            mono, rgb, 0, 2, [2, 0, 255, 255], {2: 0.5, 0: 1.0}
+        )
+        self.assertEqual(combined, [(5, 0, 30), (10, 0, 40)])
+
     def test_combine_style_samples_weights_and_clamps(self):
         rgb = bytes((200, 10, 10, 100, 20, 20))
         combined = lighting.combine_style_samples(b'\x00\x00', rgb, 0, 1, [0, 2], {0: 1.0, 2: 0.5})
@@ -83,6 +93,119 @@ class LightingHelpersTests(unittest.TestCase):
             lighting.extract_rgb_samples(bytes(6), 1, 2)
         with self.assertRaises(ValueError):
             lighting.extract_rgb_samples(bytes(6), -1, 1)
+
+
+class BlenderLivePreviewCalibrationTests(unittest.TestCase):
+    def test_cycles_margin_scales_with_atlas_resolution(self):
+        self.assertEqual(lighting.lightmap_bake_margin_pixels(2, 1), 2)
+        self.assertEqual(lighting.lightmap_bake_margin_pixels(2, 4), 8)
+        self.assertEqual(lighting.lightmap_bake_margin_pixels(0, 8), 0)
+
+    def test_cycles_margin_rejects_invalid_values(self):
+        with self.assertRaises(ValueError):
+            lighting.lightmap_bake_margin_pixels(-1, 1)
+        with self.assertRaises(ValueError):
+            lighting.lightmap_bake_margin_pixels(2, 0)
+
+    def test_delay_two_preview_is_inverse_square_calibrated(self):
+        result = lighting.blender_live_light_preview_parameters(
+            300, 300, 2, wait=1, world_dist=1, unit_scale=0.0254
+        )
+        reference = 128 * 0.0254
+        self.assertAlmostEqual(result['energy'], 300 * reference ** 2)
+        self.assertEqual(result['profile'], 'delay2_inverse_square_exact')
+        # At the ericw 128-unit reference distance, native E/r^2 is 300.
+        self.assertAlmostEqual(result['energy'] / reference ** 2, 300)
+
+    def test_delay_zero_default_radius_uses_inverse_wait_and_world_dist(self):
+        result = lighting.blender_live_light_preview_parameters(
+            300, 300, 0, wait=2, world_dist=1.5, unit_scale=0.01
+        )
+        expected_radius = 300 / (2 * 1.5) * 0.01
+        self.assertAlmostEqual(result['cutoff_distance'], expected_radius)
+        self.assertAlmostEqual(result['energy'], 300 * expected_radius ** 2 / 8)
+
+    def test_delay_zero_honours_explicit_falloff_radius(self):
+        result = lighting.blender_live_light_preview_parameters(
+            300, 300, 0, wait=9, world_dist=2, falloff=100, unit_scale=0.01
+        )
+        self.assertAlmostEqual(result['cutoff_distance'], 2.0)
+        self.assertEqual(result['profile'], 'delay0_linear_midpoint_approximation')
+
+    def test_delay_one_and_five_use_reference_calibrations(self):
+        inverse = lighting.blender_live_light_preview_parameters(200, 200, 1, unit_scale=0.01)
+        soft = lighting.blender_live_light_preview_parameters(200, 200, 5, unit_scale=0.01)
+        self.assertAlmostEqual(inverse['energy'], 200 * 1.28 ** 2)
+        self.assertAlmostEqual(soft['energy'], inverse['energy'] / 4.0)
+        self.assertGreater(soft['shadow_soft_size'], inverse['shadow_soft_size'])
+
+    def test_cycles_delay_zero_correction_reconstructs_ericw_linear_curve(self):
+        raw = 300.0
+        world_range = 0.5
+        wait = 0.75
+        world_dist = 1.4
+        unit_scale = 0.0254
+
+        for falloff in (0.0, 150.0):
+            radius = (
+                falloff * world_dist
+                if falloff > 0.0
+                else raw / (wait * world_dist)
+            )
+            base_energy = raw * world_range * (radius * unit_scale) ** 2 / 8.0
+            distances = (8.0, 24.0, 64.0, 128.0, radius * 0.5, radius, radius * 1.2)
+            for distance in distances:
+                if distance <= 0.0:
+                    continue
+                native_inverse_square = base_energy / (distance * unit_scale) ** 2
+                correction = lighting.ericw_cycles_light_falloff_correction(
+                    0, distance, raw, wait, world_dist, falloff
+                )
+                reconstructed = native_inverse_square * correction
+                expected = (
+                    lighting.ericw_light_value( raw, 0, distance, wait, world_dist, falloff)
+                    * world_range
+                )
+                self.assertAlmostEqual(reconstructed, expected, places=7)
+
+    def test_cycles_delay_five_correction_reconstructs_ericw_soft_inverse_square(self):
+        raw = 300.0
+        world_range = 0.5
+        wait = 0.8
+        world_dist = 1.3
+        unit_scale = 0.0254
+        reference_quake = 128.0 / (wait * world_dist)
+        reference_blender = reference_quake * unit_scale
+        base_energy = raw * world_range * reference_blender ** 2 / 4.0
+
+        for distance in (1.0, 8.0, 24.0, 64.0, 128.0, 256.0, 512.0, 1024.0):
+            native_inverse_square = base_energy / (distance * unit_scale) ** 2
+            correction = lighting.ericw_cycles_light_falloff_correction(
+                5, distance, raw, wait, world_dist
+            )
+            reconstructed = native_inverse_square * correction
+            expected = (
+                lighting.ericw_light_value(raw, 5, distance, wait, world_dist)
+                * world_range
+            )
+            self.assertAlmostEqual(reconstructed, expected, places=7)
+
+    def test_cycles_falloff_correction_leaves_other_delays_unchanged(self):
+        for delay in (1, 2, 3, 4):
+            self.assertEqual(
+                lighting.ericw_cycles_light_falloff_correction(
+                    delay, 64.0, 300.0
+                ),
+                1.0,
+            )
+
+    def test_delay_three_and_four_are_labelled_as_unmatched_fallbacks(self):
+        constant = lighting.blender_live_light_preview_parameters(100, 100, 3)
+        minlight = lighting.blender_live_light_preview_parameters(100, 100, 4)
+        self.assertIn('fallback', constant['profile'])
+        self.assertIn('fallback', minlight['profile'])
+        self.assertEqual(constant['energy'], 100)
+        self.assertEqual(minlight['energy'], 100)
 
 
 if __name__ == '__main__':
@@ -227,6 +350,48 @@ class EricwLuxelEvaluationTests(unittest.TestCase):
         )
         # The larger additive contribution wins; the local-minlight does not add.
         self.assertAlmostEqual(result[0], baseline[0])
+
+    def test_local_minlight_ignores_anglescale_and_spotlight_cone(self):
+        minlight = self._light(
+            delay=4, value=100, color=(1, 0, 1), anglescale=1.0,
+            is_spot=True, direction=(0, 0, 1), outer_angle=10,
+        )
+        result = lighting.evaluate_quake_luxel(
+            (0, 0, 0), (1, 0, 0), [minlight], [0], world_range=1.0
+        )
+        self.assertAlmostEqual(result[0], 100 / 255.0)
+        self.assertEqual(result[1], 0.0)
+        self.assertAlmostEqual(result[2], 100 / 255.0)
+
+    def test_local_minlight_skips_clamp_when_existing_average_is_high_enough(self):
+        bright_red = self._light(
+            delay=3, value=300, color=(1, 0, 0), anglescale=0.0
+        )
+        white_minlight = self._light(
+            delay=4, value=100, color=(1, 1, 1), anglescale=1.0
+        )
+        result = lighting.evaluate_quake_luxel(
+            (0, 0, 0), (0, 0, 1), [bright_red, white_minlight], [0],
+            world_range=1.0,
+        )
+        # Mean brightness is exactly 100, so ericw's strict '< threshold'
+        # condition skips the white clamp and leaves the red contribution alone.
+        self.assertEqual(result, (1.0, 0.0, 0.0))
+
+    def test_local_minlight_clamps_channels_only_when_average_is_below_threshold(self):
+        dim_red = self._light(
+            delay=3, value=150, color=(1, 0, 0), anglescale=0.0
+        )
+        white_minlight = self._light(
+            delay=4, value=100, color=(1, 1, 1), anglescale=0.0
+        )
+        result = lighting.evaluate_quake_luxel(
+            (0, 0, 0), (0, 0, 1), [dim_red, white_minlight], [0],
+            world_range=1.0,
+        )
+        self.assertAlmostEqual(result[0], 150 / 255.0)
+        self.assertAlmostEqual(result[1], 100 / 255.0)
+        self.assertAlmostEqual(result[2], 100 / 255.0)
 
     def test_spotlight_cone_rejects_sample_behind_cone(self):
         spot = self._light(is_spot=True, direction=(0, 0, -1), outer_angle=40)

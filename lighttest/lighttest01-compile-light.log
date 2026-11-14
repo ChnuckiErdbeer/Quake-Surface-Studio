@@ -1,0 +1,43 @@
+---- light / ericw-tools 2.0.0-alpha11 ----
+LoadBSPFile: '/mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.bsp'
+BSP is version Quake BSP bsp29
+INFO: using built-in palette.
+Loading extended texinfo flags from /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.texinfo.json...
+Loading extended content flags from /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.content.json...
+20 entities read, 18 are lights.
+
+--- Options Summary ---
+    "dirt" was set to "1" (from command line)
+    "minlight_dirt" was set to "1" (from command line)
+    "phong" was set to "1" (from command line)
+    "bounce" was set to "1" (from command line)
+    "surflightscale" was set to "0.700000" (from command line)
+    "sunlight_dirt" was set to "1.000000" (from command line)
+    "sunlight2_dirt" was set to "1.000000" (from command line)
+    "surflight_subdivide" was set to "64.000000" (from command line)
+    "soft" was set to "2" (from command line)
+    "extra" was set to "4" (from command line)
+
+Embree_TraceInit: Embree version: 4.4.0
+Embree_TraceInit: 
+	0 sky faces
+	4727 solid faces
+	0 filtered faces
+	0 shadow-casting skip faces
+SetupLights: 18 initial lights
+SetupLights: 18 after surface lights
+SetupLights: 18 after jittering
+Final count: 18 lights, 0 suns in use.
+       48 dirtmap vectors
+0 surface light points in use.
+WARNING: a face has exceeded max light styles (4). Use -verbose to find which faces.
+map uses color: false
+lightmap size (total): 930152
+Lighting Completed.
+
+15 switchable light styles (32 max)
+Writing /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.bsp as Quake BSP bsp29
+9.849s seconds elapsed
+0 empty lightmaps
+
+

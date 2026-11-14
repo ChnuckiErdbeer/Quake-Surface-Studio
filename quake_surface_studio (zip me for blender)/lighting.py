@@ -206,6 +206,71 @@ def ericw_light_value(light_value: float, delay: int, distance: float,
     return min(0.0, light + value)
 
 
+def ericw_cycles_light_falloff_correction(
+    delay: int,
+    distance: float,
+    raw_light_value: float,
+    wait: float = 1.0,
+    world_dist: float = 1.0,
+    falloff: float = 0.0,
+) -> float:
+    """Correct a calibrated inverse-square Cycles lamp to ericw delay 0 or 5.
+
+    The existing Blender lamp-energy calibration deliberately matches each
+    profile at one reference distance:
+      * delay 0: the midpoint of its finite linear radius (energy = I*R^2/8)
+      * delay 5: the ericw 128/(wait*world_dist) reference distance (energy = I*R^2/4)
+
+    Cycles' Light Falloff node exposes both 1/d and 1/d^2. Their ratio recovers
+    distance, allowing the light shader to multiply the native inverse-square
+    result by this correction. Distances and radius are in Quake map units.
+    The return value is a dimensionless multiplier; other delays are unchanged.
+    """
+    import math
+
+    try:
+        mode = int(delay)
+        dist = max(0.0, float(distance))
+        wait_value = max(1e-6, float(wait))
+        dist_scale = max(1e-6, float(world_dist))
+        raw_intensity = abs(float(raw_light_value))
+        falloff_radius = max(0.0, float(falloff))
+    except (TypeError, ValueError, OverflowError):
+        return 1.0
+
+    if not all(math.isfinite(value) for value in (
+        dist, wait_value, dist_scale, raw_intensity, falloff_radius
+    )):
+        return 1.0
+
+    if mode == 0:
+        radius = (
+            falloff_radius * dist_scale
+            if falloff_radius > 0.0
+            else raw_intensity / (wait_value * dist_scale)
+        )
+        if radius <= 1e-12:
+            return 0.0
+        normalized_distance = dist / radius
+        # Exact ratio between ericw's max(0, 1-d/R) and the existing
+        # inverse-square lamp whose energy is calibrated at d=R/2.
+        return 8.0 * normalized_distance * normalized_distance * max(
+            0.0, 1.0 - normalized_distance
+        )
+
+    if mode == 5:
+        scaled_distance = wait_value * dist_scale * dist
+        denominator = scaled_distance + ERICW_LIGHT_SCALE
+        if denominator <= 1e-12:
+            return 0.0
+        # Exact ratio between ericw's shifted inverse-square curve and the
+        # existing lamp calibrated to L/4 at d=128/(wait*world_dist).
+        ratio = scaled_distance / denominator
+        return 4.0 * ratio * ratio
+
+    return 1.0
+
+
 def ericw_surface_angle(normal_dot_to_light: float, anglescale: float = 0.5,
                         bleed: bool = False) -> float:
     """Lambert/incidence factor used by ericw-tools for a receiving surface."""
@@ -282,16 +347,15 @@ def evaluate_quake_luxel(sample_position, surface_normal, lights, active_styles,
                           contribution_gate: float = 0.001):
     """Evaluate static direct ericw-style lighting for one BSP luxel.
 
-    `sample_position`, `surface_normal`, light origins and spot directions use
-    raw Quake map units / Quake Z-up coordinates. Each light is a mapping with
-    origin, value, color, style, delay, wait, falloff, anglescale, direction,
-    outer_angle, inner_angle and nostaticlight keys.
+    This mirrors the ericw-tools direct-light and local-minlight passes for
+    point/spot entity lights. Delay 4 is deliberately processed after ordinary
+    direct contributions: it ignores surface incidence and spotlight cones,
+    checks the average brightness of the existing style sample, and clamps
+    each RGB channel only when the sample is below the light threshold.
 
-    This implements point/spot direct lighting only. `delay=4` contributes a
-    channel-wise local-minlight clamp, not additive energy. `visible(light,
-    sample_position, surface_normal)` may be supplied by a geometry ray caster.
-    The function is Blender-independent so its attenuation and style behavior
-    can be regression-tested without Blender.
+    `sample_position`, `surface_normal`, light origins and spot directions
+    use raw Quake map units / Quake Z-up coordinates. A `visible(light,
+    sample_position, surface_normal)` callback may supply line-of-sight tests.
     """
     import math
 
@@ -309,7 +373,10 @@ def evaluate_quake_luxel(sample_position, surface_normal, lights, active_styles,
         return (0.0, 0.0, 0.0)
 
     additive = {style: [0.0, 0.0, 0.0] for style in style_set}
-    local_min = {style: [0.0, 0.0, 0.0] for style in style_set}
+    local_min_lights = {style: [] for style in style_set}
+
+    # First pass: ordinary point/spot lights. ericw handles delay 4 in a
+    # separate local-minlight pass after normal direct lighting is accumulated.
     for light in lights:
         if bool(light.get('nostaticlight', False)):
             continue
@@ -324,16 +391,27 @@ def evaluate_quake_luxel(sample_position, surface_normal, lights, active_styles,
         else:
             direction_to_light = tuple(v / distance for v in delta)
 
+        delay = int(light.get('delay', 0))
+        intensity = float(light.get('value', 300.0)) * max(0.0, float(energy_scale))
+        colour = tuple(max(0.0, float(v)) for v in light.get('color', (1.0, 1.0, 1.0))[:3])
+
+        if delay == 4:
+            # LF_LOCALMIN is not an additive point-light contribution. Defer
+            # it until after the normal lights have populated this style.
+            local_min_lights[style].append((light, intensity, colour))
+            continue
+
         incidence = sum(normal[i] * direction_to_light[i] for i in range(3))
-        bleed = bool(light.get('bleed', False))
         angle_factor = ericw_surface_angle(
-            incidence, float(light.get('anglescale', 0.5)), bleed=bleed
+            incidence, float(light.get('anglescale', 0.5)),
+            bleed=bool(light.get('bleed', False))
         )
         if angle_factor <= 0.0:
             continue
         if visible is not None and not visible(light, sample, normal):
             continue
 
+        cone_factor = 1.0
         if bool(light.get('is_spot', False)):
             spot_dir = tuple(float(v) for v in light.get('direction', (0.0, 0.0, -1.0))[:3])
             spot_len = math.sqrt(sum(v * v for v in spot_dir))
@@ -349,35 +427,149 @@ def evaluate_quake_luxel(sample_position, surface_normal, lights, active_styles,
             )
             if cone_factor <= 0.0:
                 continue
-        else:
-            cone_factor = 1.0
 
-        intensity = float(light.get('value', 300.0)) * max(0.0, float(energy_scale))
-        falloff = float(light.get('falloff', 0.0))
-        wait = float(light.get('wait', 1.0))
         amount = ericw_light_value(
-            intensity, int(light.get('delay', 0)), distance, wait,
-            float(world_dist), falloff
+            intensity, delay, distance,
+            float(light.get('wait', 1.0)), float(world_dist),
+            float(light.get('falloff', 0.0))
         ) * angle_factor * cone_factor
         if abs(amount) < gate or abs(amount) <= 0.0:
             continue
-        colour = tuple(max(0.0, float(v)) for v in light.get('color', (1.0, 1.0, 1.0))[:3])
-        target = local_min[style] if int(light.get('delay', 0)) == 4 else additive[style]
         for channel in range(3):
-            value = amount * (colour[channel] if channel < len(colour) else 1.0)
-            if int(light.get('delay', 0)) == 4:
-                # ericw delay 4 is a local minlight cap. Keep the largest cap
-                # per channel; it does not add to the regular light sum.
-                target[channel] = max(target[channel], value)
-            else:
-                target[channel] += value
+            component = colour[channel] if channel < len(colour) else 1.0
+            additive[style][channel] += amount * component
 
+    # Second pass: ericw's LightFace_LocalMin. Its brightness test is the
+    # arithmetic RGB mean of the already accumulated style sample. If below
+    # the entity's light value, a visible sample is clamped per channel to
+    # light * colour. It does not use _anglescale or a spotlight cone.
     total = [0.0, 0.0, 0.0]
     for style in style_set:
-        values = [max(additive[style][c], local_min[style][c]) for c in range(3)]
+        values = additive[style]
+        for light, threshold, colour in local_min_lights[style]:
+            if (values[0] + values[1] + values[2]) / 3.0 >= threshold:
+                continue
+            if visible is not None and not visible(light, sample, normal):
+                continue
+            for channel in range(3):
+                component = colour[channel] if channel < len(colour) else 1.0
+                values[channel] = max(values[channel], threshold * component)
         for channel in range(3):
             total[channel] += values[channel]
+
     return ericw_postprocess_rgb(
         total, range_scale=float(world_range), gamma=float(world_gamma),
         maxlight=float(maxlight)
     )
+
+def lightmap_bake_margin_pixels(gutter: int = 2, resolution: int = 1) -> int:
+    """Return the safe Cycles edge-extension margin for a packed atlas island.
+
+    Atlas gutters are stored in source-luxel units and scaled with the working
+    lightmap resolution. Using the full one-sided gutter prevents unfilled bake
+    edge pixels while keeping extensions inside the reserved inter-island gap.
+    """
+    gutter = int(gutter)
+    resolution = int(resolution)
+    if gutter < 0:
+        raise ValueError("Lightmap gutter cannot be negative")
+    if resolution < 1:
+        raise ValueError("Lightmap resolution must be at least one")
+    return gutter * resolution
+
+
+def blender_live_light_preview_parameters(
+    effective_light_value: float,
+    raw_light_value: float,
+    delay: int,
+    wait: float = 1.0,
+    world_dist: float = 1.0,
+    falloff: float = 0.0,
+    unit_scale: float = 0.0254,
+):
+    """Return a delay-aware native Blender lamp approximation.
+
+    Blender's standard point/spot lights use inverse-square attenuation. Quake
+    delay 2 is therefore representable by the same curve after converting the
+    Quake 128-unit reference distance to Blender units. Other profiles are
+    calibrated at a documented reference point and/or softened/cut off; delays
+    3 and 4 remain explicit native-light fallbacks because a constant point
+    field and a local-minlight max-clamp are not expressible by a standard lamp.
+
+    Returned profile labels are intended for diagnostics, not as claims of
+    pixel-identical ericw-tools output. Quake's exact equations remain in the
+    Quake Direct CPU solver.
+    """
+    import math
+
+    def finite(value, default):
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return float(default)
+        return result if math.isfinite(result) else float(default)
+
+    intensity = abs(finite(effective_light_value, 0.0))
+    raw_intensity = abs(finite(raw_light_value, intensity))
+    wait_value = max(1e-6, finite(wait, 1.0))
+    dist_scale = max(1e-6, finite(world_dist, 1.0))
+    scale = max(1e-9, abs(finite(unit_scale, 0.0254)))
+    falloff_value = max(0.0, finite(falloff, 0.0))
+    mode = int(delay)
+    attenuation = wait_value * dist_scale
+    reference_qu = ERICW_LIGHT_SCALE / attenuation
+    reference_blender = reference_qu * scale
+    min_cutoff = 32.0 * scale
+
+    if mode == 0:
+        radius_qu = (falloff_value * dist_scale) if falloff_value > 0.0 else raw_intensity / attenuation
+        radius_blender = max(min_cutoff, radius_qu * scale)
+        # Match the linear Quake profile at half its radius: QSS receives half
+        # the source intensity there, as does an inverse-square lamp at this
+        # calibrated energy/radius pair.
+        energy = intensity * (radius_blender ** 2) / 8.0
+        cutoff = max(min_cutoff, radius_blender)
+        soft_size = max(2.0 * scale, radius_blender * 0.02)
+        profile = "delay0_linear_midpoint_approximation"
+    elif mode == 1:
+        energy = intensity * (reference_blender ** 2)
+        cutoff = max(min_cutoff, reference_blender * 16.0)
+        soft_size = max(scale, reference_blender * 0.01)
+        profile = "delay1_inverse_reference_calibration"
+    elif mode == 2:
+        # Exact radial curve match: E / d_blender^2 equals
+        # I * (128 / (wait * world_dist * d_quake))^2.
+        energy = intensity * (reference_blender ** 2)
+        cutoff = max(min_cutoff, reference_blender * 16.0)
+        soft_size = max(scale * 0.5, reference_blender * 0.002)
+        profile = "delay2_inverse_square_exact"
+    elif mode == 5:
+        # The ericw soft inverse-square reaches one quarter of source value at
+        # 128/(wait*world_dist) Quake units. Match there and use the same scale
+        # as a native spherical emitter to soften the near-source transition.
+        energy = intensity * (reference_blender ** 2) / 4.0
+        cutoff = max(min_cutoff, reference_blender * 16.0)
+        soft_size = max(scale, reference_blender)
+        profile = "delay5_soft_inverse_square_approximation"
+    else:
+        # Native point lights cannot express constant delay 3 or delay 4's
+        # per-channel local-minlight clamp. Preserve the familiar prior energy
+        # and conservative range rather than inventing false equivalence.
+        legacy_radius = max(min_cutoff, raw_intensity * attenuation * scale)
+        energy = intensity
+        cutoff = legacy_radius
+        soft_size = 0.0
+        profile = (
+            "delay3_native_inverse_square_fallback" if mode == 3 else
+            "delay4_native_local_minlight_fallback" if mode == 4 else
+            "unknown_delay_native_fallback"
+        )
+
+    return {
+        "energy": max(0.0, min(1e12, float(energy))),
+        "cutoff_distance": max(min_cutoff, min(1e9, float(cutoff))),
+        "shadow_soft_size": max(0.0, min(1e6, float(soft_size))),
+        "profile": profile,
+        "reference_distance": reference_blender,
+    }
+

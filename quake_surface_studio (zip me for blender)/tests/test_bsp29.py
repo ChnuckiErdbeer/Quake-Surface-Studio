@@ -85,6 +85,20 @@ class BSP29Tests(unittest.TestCase):
         self.assertEqual(texinfo[8], 0)
         self.assertEqual(texinfo[9], 0)
 
+
+    def test_replace_face_lightofs(self):
+        original = make_test_bsp()
+        changed = bsp.replace_face_lightofs(original.lumps[bsp.LUMP_FACES], 0, 1234)
+        self.assertEqual(bsp.BSP29(original.write([
+            changed if index == bsp.LUMP_FACES else lump
+            for index, lump in enumerate(original.lumps)
+        ])).faces()[0][9], 1234)
+
+    def test_replace_face_lightofs_rejects_invalid_offset(self):
+        original = make_test_bsp()
+        with self.assertRaises(bsp.BSPError):
+            bsp.replace_face_lightofs(original.lumps[bsp.LUMP_FACES], 0, 0x80000000)
+
     def test_rejects_non_bsp29(self):
         with self.assertRaises(bsp.BSPError):
             bsp.BSP29(b'BSP2' + b'\0' * 120)
@@ -199,5 +213,154 @@ class BSP29Tests(unittest.TestCase):
 
 
 
+class FaceWindingTests(unittest.TestCase):
+    def test_face_winding_respects_bsp_plane_and_side(self):
+        vertices = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        self.assertFalse(bsp.face_winding_needs_reversal(vertices, (0, 0, 1), side=0))
+        self.assertTrue(bsp.face_winding_needs_reversal(vertices, (0, 0, 1), side=1))
+        reversed_vertices = list(reversed(vertices))
+        self.assertTrue(bsp.face_winding_needs_reversal(reversed_vertices, (0, 0, 1), side=0))
+        self.assertFalse(bsp.face_winding_needs_reversal(reversed_vertices, (0, 0, 1), side=1))
+
+    def test_face_winding_accounts_for_z_reflection(self):
+        vertices = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        self.assertTrue(bsp.face_winding_needs_reversal(vertices, (0, 0, 1), side=0, flip_z=True))
+        self.assertFalse(bsp.face_winding_needs_reversal(vertices, (0, 0, 1), side=1, flip_z=True))
+        reversed_vertices = list(reversed(vertices))
+        self.assertFalse(bsp.face_winding_needs_reversal(
+            reversed_vertices, (0, 0, 1), side=0, flip_z=True
+        ))
+
+    def test_degenerate_face_does_not_request_arbitrary_reversal(self):
+        self.assertFalse(bsp.face_winding_needs_reversal(
+            [(0, 0, 0), (1, 0, 0), (2, 0, 0)], (0, 0, 1)
+        ))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
+
+
+class InlineBrushModelTests(unittest.TestCase):
+    def test_models_parse_face_ranges_and_face_ownership(self):
+        parsed = make_test_bsp()
+        face = parsed.lumps[bsp.LUMP_FACES]
+        model0 = struct.pack(
+            '<9f7i', 0, 0, 0, 64, 64, 64, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 1
+        )
+        model1 = struct.pack(
+            '<9f7i', -16, -16, -16, 16, 16, 16, 0, 0, 0,
+            0, 0, 0, 0, 0, 1, 1
+        )
+        lumps = list(parsed.lumps)
+        lumps[bsp.LUMP_FACES] = face + face
+        lumps[bsp.LUMP_MODELS] = model0 + model1
+        rebuilt = bsp.BSP29(parsed.write(lumps))
+        self.assertEqual(len(rebuilt.models()), 2)
+        self.assertEqual(rebuilt.face_model_ids(), [0, 1])
+
+    def test_model_face_range_rejects_out_of_bounds(self):
+        parsed = make_test_bsp()
+        bad_model = struct.pack(
+            '<9f7i', 0, 0, 0, 64, 64, 64, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 2
+        )
+        lumps = list(parsed.lumps)
+        lumps[bsp.LUMP_MODELS] = bad_model
+        rebuilt = bsp.BSP29(parsed.write(lumps))
+        with self.assertRaises(bsp.BSPError):
+            rebuilt.face_model_ids()
+
+    def test_inline_model_entity_references(self):
+        entities = [
+            {'classname': 'worldspawn', 'model': '*0'},
+            {'classname': 'func_door', 'model': '*1'},
+            {'classname': 'func_plat', 'model': '*2'},
+            {'classname': 'light', 'model': '*3'},
+            {'classname': 'func_train', 'model': 'not-an-inline-model'},
+        ]
+        self.assertEqual(
+            bsp.parse_inline_model_references(entities, 3),
+            [(1, 1), (2, 2)]
+        )
+
+    def test_inline_model_origin_and_yaw_transform(self):
+        point = bsp.transform_inline_model_position(
+            (10, 0, 0), {'origin': '100 200 300', 'angles': '0 90 0'}
+        )
+        for actual, expected in zip(point, (100, 210, 300)):
+            self.assertAlmostEqual(actual, expected, places=6)
+
+    def test_inline_model_rotation_and_origin_defaults(self):
+        self.assertEqual(
+            bsp.transform_inline_model_position((1, 2, 3), {}),
+            (1.0, 2.0, 3.0)
+        )
+        point = bsp.transform_inline_model_position(
+            (0, 1, 0), {'origin': '5 6 7', 'angles': '0 0 90'}
+        )
+        for actual, expected in zip(point, (5, 6, 8)):
+            self.assertAlmostEqual(actual, expected, places=6)
+
+
+    def test_inline_model_scalar_angle_is_mover_travel_not_orientation(self):
+        point = bsp.transform_inline_model_position(
+            (10, 0, 0), {'origin': '0 0 0', 'angle': '90'}
+        )
+        for actual, expected in zip(point, (10, 0, 0)):
+            self.assertAlmostEqual(actual, expected, places=6)
+
+
+    def test_inline_model_inverse_transform_round_trip(self):
+        entity = {'origin': '128 -64 32', 'angles': '25 90 -15'}
+        local = (13.5, -27.0, 41.25)
+        world = bsp.transform_inline_model_position(local, entity)
+        restored = bsp.inverse_transform_inline_model_position(world, entity)
+        for actual, expected in zip(restored, local):
+            self.assertAlmostEqual(actual, expected, places=6)
+
+
+
+
+    def test_inline_model_shadow_defaults_off_for_any_custom_classname(self):
+        self.assertEqual(
+            bsp.inline_model_shadow_policy({
+                'classname': 'mod_secret_door', 'model': '*1'
+            }),
+            'none'
+        )
+
+    def test_inline_model_shadow_key_enables_full_shadow_casting(self):
+        self.assertEqual(
+            bsp.inline_model_shadow_policy({
+                'classname': 'mod_secret_door', 'model': '*1', '_shadow': '1'
+            }),
+            'all'
+        )
+
+    def test_inline_model_shadow_minus_one_disables_shadow_casting(self):
+        self.assertEqual(
+            bsp.inline_model_shadow_policy({
+                'classname': 'func_detail', 'model': '*1', '_shadow': '-1'
+            }),
+            'none'
+        )
+
+    def test_inline_model_special_shadow_modes_are_preserved_as_policy(self):
+        self.assertEqual(
+            bsp.inline_model_shadow_policy({'_shadowself': '1'}), 'self'
+        )
+        self.assertEqual(
+            bsp.inline_model_shadow_policy({'_shadowworldonly': '1'}), 'world_only'
+        )
+        self.assertEqual(
+            bsp.inline_model_shadow_policy({'_switchableshadow': '1'}), 'switchable'
+        )
+
+    def test_inline_model_single_angle_is_not_initial_rotation_in_inverse(self):
+        point = bsp.inverse_transform_inline_model_position(
+            (10, 0, 0), {'origin': '0 0 0', 'angle': '90'}
+        )
+        for actual, expected in zip(point, (10, 0, 0)):
+            self.assertAlmostEqual(actual, expected, places=6)
