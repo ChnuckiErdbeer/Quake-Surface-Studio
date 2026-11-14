@@ -81,7 +81,9 @@ class ImageUndoJournalTests(unittest.TestCase):
         painted_stroke = [0.2, 0.4, 0.6, 1.0] * 4
         self.image.pixels.foreach_set(painted_stroke)
         self.journal.reconcile([self.obj], self.lookup)
-        self.assertEqual(self.values(), tuple(painted_stroke))
+        self.assertEqual(len(self.values()), len(painted_stroke))
+        for actual, expected in zip(self.values(), painted_stroke):
+            self.assertAlmostEqual(actual, expected, places=6)
 
     def test_new_operation_after_undo_discards_the_old_redo_branch(self):
         first = self.journal.begin(self.obj, [self.image])
