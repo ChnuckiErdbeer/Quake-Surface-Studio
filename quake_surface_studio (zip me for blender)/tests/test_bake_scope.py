@@ -149,5 +149,59 @@ class AtlasGutterDilationTests(unittest.TestCase):
         )
 
 
+    def test_luxel_block_canonicalization_uses_centre_and_preserves_gutters(self):
+        width = height = 6
+        pixels = array.array("f", [0.0, 0.0, 0.0, 1.0] * (width * height))
+        # A 2x2 luxel block with different raster values. Its geometric centre
+        # is the average of the four pixels, not the average of the whole block.
+        values = {
+            (1, 1): (0.2, 0.4, 0.6, 1.0),
+            (2, 1): (0.4, 0.6, 0.8, 1.0),
+            (1, 2): (0.6, 0.8, 1.0, 1.0),
+            (2, 2): (0.8, 1.0, 1.2, 1.0),
+        }
+        for (x, y), rgba in values.items():
+            offset = (y * width + x) * 4
+            pixels[offset:offset + 4] = array.array("f", rgba)
+        changed = bake_scope.collapse_rgba_luxel_blocks(
+            pixels, width, height, [(1, 1, 3, 3)], block_size=2
+        )
+        self.assertEqual(changed, 1)
+        expected = (0.5, 0.7, 0.9, 1.0)
+        for y in (1, 2):
+            for x in (1, 2):
+                offset = (y * width + x) * 4
+                for actual, target in zip(pixels[offset:offset + 4], expected):
+                    self.assertAlmostEqual(actual, target, places=6)
+        # Atlas gutter / unrelated pixels remain byte-for-byte untouched.
+        self.assertEqual(tuple(pixels[(0 * width + 1) * 4:(0 * width + 1) * 4 + 4]),
+                         (0.0, 0.0, 0.0, 1.0))
+
+    def test_luxel_block_canonicalization_supports_1x_2x_and_4x(self):
+        for block in (1, 2, 4):
+            width = height = block * 2
+            pixels = array.array("f", [0.0, 0.0, 0.0, 1.0] * (width * height))
+            rects = [(0, 0, width, height)]
+            count = bake_scope.collapse_rgba_luxel_blocks(
+                pixels, width, height, rects, block_size=block
+            )
+            self.assertEqual(count, 4)
+            for by in (0, block):
+                for bx in (0, block):
+                    first = tuple(pixels[(by * width + bx) * 4:(by * width + bx) * 4 + 4])
+                    for y in range(by, by + block):
+                        for x in range(bx, bx + block):
+                            offset = (y * width + x) * 4
+                            self.assertEqual(tuple(pixels[offset:offset + 4]), first)
+
+    def test_luxel_block_canonicalization_rejects_partial_blocks(self):
+        pixels = array.array("f", [0.0, 0.0, 0.0, 1.0] * 16)
+        with self.assertRaisesRegex(ValueError, "exact multiples"):
+            bake_scope.collapse_rgba_luxel_blocks(
+                pixels, 4, 4, [(0, 0, 3, 4)], block_size=2
+            )
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
