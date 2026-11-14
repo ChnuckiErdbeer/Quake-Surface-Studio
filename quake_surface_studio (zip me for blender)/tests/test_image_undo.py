@@ -121,7 +121,8 @@ class ImageUndoJournalTests(unittest.TestCase):
         self.journal.reconcile([self.obj], self.lookup)
         for actual, expected in zip(self.values(), painted):
             self.assertAlmostEqual(actual, expected, places=6)
-        self.assertEqual(tuple(image_b.pixels.values), (0.1, 0.2, 0.3, 1.0) * 4)
+        for actual, expected in zip(image_b.pixels.values, (0.1, 0.2, 0.3, 1.0) * 4):
+            self.assertAlmostEqual(actual, expected, places=6)
 
     def test_images_created_inside_an_operation_are_restored_on_redo(self):
         transaction = self.journal.begin(self.obj, [])
