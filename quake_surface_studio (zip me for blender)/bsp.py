@@ -668,6 +668,38 @@ def transform_inline_model_position(position, entity: dict[str, str]) -> tuple[f
     )
 
 
+def inverse_transform_inline_model_position(position, entity: dict[str, str]) -> tuple[float, float, float]:
+    """Undo transform_inline_model_position, returning Quake model-local coordinates."""
+    try:
+        origin_values = [float(value) for value in str(entity.get("origin", "0 0 0")).replace(",", " ").split()]
+    except (TypeError, ValueError):
+        origin_values = []
+    if len(origin_values) < 3:
+        origin_values = [0.0, 0.0, 0.0]
+    try:
+        angle_text = str(entity.get("angles", "")).replace(",", " ").split()
+        if len(angle_text) >= 3:
+            angle_values = [float(value) for value in angle_text[:3]]
+        elif entity.get("angle") is not None:
+            angle_values = [0.0, float(entity.get("angle", 0.0)), 0.0]
+        else:
+            angle_values = [0.0, 0.0, 0.0]
+    except (TypeError, ValueError):
+        angle_values = [0.0, 0.0, 0.0]
+
+    x, y, z = (float(position[index]) - origin_values[index] for index in range(3))
+    pitch, yaw, roll = (math.radians(value) for value in angle_values[:3])
+
+    # Reverse the forward order: inverse yaw, inverse negative pitch, inverse roll.
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    x1, y1 = x * cy + y * sy, -x * sy + y * cy
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    x2, z2 = x1 * cp - z * sp, x1 * sp + z * cp
+    cr, sr = math.cos(roll), math.sin(roll)
+    y3, z3 = y1 * cr + z2 * sr, -y1 * sr + z2 * cr
+    return (x2, y3, z3)
+
+
 def parse_entities_lump(entities_lump: bytes) -> list[dict[str, str]]:
     """Parse Quake's brace-delimited entity lump into ordered key/value maps.
 
