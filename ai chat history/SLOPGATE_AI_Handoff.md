@@ -634,3 +634,10 @@ The gutter pass addresses atlas filtering/bleed inside Blender and makes per-fac
 - Actual Ctrl+Z/redo behavior with Blender 5.3 still needs GUI validation for bake, Undo Last Bake, source restore, resolution changes, detach faces, Texture Paint strokes, lightmap paint strokes, map switching and save/reopen.
 - The Blender undo_post/redo_post callbacks are implemented but have not been exercised inside a running Blender process in this environment.
 - The atlas gutter change needs a visual comparison at 1x, 2x and 4x resolution, plus a compiled Ironwail test for the in-game blur/crop issue.
+
+### 0.21.11 follow-up: generated image datablocks included
+
+- Face detachment now journals the generated face-local paint images (or packed shared atlas) as the post-state of the same Blender undo operation. The generated image datablocks are kept as fake-user images so redo can reattach and restore their contents.
+- Lightmap-resolution rebuilds journal the newly generated atlas image and now treat preview-switch failures as warnings after a successful rebuild, preserving a valid undo step.
+- Quake Direct bake's previous snapshot is retained, and both Direct and Cycles bake journal their newly created pre-bake snapshot image as well as the edited atlas.
+- The journal now supports operations that create images as well as those that modify existing images.

@@ -6041,6 +6041,7 @@ class QSS_OT_detach_faces(Operator):
         created_materials = []
         plans = []
         selected_indices = []
+        transaction = None
 
         try:
             if was_edit_mode:
@@ -6072,6 +6073,7 @@ class QSS_OT_detach_faces(Operator):
                 _report(self, 'WARNING', "No faces selected. Use Face Select and select at least one face.")
                 return {'CANCELLED'}
 
+            transaction = image_undo.begin(obj, [])
             stage = 'validate source BSP path'
             source_path = obj.get('qss_source_path', '')
             if not source_path or not os.path.isfile(source_path):
@@ -6269,6 +6271,17 @@ class QSS_OT_detach_faces(Operator):
                             created_images.remove(local_image)
                     except Exception:
                         pass
+            history_images = []
+            for plan in plans:
+                image = plan.get("image")
+                if image is not None and image not in history_images:
+                    image.use_fake_user = True
+                    image["qss_undo_created_image"] = True
+                    history_images.append(image)
+            if transaction is not None:
+                image_undo.commit(obj, history_images, transaction)
+                transaction = None
+
             atlas_scale_note = ""
             if len(plans) > 1 and plans[0].get("image") is not None:
                 atlas_scale = float(plans[0]["image"].get("qss_detached_atlas_scale", 1.0))
@@ -6288,6 +6301,12 @@ class QSS_OT_detach_faces(Operator):
             return {'FINISHED'}
 
         except Exception as exc:
+            if transaction is not None:
+                try:
+                    image_undo.rollback(obj, transaction, bpy.data.images.get)
+                except Exception:
+                    pass
+                transaction = None
             trace = traceback.format_exc()
             obj['qss_last_detach_error'] = f"{stage}: {exc}"
             obj['qss_last_detach_traceback'] = trace[-12000:]
@@ -7824,7 +7843,8 @@ def _qss_run_ericw_direct_bake(context, obj):
             bpy.data.images.remove(snapshot)
         raise
     if old_snapshot is not None and old_snapshot != snapshot and old_snapshot.users == 0:
-        bpy.data.images.remove(old_snapshot)
+        old_snapshot.use_fake_user = True
+        old_snapshot["qss_retired_bake_snapshot"] = True
     obj['qss_last_bake_backup'] = snapshot.name
     obj['qss_lightmap_source'] = 'quake_direct_cpu_bake'
     obj['qss_lightmap_gradient_baked'] = True
@@ -7879,7 +7899,8 @@ class QSS_OT_quake_direct_bake(Operator):
                 _set_lighting_preview(context, obj, 'baked')
             except Exception as preview_error:
                 self.report({'WARNING'}, f'Bake completed but preview switch failed: {preview_error}')
-            image_undo.commit(obj, [image], transaction)
+            backup_image = bpy.data.images.get(obj.get('qss_last_bake_backup', ''))
+            image_undo.commit(obj, [image, backup_image], transaction)
             transaction = None
             unsupported_note = f"; unsupported: {', '.join(stats['unsupported'])}" if stats['unsupported'] else ''
             self.report({'INFO'},
@@ -8277,7 +8298,8 @@ class QSS_OT_bake_scene_lights(Operator):
             )
             if transaction is not None:
                 if "FINISHED" in result:
-                    image_undo.commit(obj, [image], transaction)
+                    backup_image = bpy.data.images.get(obj.get("qss_last_bake_backup", ""))
+                    image_undo.commit(obj, [image, backup_image], transaction)
                 else:
                     image_undo.rollback(obj, transaction, bpy.data.images.get)
                 transaction = None
@@ -10877,12 +10899,28 @@ class QSS_OT_change_lightmap_resolution(Operator):
         if str(obj.get("qss_lightmap_resolution", 1)) == self.resolution:
             self.report({"INFO"}, "The active map already uses this lightmap resolution.")
             return {"CANCELLED"}
+        transaction = image_undo.begin(obj, [])
         try:
             _qss_rebuild_map_lightmap_resolution(obj, int(self.resolution))
-            _set_lighting_preview(context, obj, "source")
+            image = bpy.data.images.get(obj.get("qss_lightmap_image_name", ""))
+            if image is None:
+                raise bsp.BSPError("The rebuilt lightmap atlas image is missing.")
+            image.use_fake_user = True
+            image["qss_undo_created_image"] = True
+            image_undo.commit(obj, [image], transaction)
+            transaction = None
+            try:
+                _set_lighting_preview(context, obj, "source")
+            except Exception as preview_error:
+                self.report({"WARNING"}, f"Atlas rebuilt, but preview switch failed: {preview_error}")
             self.report({"INFO"}, f"Lightmap atlas rebuilt at {self.resolution}×.")
             return {"FINISHED"}
         except Exception as exc:
+            if transaction is not None:
+                try:
+                    image_undo.rollback(obj, transaction, bpy.data.images.get)
+                except Exception:
+                    pass
             self.report({"ERROR"}, f"Could not rebuild lightmap atlas: {exc}")
             return {"CANCELLED"}
 

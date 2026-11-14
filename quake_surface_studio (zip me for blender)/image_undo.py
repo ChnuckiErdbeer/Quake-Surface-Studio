@@ -95,8 +95,6 @@ class ImageUndoJournal:
             name = str(getattr(image, "name", "") or "")
             if name:
                 result[name] = image
-        if not result:
-            raise ValueError("A SLOPGATE image transaction requires at least one named image.")
         return result
 
     def _capture_images(self, images):

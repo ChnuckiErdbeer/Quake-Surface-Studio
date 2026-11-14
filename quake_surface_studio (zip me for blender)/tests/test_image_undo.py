@@ -99,6 +99,23 @@ class ImageUndoJournalTests(unittest.TestCase):
         states = self.journal._states[self.obj["qss_undo_uid"]]
         self.assertNotIn(old_redo_token, states)
 
+    def test_images_created_inside_an_operation_are_restored_on_redo(self):
+        transaction = self.journal.begin(self.obj, [])
+        created_pixels = [0.35, 0.45, 0.55, 1.0] * 4
+        self.image.pixels.foreach_set(created_pixels)
+        self.journal.commit(self.obj, [self.image], transaction)
+        created_token = self.obj["qss_undo_token"]
+
+        # Model Blender undo removing or clearing an image datablock created by
+        # the operation, then redo restoring the operator's token and image ID.
+        self.image.pixels.foreach_set([0.0, 0.0, 0.0, 1.0] * 4)
+        self.obj["qss_undo_token"] = ""
+        self.journal.reconcile([self.obj], self.lookup)
+        self.obj["qss_undo_token"] = created_token
+        self.journal.reconcile([self.obj], self.lookup)
+        for actual, expected in zip(self.values(), created_pixels):
+            self.assertAlmostEqual(actual, expected, places=6)
+
     def test_missing_images_are_ignored_during_reconciliation(self):
         transaction = self.journal.begin(self.obj, [self.image])
         self.image.pixels.foreach_set([0.6, 0.6, 0.6, 1.0] * 4)
