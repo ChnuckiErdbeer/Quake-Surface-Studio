@@ -451,3 +451,12 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - Imported material variants are assigned only to faces with those inline model IDs, so worldspawn geometry retains normal shadow behavior. Stats and diagnostics report the exempt face count/classes.
 - Important validation still required in Blender 5.3: verify Cycles Bake honors Is Shadow Ray on the shader path; compare door/platform shadows and static receiver lightmaps with ericw output; verify mover surfaces still receive expected lighting and display normally; test shared material reuse and export behavior. If Cycles bake treats Light Path differently than expected, use object-level Cycles visibility or a bake-only scene proxy approach.
 - Current build's bake timing from user: total 203.6s; Cycles 199.5s; non-Cycles overhead ~4.1s. No bake quality settings changed.
+
+
+### SLOPGATE 0.21.8 verified build
+
+- Source/version commit: `79aceaed83135a771d7690970ff66be61aa71f09`; documentation/handoff commit: `20bdd20abe6794a8db02639845d92d339587c0ab`.
+- QSS Python workflow run: `43581227689`, job `132406179325`, success. Python compilation passed; **246 standalone tests passed**; add-on package assembled and installer artifact uploaded.
+- Installer: `Quake-Surface-Studio-v0.21.8-Blender-Install`, artifact ID `14107953631`, 274,236 bytes, SHA-256 `72a15281c51a8bdb98bba18990f0b54b9f05d0afd42cee91b1dc10244ad6fc5c`, expires 2027-02-12. Downloaded ZIP passed `unzip -t`.
+- UI changes: bake timing/workload moved to STATS; standalone LAST BAKE box removed. Copy Stats to Clipboard added in EXPORT & DIAGNOSTICS, copying the full text diagnostic report.
+- Shadow policy change is source/CI verified only; Blender 5.3 runtime bake behavior has not been exercised in this environment. User must validate against a map with doors/platforms before treating the lighting correction as confirmed.
