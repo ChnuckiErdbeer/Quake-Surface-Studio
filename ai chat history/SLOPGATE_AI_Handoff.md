@@ -641,3 +641,8 @@ The gutter pass addresses atlas filtering/bleed inside Blender and makes per-fac
 - Lightmap-resolution rebuilds journal the newly generated atlas image and now treat preview-switch failures as warnings after a successful rebuild, preserving a valid undo step.
 - Quake Direct bake's previous snapshot is retained, and both Direct and Cycles bake journal their newly created pre-bake snapshot image as well as the edited atlas.
 - The journal now supports operations that create images as well as those that modify existing images.
+
+### Undo-journal preservation fix
+
+- Before every journalled operation, refresh all image snapshots already associated with the current undo token, not only the image(s) the new operation will edit. This preserves native Texture Paint changes made between SLOPGATE operations, including when the next operation edits a different image.
+- Added a regression test for the sequence: SLOPGATE edit → native paint stroke → unrelated SLOPGATE edit → Ctrl+Z.

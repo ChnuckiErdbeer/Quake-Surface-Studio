@@ -70,6 +70,7 @@ class ImageUndoJournal:
         self._states = {}
         self._owners = {}
         self._last_seen = {}
+        self._image_refs = {}
         self._bpy = None
         self._handlers = {}
 
@@ -98,10 +99,22 @@ class ImageUndoJournal:
         return result
 
     def _capture_images(self, images):
-        return {
-            name: _capture_image(image)
-            for name, image in self._unique_images(images).items()
-        }
+        result = {}
+        for name, image in self._unique_images(images).items():
+            result[name] = _capture_image(image)
+            self._image_refs[name] = image
+        return result
+
+    def _resolve_image(self, name):
+        if self._bpy is not None:
+            try:
+                image = self._bpy.data.images.get(name)
+                if image is not None:
+                    self._image_refs[name] = image
+                    return image
+            except Exception:
+                pass
+        return self._image_refs.get(name)
 
     def _truncate_redo_branch(self, states, current_token):
         keys = list(states.keys())
@@ -121,7 +134,18 @@ class ImageUndoJournal:
         before = self._capture_images(images)
         states = self._states.setdefault(uid, OrderedDict())
         self._truncate_redo_branch(states, token)
+        # Native Texture Paint can change an image without changing the
+        # SLOPGATE token. Refresh every image already tracked at this state
+        # before adding the current operation's own images, so a later undo
+        # never rewinds unrelated paint strokes on another atlas/image.
         merged = dict(states.get(token, {}))
+        for image_name in tuple(merged):
+            image = self._resolve_image(image_name)
+            if image is not None:
+                try:
+                    merged[image_name] = _capture_image(image)
+                except Exception as exc:
+                    print(f"[SLOPGATE] could not refresh undo image {image_name}: {exc}")
         merged.update(before)
         states[token] = merged
         states.move_to_end(token)
@@ -191,6 +215,7 @@ class ImageUndoJournal:
         self._states.clear()
         self._owners.clear()
         self._last_seen.clear()
+        self._image_refs.clear()
 
     def register(self, bpy_module):
         self.unregister(bpy_module)

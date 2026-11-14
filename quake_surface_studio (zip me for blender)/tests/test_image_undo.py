@@ -99,6 +99,29 @@ class ImageUndoJournalTests(unittest.TestCase):
         states = self.journal._states[self.obj["qss_undo_uid"]]
         self.assertNotIn(old_redo_token, states)
 
+    def test_native_paint_between_operations_survives_undo_of_unrelated_image_edit(self):
+        image_b = FakeImage("QSS_Painted_Texture_B", [0.1, 0.2, 0.3, 1.0] * 4)
+        first = self.journal.begin(self.obj, [self.image])
+        self.image.pixels.foreach_set([0.7, 0.7, 0.7, 1.0] * 4)
+        self.journal.commit(self.obj, [self.image], first)
+        first_token = self.obj["qss_undo_token"]
+
+        # Native Texture Paint changes image A without changing SLOPGATE's token.
+        painted = [0.25, 0.35, 0.45, 1.0] * 4
+        self.image.pixels.foreach_set(painted)
+
+        # A second SLOPGATE operation edits image B. Its pre-state must refresh
+        # image A too, otherwise undoing this unrelated operation would erase
+        # the intervening user paint stroke on A.
+        second = self.journal.begin(self.obj, [image_b])
+        image_b.pixels.foreach_set([0.9, 0.8, 0.7, 1.0] * 4)
+        self.journal.commit(self.obj, [image_b], second)
+        self.obj["qss_undo_token"] = first_token
+        self.journal.reconcile([self.obj], self.lookup)
+        for actual, expected in zip(self.values(), painted):
+            self.assertAlmostEqual(actual, expected, places=6)
+        self.assertEqual(tuple(image_b.pixels.values), (0.1, 0.2, 0.3, 1.0) * 4)
+
     def test_images_created_inside_an_operation_are_restored_on_redo(self):
         transaction = self.journal.begin(self.obj, [])
         created_pixels = [0.35, 0.45, 0.55, 1.0] * 4
