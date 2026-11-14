@@ -1810,13 +1810,8 @@ def _load_quake_image_and_materials(parsed, palette, wad_textures=None, loose_te
 
 
 def _qss_inline_entity_shadow_exempt(entity):
-    """True for moving/illusionary Quake brush entities that must not occlude static lighting."""
-    classname = str(entity.get("classname", "")).strip().lower()
-    return classname in {
-        "func_door", "func_door_rotating", "func_plat", "func_train",
-        "func_rotating", "func_button", "func_bobbing", "func_pendulum",
-        "func_water", "func_illusionary",
-    }
+    """True when ericw's BSP entity keys say this inline model is not a full shadow caster."""
+    return bsp.inline_model_shadow_policy(entity) != "all"
 
 
 def _qss_make_shadow_ray_transparent_material(material):
@@ -3938,9 +3933,17 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
         for model_index, entity_index in model_entity_indices.items()
         if 0 <= entity_index < len(bsp_entities)
     }
+    inline_shadow_policies = {
+        model_id: bsp.inline_model_shadow_policy(entity)
+        for model_id, entity in model_entities_by_id.items()
+    }
+    # ericw defaults every inline brush model to non-shadow-casting, regardless
+    # of classname. Full '_shadow 1' casters retain their ordinary material.
+    # Special self/world/switchable policies are conservatively non-blocking
+    # until model-aware source/hit ray filtering is implemented.
     no_shadow_model_ids = {
-        model_id for model_id, entity in model_entities_by_id.items()
-        if _qss_inline_entity_shadow_exempt(entity)
+        model_id for model_id, policy in inline_shadow_policies.items()
+        if policy != "all"
     }
     no_shadow_material_slots = {}
     no_shadow_face_count = 0
@@ -4014,6 +4017,10 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
         for model_id, entity in model_entities_by_id.items()
         if model_id in no_shadow_model_ids
     }))
+    obj['qss_inline_model_shadow_policy_counts'] = json.dumps({
+        policy: sum(1 for value in inline_shadow_policies.values() if value == policy)
+        for policy in ("none", "all", "self", "world_only", "switchable")
+    }, sort_keys=True)
     obj['qss_inline_model_entity_map'] = json.dumps({
         str(model_index): int(entity_index)
         for model_index, entity_index in model_entity_indices.items()
@@ -10446,6 +10453,7 @@ class QSS_OT_toggle_textures(Operator):
     bl_idname = "qss.toggle_textures"
     bl_label = "Toggle Base Textures"
     bl_description = "Show base textures or pure BSP lightmaps"
+    bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
     def poll(cls, context):
@@ -10468,6 +10476,7 @@ class QSS_OT_toggle_source_lightmaps(Operator):
     bl_idname = "qss.toggle_source_lightmaps"
     bl_label = "Toggle Source Lightmaps"
     bl_description = "Show or hide the current unpainted Original/Baked lightmap contribution"
+    bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
     def poll(cls, context):
@@ -10572,6 +10581,7 @@ class QSS_OT_toggle_painted_textures(Operator):
     bl_idname = "qss.toggle_painted_textures"
     bl_label = "Toggle Painted Textures"
     bl_description = "Switch detached face textures between original and painted material versions"
+    bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
     def poll(cls, context):
@@ -10637,6 +10647,7 @@ class QSS_OT_toggle_painted_lightmaps(Operator):
     bl_idname = "qss.toggle_painted_lightmaps"
     bl_label = "Toggle Painted Lightmaps"
     bl_description = "Switch between the active lightmap source and its painted override"
+    bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
     def poll(cls, context):
@@ -11252,6 +11263,7 @@ class QSS_OT_close_active_map(Operator):
     bl_idname = "qss.close_active_map"
     bl_label = "Close Active Map"
     bl_description = "Remove the selected QSS map collection and all of its imported map objects"
+    bl_options = {"REGISTER", "UNDO"}
 
     collection_name: StringProperty(default="", options={"HIDDEN"})
 
