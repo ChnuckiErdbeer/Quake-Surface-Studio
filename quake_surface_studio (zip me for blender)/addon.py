@@ -8712,6 +8712,22 @@ class QSS_OT_bake_scene_lights(Operator):
             # claim that Blender's inverse-square lights reproduce every Quake luxel.
             baked = array.array('f', [0.0]) * (int(bake_target.size[0]) * int(bake_target.size[1]) * 4)
             bake_target.pixels.foreach_get(baked)
+            # A Quake luxel is one sample, even when the editable atlas stores
+            # it as a 2x/4x block. Collapse Cycles' within-block raster variation
+            # to the exact luxel-centre value before extending the gutters.
+            core_rectangles = _qss_partial_lightmap_rectangles(
+                obj, image, receiver_face_indices, padding=0
+            )
+            luxel_block_size = (
+                max(1, int(obj.get('qss_lightmap_scale', 1)))
+                * _qss_lightmap_pixel_scale(obj, image)
+            )
+            obj['qss_last_bake_luxel_blocks_canonicalized'] = int(
+                bake_scope_utils.collapse_rgba_luxel_blocks(
+                    baked, int(image.size[0]), int(image.size[1]),
+                    core_rectangles, block_size=luxel_block_size,
+                )
+            )
             # Re-dilate each receiver from its own core luxels. This makes
             # padding deterministic across Cycles versions and partial bakes.
             core_rectangles = _qss_partial_lightmap_rectangles(
