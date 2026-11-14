@@ -1,8 +1,8 @@
-# SLOPGATE 0.21.5
+# SLOPGATE 0.21.6
 
 ## 0.21.5 — visible bake timing and BSP inline-model placement
 
-- Adds persistent last-bake total and Cycles operator timings to the Lighting section of the STATS panel. Timing is visible after baking without saving a diagnostics report.
+- Adds persistent last-bake total and Cycles operator timings directly below the Bake Lightmap button in the Lighting panel. Timing is visible immediately after baking; it is not hidden in the default-collapsed STATS panel.
 - Parses BSP29 dmodel_t records and validates per-model face ranges. Tracks each imported face's inline model ID and links `model "*n"` entity references.
 - Applies compiled entity origin and explicit three-component `angles` transforms to inline brush-model display geometry. The original model-local coordinates remain the source for texture UV construction and lightmap atlas generation.
 - Stores inline-model entity transform metadata and reverses the transform when rebuilding the lightmap atlas at a new resolution.
