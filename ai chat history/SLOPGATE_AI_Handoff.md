@@ -694,7 +694,7 @@ features.
 
 - Added `lightmap_export.add_half_luxel_edge_padding`. It builds a one-sample
   rim around an eligible face grid by half-luxel resampling with edge clamping,
-  increases dimensions by two, and shifts the per-face projection origin by
+  increases each dimension by one sample, and shifts the per-face projection origin by
   +0.5 luxel on S and T. For classic-derived records this is represented by
   moving `s_min` and `t_min` outward by half the selected luxel spacing; for
   explicit decoupled records the two vector intercepts are increased by 0.5.

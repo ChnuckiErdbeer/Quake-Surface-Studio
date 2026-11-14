@@ -145,14 +145,13 @@ class LightmapExportTests(unittest.TestCase):
         padded, did_pad = lightmap_export.add_half_luxel_edge_padding(record)
 
         self.assertTrue(did_pad)
-        self.assertEqual((padded["width"], padded["height"]), (4, 4))
-        self.assertEqual(len(padded["rgb"]), 4 * 4 * 3)
+        self.assertEqual((padded["width"], padded["height"]), (3, 3))
+        self.assertEqual(len(padded["rgb"]), 3 * 3 * 3)
         red = list(padded["rgb"][0::3])
         self.assertEqual(red, [
-            0, 50, 100, 100,
-            100, 139, 178, 178,
-            200, 228, 255, 255,
-            200, 228, 255, 255,
+            0, 50, 100,
+            100, 139, 178,
+            200, 228, 255,
         ])
         self.assertEqual((padded["s_min"], padded["t_min"]), (-8.0, 8.0))
         self.assertEqual(record["rgb"], source)
@@ -165,7 +164,7 @@ class LightmapExportTests(unittest.TestCase):
         }
         padded, did_pad = lightmap_export.add_half_luxel_edge_padding(record)
         self.assertTrue(did_pad)
-        self.assertEqual((padded["width"], padded["height"]), (4, 3))
+        self.assertEqual((padded["width"], padded["height"]), (3, 2))
         self.assertEqual(padded["lmvecs"], (1.0, 0.0, 0.0, -3.5, 0.0, 1.0, 0.0, 8.5))
 
     def test_half_luxel_edge_padding_offsets_classic_luxel_grid_origin(self):
@@ -183,15 +182,15 @@ class LightmapExportTests(unittest.TestCase):
             faces, texinfos, {0: padded}, offsets
         )
         values = struct.unpack_from("<HHI8f", data, 0)
-        self.assertEqual(values[:3], (4, 3, 100))
+        self.assertEqual(values[:3], (3, 2, 100))
         self.assertAlmostEqual(values[3], 0.25)
         self.assertAlmostEqual(values[6], -0.5)
         self.assertAlmostEqual(values[10], -1.5)
 
     def test_half_luxel_edge_padding_skips_dimensions_over_engine_limit(self):
         record = {
-            "shift": 4, "width": 255, "height": 1,
-            "s_min": 0, "t_min": 0, "rgb": bytes(255 * 3),
+            "shift": 4, "width": 256, "height": 1,
+            "s_min": 0, "t_min": 0, "rgb": bytes(256 * 3),
         }
         padded, did_pad = lightmap_export.add_half_luxel_edge_padding(record)
         self.assertFalse(did_pad)

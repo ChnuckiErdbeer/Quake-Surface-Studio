@@ -385,7 +385,7 @@ def add_half_luxel_edge_padding(record: Mapping[str, Any],
                                  max_dimension: int = MAX_SURFACE_LUXELS) -> tuple[dict[str, Any], bool]:
     """Add a half-luxel support rim for linear filtering at a face boundary.
 
-    The output grid is two samples wider and taller. New output sample (x, y)
+    The output grid is one sample wider and taller. New output sample (x, y)
     resamples the original grid at (x - 0.5, y - 0.5), clamped to the face
     bounds. The projection origin is shifted by +0.5 luxel on both axes, so a
     face edge maps between the rim sample and the first interior sample.
@@ -407,7 +407,7 @@ def add_half_luxel_edge_padding(record: Mapping[str, Any],
     max_dimension = int(max_dimension)
     if max_dimension < 1:
         raise ValueError("Maximum lightmap dimension must be positive")
-    if width + 2 > max_dimension or height + 2 > max_dimension:
+    if width + 1 > max_dimension or height + 1 > max_dimension:
         return dict(record), False
 
     if "lmvecs" in record:
@@ -433,9 +433,9 @@ def add_half_luxel_edge_padding(record: Mapping[str, Any],
         shifted_s_min = s_min - half_spacing
         shifted_t_min = t_min - half_spacing
 
-    padded = bytearray((width + 2) * (height + 2) * 3)
-    out_width = width + 2
-    out_height = height + 2
+    padded = bytearray((width + 1) * (height + 1) * 3)
+    out_width = width + 1
+    out_height = height + 1
     for out_y in range(out_height):
         source_y = min(max(out_y - 0.5, 0.0), float(height - 1))
         y0 = int(math.floor(source_y))
