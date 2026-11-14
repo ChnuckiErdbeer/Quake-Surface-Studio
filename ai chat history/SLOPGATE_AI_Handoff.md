@@ -412,3 +412,13 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 
 - The user could not find the 0.21.5 timing display because it was placed in the default-collapsed STATS panel. Moved it directly below **Bake Lightmap** in the always-visible Lighting panel, where it shows total and Cycles duration.
 - No bake behavior or quality settings changed. 0.21.6 supersedes the 0.21.5 installer for testing.
+
+
+### SLOPGATE 0.21.6 verified installer
+
+- Source/version commit: `20f1ecc368a7ef3a5a1e21826a35a0d48c60734a` (add-on version 0.21.6).
+- QSS Python workflow run: `43579167842`, job `132399985935`, success. Python compilation passed; **246 standalone tests passed**; package assembly and artifact upload passed.
+- Final user-facing installer: `Quake-Surface-Studio-v0.21.6-Blender-Install`, artifact ID `14107519044`, 272,682 bytes, SHA-256 `2624bdfa340ddb4f77c364c307978f57e10e0110964a34b9f465b079c4c58da4`, expires 2027-02-12.
+- Downloaded archive passed `unzip -t` with no corrupt members.
+- Timing display is now directly below the Bake Lightmap button in the Lighting panel, not in the collapsed STATS accordion.
+- The inline brush-model geometry placement pass is included in 0.21.6. It retains one combined map mesh; this does not yet provide independently selectable animated mover objects. User runtime validation in Blender 5.3 is required before treating placement as fully verified.
