@@ -292,43 +292,39 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - FGD property conventions reference: https://book.leveldesignbook.com/appendix/resources/formats/fgd
 
 
-## Current source and install baseline — 2026-11-13 (SLOPGATE 0.21.1)
+## Current source and install baseline — 2026-11-14 (SLOPGATE 0.21.2)
 
-The user tested 0.21.0 and confirmed that the companion MAP was found, supported light edits appeared in the exported MAP, and Cycles-baked lightmap changes appeared in the exported BSP.
+The user tested 0.21.0 and confirmed companion MAP discovery, light edits synchronized to exported MAP, and Cycles-baked lighting synchronized to exported BSP.
 
-### Implemented in 0.21.1 source
+### Implemented in 0.21.2
 
-- Palette fallback: selected mod first, sibling base-game id1 second. Within a game directory, loose palette files override PAK copies; higher-numbered pakN.pak archives override lower-numbered PAKs.
-- Cycles baking can start in Mesh Edit Mode. SLOPGATE temporarily switches to Object Mode and restores the edit-object set, selection and active object. Full Map remains the default scope.
-- Added a Bake Scope menu with Full Map, Selected Faces, Faces Affected by Selected Lights, and Selected Faces Affected by Selected Lights.
-- Partial bake works by temporarily moving non-target lightmap UV islands outside the target image, baking the existing full map geometry, and restoring UVs. The result is merged only into target face atlas rectangles and reserved margin pixels; untouched pixels are copied from the pre-bake snapshot and preserved. Source-mean normalization is calculated from the target face samples.
-- Selected-light scope derives a direct-light receiver-face mask from selected imported lights, face normals, point/spot/sun direction/cone/cutoff and BSP-geometry line-of-sight. **All active-map lights remain enabled during the actual bake**, so non-selected lamps and indirect contributions on those targeted faces are recalculated too. This updates receiver regions affected by the selected lights without discarding other light contributions on the same faces. The mask is an approximation based on a face-level representative point; indirect-only receiver faces are not guaranteed to be included.
-- PAK map browsing performs directory discovery once when the dialog opens. Enum redraw and hover operate on the in-memory map list. Filtering uses only that cached list. PAK directory indexes are cached by absolute path, file size and modification time.
-- Added Extract PAKs. Each archive is safely extracted into its own versioned SLOPGATE user-data cache directory; source PAK files remain untouched and duplicate virtual paths from distinct PAKs remain distinct. Repeated extraction reuses unchanged cached files.
-- Added bake_scope.py with pure face-mask, atlas-rectangle and partial RGBA region-merge helpers.
-- Added tests/test_bake_scope.py, expanded tests/test_quake_paths.py, and retained tests/test_palette_fallback.py.
-- README documents the new workflows and current limitations.
+- Replaced the Bake Scope dropdown with one scene checkbox, **Only Selected Faces**, and one Bake Lightmap action. Unchecked means full-map bake; checked means use current BSP face selection in Mesh Edit Mode.
+- Added Object Mode right-click context-menu action **Select Affected Faces** for selected imported SLOPGATE lights. It calculates the direct-light receiver mask and switches the BSP object to Edit Mode with those faces selected.
+- Added Mesh Edit Mode right-click context-menu action **Select Affecting Lights**. It tests imported lights against selected faces and switches to Object Mode with matching lights selected.
+- Context-menu callbacks are removed during add-on cleanup/reload to avoid duplicate menu entries.
+- Removed the Extract PAKs operator/button workflow. PAK-aware Browse Maps remains.
+- Existing partial bake still isolates UVs and merges only target atlas regions, preserving unselected pixels. **This does not establish faster Cycles baking.** The user reported selected-face bake duration remained close to full-map duration. UV masking alone is not receiver-geometry filtering. True performance optimization requires baking a temporary selected-face receiver mesh while keeping the complete BSP geometry as an occluder/lighting contributor; that redesign is NOT implemented.
+- Preview distinction verified in source: Original/Baked modes intentionally multiply albedo by lightmap and feed Principled Emission to reproduce the Quake lightmap without adding Blender illumination. Live Eevee/Cycles modes already use diffuse Base Color and disconnect emission, so actual Blender lights illuminate the material. Do not blindly switch Original/Baked to diffuse; that can double-illuminate. Bright preview root cause remains to be measured.
+- Interactive Blender 5.2 context-menu and bake tests have not been run by the assistant.
 
-### Latest verified build
+### Latest verified install build
 
 - Branch: \`fix/v0.11.1-metadata-style-order-test\`
-- Package source commit: \`bbfe192600a3bff3727387499e6c4d607dd3e253\`
-- Version: \`0.21.1\`
-- QSS Python push workflow: run \`43513363267\`, job \`132188948610\`; passed Python compilation, 232 standalone unit tests, package assembly and artifact upload.
-- QSS Python PR workflow: run \`43513370669\`; this was in progress at handoff update. Push workflow success is the validated artifact source.
-- Companion converter GUI PR workflow: run \`43513370688\`, success. This tests the companion converter, not the Blender GUI.
-- Artifact: \`14079401997\`, \`Quake-Surface-Studio-v0.21.1-Blender-Install\`, 264,338 bytes, 45 ZIP entries, expires 2027-02-11.
-- SHA-256: \`e8438593d12616e0a46c72fe7f1426b9c490be3a984c9a870ae250ca699a1378\`.
-- Artifact URL: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43513363267/artifacts/14079401997
-- The downloaded ZIP passed unzip integrity; package root is \`quake_surface_studio/\`; required \`__init__.py\`, \`addon.py\`, \`bake_scope.py\`, \`quake_paths.py\` and test modules are present.
-- Local verified ZIP path in this session: \`/mnt/data/SLOPGATE-v0.21.1-Blender-Install.zip\`.
+- Version: \`0.21.2\`
+- Build/source commit: \`4ea772c5068e373bcb38bb397efe807a8fa0e1bf\`
+- Follow-up comment-only source commit: \`88e38b4fb8abce54704360b5b25b55305091c8fe\`; installer built from the preceding commit includes all functional changes and version metadata.
+- QSS Python workflow run: \`43537033763\`, job \`132268411787\`, passed Python compilation, 232 standalone tests, package assembly and artifact upload.
+- Artifact ID: \`14090296445\`, name \`Quake-Surface-Studio-v0.21.2-Blender-Install\`, 264,768 bytes; expires 2027-02-12.
+- SHA-256: \`d2e168089a930d8eac260dd6aad6564567188c182557b6832765e2becbca0109\`.
+- Artifact page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43537033763/artifacts/14090296445
+- Downloaded ZIP available in this session as \`/mnt/data/SLOPGATE-v0.21.2-Blender-Install.zip\`. Artifact SHA is reported by GitHub Actions.
+- Automated suite does not validate Blender context menus, actual Cycles performance, UV receiver filtering, or viewport material appearance.
 
-### Runtime validation and remaining caveats
+### Required next implementation/test work
 
-- No interactive Blender 5.2 test has been run in this environment. The partial-bake UV-isolation and atlas-rectangle merge strategy therefore needs testing in the user's Blender file before relying on it for valuable lightmaps.
-- Test selected faces on multiple materials, verify that non-selected atlas pixels remain byte/pixel-identical, then verify Undo Last Bake and save/reopen.
-- Test selected-light mask for point, spot and sun; it is a direct-receiver approximation. Verify it does not miss wide-face/edge illumination or produce occlusion false positives. All map lights intentionally remain enabled during the regional re-bake.
-- Test multi-object Edit Mode restoration after both successful and failed bakes.
-- PAK cache/extract behavior has Python unit coverage, but no huge real-world archive timing test or Blender UI hover test has been performed.
-- No BSP2/2PSB parser/writer, live preview brightness calibration, lightmap engine-blur edge padding/bleed, or Ironwail runtime validation has been performed.
-- For every updated installable add-on build, provide a verified install ZIP and link with version, commit, test status and digest. Never reuse an older ZIP for newer code.
+1. **True selective bake acceleration:** implement a receiver-only temporary mesh containing only selected BSP faces, while retaining the full original BSP as a non-receiver occluder. Ensure only receiver luxels are sampled. Preserve materials, UVs, normal transforms, world-space transforms, all map lights, indirect contribution strategy, atlas merging and cleanup on failure. Benchmark full map vs one face on same map. If Cycles still traverses all faces, don't claim speed-up.
+2. Test context menus in Blender 5.2: selected imported lights + selected map object, select affected faces, reverse-select lights, and confirm mode/selection transitions. Check map collections and multi-map scenes.
+3. Investigate bright preview by measuring actual mode transition and render engine. Original/Baked emission is intentional; live Eevee/Cycles already diffuse.
+4. Test the checkbox from Object and Edit Mode, including empty selection, full map, undo and pixel preservation.
+5. Continue sending a verified installer ZIP/link for every new installable build, with exact version, commit, tests and digest. Do not call CI a Blender runtime test.
+
