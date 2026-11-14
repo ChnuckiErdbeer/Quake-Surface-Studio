@@ -8300,12 +8300,33 @@ class QSS_OT_bake_scene_lights(Operator):
                 light_uv.active_render = True
             except Exception:
                 pass
+            receiver_face_indices = [
+                poly.index for poly in mesh.polygons
+                if _qss_face_receives_light(obj, poly.index)
+            ]
             if target_face_indices is not None:
+                requested_faces = {int(index) for index in target_face_indices}
+                receiver_face_indices = [
+                    index for index in receiver_face_indices if index in requested_faces
+                ]
+                if not receiver_face_indices:
+                    raise bsp.BSPError(
+                        "The selected faces are all compiler-only nodraw surfaces and cannot receive a lightmap."
+                    )
+                target_face_indices = receiver_face_indices
                 lightmap_uv_backup = _qss_mask_unselected_lightmap_uvs(
-                    obj, light_uv, target_face_indices
+                    obj, light_uv, receiver_face_indices
                 )
                 obj["qss_last_bake_scope"] = str(bake_scope_name)
-                obj["qss_last_bake_target_face_count"] = len(target_face_indices)
+                obj["qss_last_bake_target_face_count"] = len(receiver_face_indices)
+            elif len(receiver_face_indices) != len(mesh.polygons):
+                # Full-map bake still keeps every BSP face as geometry. Only
+                # real light-receiving material islands retain in-image UVs.
+                lightmap_uv_backup = _qss_mask_unselected_lightmap_uvs(
+                    obj, light_uv, receiver_face_indices
+                )
+                obj["qss_last_bake_scope"] = "FULL_WITH_NODRAW_EXCLUDED"
+                obj["qss_last_bake_target_face_count"] = len(receiver_face_indices)
 
             for mat in mesh.materials:
                 if mat is None:
@@ -8319,10 +8340,16 @@ class QSS_OT_bake_scene_lights(Operator):
                 if output is None:
                     output = nodes.new('ShaderNodeOutputMaterial')
                 old_surface = [(l.from_node, l.from_socket) for l in links if l.to_socket == output.inputs['Surface']]
-                diffuse = nodes.new('ShaderNodeBsdfDiffuse')
-                diffuse.name = 'QSS_TEMP_CyclesBake_Diffuse'
-                diffuse.inputs['Color'].default_value = (1.0, 1.0, 1.0, 1.0)
-                diffuse.inputs['Roughness'].default_value = 1.0
+                if str(mat.get("qss_surface_policy", surface_policy.POLICY_RENDER)).upper() == surface_policy.POLICY_NODRAW:
+                    diffuse = nodes.new('ShaderNodeBsdfTransparent')
+                    diffuse.name = 'QSS_TEMP_CyclesBake_NodrawTransparent'
+                else:
+                    # NODRAW_BLOCKER (blocklight) remains opaque to Cycles rays
+                    # but its lightmap UVs are moved out of the bake image.
+                    diffuse = nodes.new('ShaderNodeBsdfDiffuse')
+                    diffuse.name = 'QSS_TEMP_CyclesBake_Diffuse'
+                    diffuse.inputs['Color'].default_value = (1.0, 1.0, 1.0, 1.0)
+                    diffuse.inputs['Roughness'].default_value = 1.0
                 target_node = _find_image_node(mat, 'lightmap')
                 if target_node is None:
                     target_node = nodes.new('ShaderNodeTexImage')
@@ -8360,13 +8387,13 @@ class QSS_OT_bake_scene_lights(Operator):
             # Measure the raw Cycles irradiance at actual BSP luxel centres.
             # The atlas is float/Non-Color: unlike an 8-bit byte image it can
             # preserve low irradiance values and calibrated values above 1.0.
-            bake_values = _lightmap_sample_luminances(obj, bake_target, target_face_indices)
+            bake_values = _lightmap_sample_luminances(obj, bake_target, receiver_face_indices)
             raw_bake_mean = (sum(bake_values) / len(bake_values)) if bake_values else 0.0
             raw_image_stats = _image_rgb_statistics(bake_target)
-            raw_face_coverage = _lightmap_face_coverage(obj, bake_target, face_indices=target_face_indices)
+            raw_face_coverage = _lightmap_face_coverage(obj, bake_target, face_indices=receiver_face_indices)
             obj['qss_last_bake_attempt_face_coverage'] = str(raw_face_coverage)
             source_image = bpy.data.images.get(obj.get('qss_original_lightmap_backup', ''))
-            source_values = _lightmap_sample_luminances(obj, source_image, target_face_indices) if source_image else []
+            source_values = _lightmap_sample_luminances(obj, source_image, receiver_face_indices) if source_image else []
             source_mean = (sum(source_values) / len(source_values)) if source_values else 0.0
             energy_scale = max(0.0, float(scene.qss_light_energy_scale))
             max_energy_after_bake = max((float(o.data.energy) for o in imported_lights), default=0.0)
@@ -8450,7 +8477,7 @@ class QSS_OT_bake_scene_lights(Operator):
                 pass
             bake_succeeded = True
             _bake_progress(5, 'Bake validated and atlas updated; restoring Blender scene state')
-            values = _lightmap_sample_luminances(obj, image, target_face_indices)
+            values = _lightmap_sample_luminances(obj, image, receiver_face_indices)
             obj['qss_last_bake_luxel_mean'] = float(sum(values) / max(1, len(values)))
             obj['qss_last_bake_luxel_max'] = float(max(values, default=0.0))
             obj['qss_last_bake_energy_scale'] = float(scene.qss_light_energy_scale)
