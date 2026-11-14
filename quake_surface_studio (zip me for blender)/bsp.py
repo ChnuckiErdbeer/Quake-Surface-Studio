@@ -626,6 +626,63 @@ def parse_inline_model_references(entities: Sequence[dict[str, str]], model_coun
     return result
 
 
+def _entity_key_enabled(entity: dict[str, str], *keys: str) -> bool:
+    """Interpret conventional numeric/boolean entity keys without assuming a classname."""
+    for key in keys:
+        raw = str(entity.get(key, "")).strip().casefold()
+        if not raw:
+            continue
+        if raw in {"true", "yes", "on"}:
+            return True
+        if raw in {"false", "no", "off"}:
+            continue
+        try:
+            if float(raw) != 0.0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def inline_model_shadow_policy(entity: dict[str, str]) -> str:
+    """Return ericw-compatible coarse bmodel shadow policy.
+
+    'none' is the default for inline brush models. 'all' means _shadow is
+    enabled (or a non-default object channel mask implicitly enables it).
+    'self', 'world_only' and 'switchable' need source/hit model-aware ray
+    filtering and are reported as special policies by the Blender importer.
+    """
+    if _entity_key_enabled(entity, "_shadowworldonly"):
+        return "world_only"
+    if _entity_key_enabled(entity, "_shadowself", "_selfshadow"):
+        return "self"
+    if _entity_key_enabled(entity, "_switchableshadow"):
+        return "switchable"
+
+    shadow_value = str(entity.get("_shadow", "")).strip()
+    if shadow_value:
+        try:
+            parsed_shadow = float(shadow_value)
+        except (TypeError, ValueError):
+            parsed_shadow = 0.0
+        if parsed_shadow == -1.0:
+            # ericw uses -1 on func_detail/func_group to opt out.
+            return "none"
+        if parsed_shadow == 1.0:
+            return "all"
+
+    channel_mask = str(entity.get("_object_channel_mask", "1")).strip()
+    try:
+        if int(channel_mask, 0) != 1:
+            # ericw implicitly enables _shadow when the object channel differs
+            # from its default channel mask.
+            return "all"
+    except (TypeError, ValueError):
+        if channel_mask and channel_mask != "1":
+            return "all"
+    return "none"
+
+
 def transform_inline_model_position(position, entity: dict[str, str]) -> tuple[float, float, float]:
     """Apply a Quake brush entity's initial origin/angles to one model-local point.
 
@@ -676,12 +733,10 @@ def inverse_transform_inline_model_position(position, entity: dict[str, str]) ->
         origin_values = [0.0, 0.0, 0.0]
     try:
         angle_text = str(entity.get("angles", "")).replace(",", " ").split()
-        if len(angle_text) >= 3:
-            angle_values = [float(value) for value in angle_text[:3]]
-        elif entity.get("angle") is not None:
-            angle_values = [0.0, float(entity.get("angle", 0.0)), 0.0]
-        else:
-            angle_values = [0.0, 0.0, 0.0]
+        angle_values = (
+            [float(value) for value in angle_text[:3]]
+            if len(angle_text) >= 3 else [0.0, 0.0, 0.0]
+        )
     except (TypeError, ValueError):
         angle_values = [0.0, 0.0, 0.0]
 
