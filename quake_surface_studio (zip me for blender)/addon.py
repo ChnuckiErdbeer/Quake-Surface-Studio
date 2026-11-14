@@ -29,7 +29,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils
 
 
-ADDON_VERSION = (0, 21, 7)
+ADDON_VERSION = (0, 21, 8)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -1806,6 +1806,59 @@ def _load_quake_image_and_materials(parsed, palette, wad_textures=None, loose_te
     materials.append(missing)
     return entries, materials, material_by_miptex, missing, source_counts, sorted(set(missing_names))
 
+
+
+
+def _qss_inline_entity_shadow_exempt(entity):
+    """True for moving/illusionary Quake brush entities that must not occlude static lighting."""
+    classname = str(entity.get("classname", "")).strip().lower()
+    return classname in {
+        "func_door", "func_door_rotating", "func_plat", "func_train",
+        "func_rotating", "func_button", "func_bobbing", "func_pendulum",
+        "func_water", "func_illusionary",
+    }
+
+
+def _qss_make_shadow_ray_transparent_material(material):
+    """Copy a material and make it transparent only to Cycles shadow rays."""
+    if material is None:
+        return None
+    variant = material.copy()
+    variant.name = material.name + "_QSS_NO_SHADOW"
+    variant["qss_inline_model_no_shadow"] = True
+    variant.use_nodes = True
+    tree = variant.node_tree
+    if tree is None:
+        return variant
+    nodes, links = tree.nodes, tree.links
+    if any(node.get("qss_role") == "inline_model_shadow_mix" for node in nodes):
+        return variant
+    output = next(
+        (node for node in nodes if node.type == "OUTPUT_MATERIAL" and getattr(node, "is_active_output", True)),
+        None,
+    )
+    if output is None:
+        return variant
+    surface = output.inputs.get("Surface")
+    original_link = next((link for link in links if link.to_socket == surface), None) if surface else None
+    if original_link is None:
+        return variant
+    original_shader = original_link.from_socket
+    links.remove(original_link)
+    light_path = nodes.new("ShaderNodeLightPath")
+    light_path.location = (output.location.x - 520, output.location.y - 80)
+    transparent = nodes.new("ShaderNodeBsdfTransparent")
+    transparent.location = (output.location.x - 280, output.location.y - 180)
+    mix = nodes.new("ShaderNodeMixShader")
+    mix.location = (output.location.x - 40, output.location.y)
+    mix["qss_role"] = "inline_model_shadow_mix"
+    # Only shadow rays see transparency; diffuse/camera/bake rays keep the
+    # original shader so the mover itself can still receive and display light.
+    links.new(light_path.outputs["Is Shadow Ray"], mix.inputs[0])
+    links.new(original_shader, mix.inputs[1])
+    links.new(transparent.outputs["BSDF"], mix.inputs[2])
+    links.new(mix.outputs["Shader"], surface)
+    return variant
 
 def _get_or_make_face_attributes(mesh):
     names = ('qss_bsp_face_id', 'qss_bsp_texinfo_id', 'qss_bsp_miptex_id', 'qss_bsp_model_id')
@@ -3880,8 +3933,34 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
         if mat.name not in material_slots:
             obj.data.materials.append(mat)
             material_slots[mat.name] = len(obj.data.materials) - 1
-    for poly, mat in zip(mesh.polygons, imported_materials):
-        poly.material_index = material_slots[mat.name]
+    model_entities_by_id = {
+        int(model_index): bsp_entities[entity_index]
+        for model_index, entity_index in model_entity_indices.items()
+        if 0 <= entity_index < len(bsp_entities)
+    }
+    no_shadow_model_ids = {
+        model_id for model_id, entity in model_entities_by_id.items()
+        if _qss_inline_entity_shadow_exempt(entity)
+    }
+    no_shadow_material_slots = {}
+    no_shadow_face_count = 0
+    for poly_index, (poly, mat) in enumerate(zip(mesh.polygons, imported_materials)):
+        model_id = int(imported_model_ids[poly_index])
+        if model_id in no_shadow_model_ids:
+            variant_slot = no_shadow_material_slots.get(mat.name)
+            if variant_slot is None:
+                variant = _qss_make_shadow_ray_transparent_material(mat)
+                if variant is not None and variant.get("qss_inline_model_no_shadow"):
+                    obj.data.materials.append(variant)
+                    variant_slot = len(obj.data.materials) - 1
+                    no_shadow_material_slots[mat.name] = variant_slot
+            if variant_slot is not None:
+                poly.material_index = variant_slot
+                no_shadow_face_count += 1
+            else:
+                poly.material_index = material_slots[mat.name]
+        else:
+            poly.material_index = material_slots[mat.name]
 
     uv_layer = mesh.uv_layers.new(name="Quake_Texture_UV")
     loop_cursor = 0
@@ -3929,6 +4008,12 @@ def _create_bsp_object(context, parsed, source_path, palette, game_dir, palette_
     obj['qss_imported_face_count'] = len(imported_face_ids)
     obj['qss_total_bsp_faces'] = len(faces)
     obj['qss_bsp_model_count'] = int(len(model_records))
+    obj['qss_inline_model_no_shadow_face_count'] = int(no_shadow_face_count)
+    obj['qss_inline_model_no_shadow_classnames'] = ", ".join(sorted({
+        str(entity.get("classname", "")).strip().lower()
+        for model_id, entity in model_entities_by_id.items()
+        if model_id in no_shadow_model_ids
+    }))
     obj['qss_inline_model_entity_map'] = json.dumps({
         str(model_index): int(entity_index)
         for model_index, entity_index in model_entity_indices.items()
@@ -9814,6 +9899,7 @@ def _qss_diagnostics_text(context, obj):
         f'Source-match calibration: {obj.get("qss_light_energy_calibration", 1.0)}',
         f'Last bake: raw_mean={obj.get("qss_last_bake_raw_mean", "n/a")} source_mean={obj.get("qss_last_bake_source_mean", "n/a")} atlas_mean={obj.get("qss_last_bake_luxel_mean", "n/a")} max={obj.get("qss_last_bake_luxel_max", "n/a")} normalization={obj.get("qss_last_bake_output_scale", "n/a")}',
         f'Last successful bake timing: total={bake_stats_utils.format_duration(obj.get("qss_last_bake_duration_seconds"))}; Cycles operator={bake_stats_utils.format_duration(obj.get("qss_last_bake_cycles_seconds"))}',
+        f'Inline mover shadow policy: faces={obj.get("qss_inline_model_no_shadow_face_count", 0)} classes={obj.get("qss_inline_model_no_shadow_classnames", "")}',
         f'Last bake attempt timing: total={bake_stats_utils.format_duration(obj.get("qss_last_bake_attempt_duration_seconds"))}; Cycles operator={bake_stats_utils.format_duration(obj.get("qss_last_bake_attempt_cycles_seconds"))}',
         f'Last successful bake workload: samples={obj.get("qss_last_bake_samples", "n/a")} device={obj.get("qss_last_bake_device", "n/a")} diffuse_bounces={obj.get("qss_last_bake_diffuse_bounces", "n/a")} atlas={obj.get("qss_last_bake_atlas_size", "n/a")}px receiver_faces={obj.get("qss_last_bake_receiver_faces", "n/a")}',
         f'Last attempted bake workload: samples={obj.get("qss_last_bake_attempt_samples", "n/a")} device={obj.get("qss_last_bake_attempt_device", "n/a")} diffuse_bounces={obj.get("qss_last_bake_attempt_diffuse_bounces", "n/a")} atlas={obj.get("qss_last_bake_attempt_atlas_size", "n/a")}px receiver_faces={obj.get("qss_last_bake_attempt_receiver_faces", "n/a")}',
@@ -10046,6 +10132,30 @@ class QSS_OT_write_diagnostics(Operator, ExportHelper):
         except Exception as exc:
             self.report({'ERROR'}, f'Could not write diagnostics: {exc}')
             return {'CANCELLED'}
+
+
+
+
+class QSS_OT_copy_stats(Operator):
+    bl_idname = "qss.copy_stats"
+    bl_label = "Copy Stats to Clipboard"
+    bl_description = "Copy map statistics and detailed lighting diagnostics as plain text"
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        return bool(obj and obj.type == "MESH" and obj.get("qss_object_role") == "quake_bsp29")
+
+    def execute(self, context):
+        obj = context.object
+        try:
+            report = _qss_diagnostics_text(context, obj)
+            context.window_manager.clipboard = report
+            self.report({"INFO"}, f"Copied {len(report)} characters of SLOPGATE stats and diagnostics")
+            return {"FINISHED"}
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not copy stats: {exc}")
+            return {"CANCELLED"}
 
 
 class QSS_OT_run_blender_selftest(Operator):
@@ -11489,32 +11599,6 @@ class QSS_PT_lighting(Panel):
         bake.enabled = context.mode in {"OBJECT", "EDIT_MESH"} and mode in {"realtime", "cycles"} and obj.get("qss_light_entity_count", 0) > 0
         bake.prop(context.scene, "qss_bake_only_selected_faces", text="Only Selected Faces")
         bake.operator(QSS_OT_bake_scene_lights.bl_idname, text="Bake Lightmap", icon="RENDER_STILL")
-        bake_timing = layout.box()
-        bake_timing.label(text="LAST BAKE", icon="TIME")
-        last_total = obj.get("qss_last_bake_duration_seconds")
-        if last_total is not None:
-            bake_timing.label(
-                text=f"Total: {bake_stats_utils.format_duration(last_total)}"
-            )
-            bake_timing.label(
-                text=f"Cycles: {bake_stats_utils.format_duration(obj.get('qss_last_bake_cycles_seconds'))}"
-            )
-            bake_timing.label(
-                text=f"{obj.get('qss_last_bake_samples', 'n/a')} samples · "
-                     f"{obj.get('qss_last_bake_diffuse_bounces', 'n/a')} bounces · "
-                     f"{obj.get('qss_last_bake_device', 'DEFAULT')} · "
-                     f"{obj.get('qss_last_bake_receiver_faces', 'n/a')} faces"
-            )
-        else:
-            bake_timing.label(text="No successful bake timing recorded yet.")
-        last_attempt = obj.get("qss_last_bake_attempt_duration_seconds")
-        if last_attempt is not None and last_total is None:
-            bake_timing.label(
-                text=f"Last attempt: {bake_stats_utils.format_duration(last_attempt)}"
-            )
-            bake_timing.label(
-                text=f"Cycles attempt: {bake_stats_utils.format_duration(obj.get('qss_last_bake_attempt_cycles_seconds'))}"
-            )
         if mode == "realtime":
             layout.label(text="Eevee preview selected; baking currently uses the Cycles backend.", icon="INFO")
         if obj.get("qss_last_quake_bake_error"):
@@ -11566,6 +11650,9 @@ class QSS_PT_stats(Panel):
             text=f"BSP inline models: {int(obj.get('qss_bsp_model_count', 0))} "
                  f"· {len(set(int(item.value) for item in mesh.attributes['qss_bsp_model_id'].data)) if mesh.attributes.get('qss_bsp_model_id') else 0} represented"
         )
+        geometry.label(
+            text=f"Mover faces not casting Cycles shadows: {int(obj.get('qss_inline_model_no_shadow_face_count', 0))}"
+        )
         selected_paint_faces = _qss_selected_paint_face_count(context, obj)
         if selected_paint_faces:
             estimate = _qss_estimate_texture_paint_memory(context, obj)
@@ -11594,8 +11681,19 @@ class QSS_PT_stats(Panel):
             memory = int(image.size[0]) * int(image.size[1]) * (16 if image.is_float else 4)
             lighting.label(text=f"Working atlas: {image.size[0]}×{image.size[1]} · ~{memory / (1024 * 1024):.1f} MiB")
         lighting.label(text=f"Generated bake: {'Available' if _qss_has_baked_lightmap(obj) else 'Not baked'}")
+        last_total = obj.get("qss_last_bake_duration_seconds")
+        if last_total is not None:
+            lighting.label(text=f"Last bake total: {bake_stats_utils.format_duration(last_total)}")
+            lighting.label(text=f"Cycles: {bake_stats_utils.format_duration(obj.get('qss_last_bake_cycles_seconds'))}")
+            lighting.label(
+                text=f"Workload: {obj.get('qss_last_bake_samples', 'n/a')} samples · "
+                     f"{obj.get('qss_last_bake_diffuse_bounces', 'n/a')} bounces · "
+                     f"{obj.get('qss_last_bake_device', 'DEFAULT')} · "
+                     f"{obj.get('qss_last_bake_receiver_faces', 'n/a')} faces"
+            )
         diagnostics = layout.box()
         diagnostics.label(text="EXPORT & DIAGNOSTICS", icon="EXPORT")
+        diagnostics.operator(QSS_OT_copy_stats.bl_idname, text="Copy Stats to Clipboard", icon="COPYDOWN")
         last_export = _qss_last_export_path(obj)
         diagnostics.label(text=f"Last export: {os.path.basename(last_export) if last_export else 'Not exported'}")
         diagnostics.label(text=f"Format: {obj.get('qss_last_export_mode', '—')}")
@@ -11630,7 +11728,7 @@ CLASSES = (
     QSS_OT_bake_scene_lights, QSS_OT_undo_last_bake,
     QSS_OT_restore_original_lightmap, QSS_OT_refresh_lightmap_preview,
     QSS_OT_apply_light_energy_scale, QSS_OT_calibrate_lights_to_source,
-    QSS_OT_write_diagnostics, QSS_OT_run_blender_selftest, QSS_OT_export_bsp,
+    QSS_OT_write_diagnostics, QSS_OT_copy_stats, QSS_OT_run_blender_selftest, QSS_OT_export_bsp,
     QSS_PT_main, QSS_PT_quick_actions, QSS_PT_project, QSS_PT_lighting, QSS_PT_stats,
 )
 
