@@ -16022,3 +16022,60 @@ The reported issues were separated by subsystem:
 5. Test in multi-object Edit Mode and verify all previous selected objects and active edit object are restored after both success and a deliberately induced failure.
 6. Open Browse Maps and hover through a large PAK map list; filtering must not trigger filesystem/archive rescans. Test Extract PAKs with duplicated paths across pak0/pak1 and verify the archives are unchanged.
 
+
+
+## 2026-11-14 — Context-driven selection and bake controls (SLOPGATE 0.21.2)
+
+### You
+
+> Bake Scope selector does not make sense right now. One can only select faces in
+> the edit mode, and lights only in object mode. We need either a button in the
+> sidebar or better entries in the right click context menues. The idea: In
+> object mode select some lights. rightclick one of them and chose "select
+> affected faces". This switches to edit mode with the faces selected. And vice
+> versa in edit mode, when you select any faces you can righ click one of them
+> and chose "select affecting lights" wich sends you to object mode with the
+> lights selected. In theory that would be enough. To bake the whole map just
+> select everything. And instead of the bake dropdown a simple chebox "only
+> selected faces".
+>
+> Also baking scope does not seem to work as intenden. When i bake it does do the
+> job of leaving all feaces exept the selected as is but it obviousely bakes the
+> whole level and just doesnt use most of it. All faces take es long a a single
+> face.
+>
+> I think i found the reason for the bright preoviews: the material uses the
+> emission slot wich is the right one for the original lighting. But for eevee
+> and cycles it should be switched to diffuse.
+>
+> we dont need the extract pak button. Remove it.
+
+### Assistant — implementation
+
+- Replaced Bake Scope dropdown with one scene checkbox, Only Selected Faces, and one Bake Lightmap action.
+- Added Object Mode context-menu action, Select Affected Faces, for selected imported SLOPGATE lights. It finds direct-light receiver faces and changes to Edit Mode with those faces selected.
+- Added Mesh Edit Mode context-menu action, Select Affecting Lights. It finds imported lights whose direct receiver mask intersects selected faces and changes to Object Mode with those lights selected.
+- Added callback cleanup to prevent duplicate context-menu entries on add-on reload.
+- Removed the Extract PAKs operator and button workflow; Browse Maps remains.
+- Important: the partial-bake UV mask still preserves unselected atlas pixels, but it does not make Cycles skip evaluating the complete receiver mesh. The user's timing observation is valid. A true speed optimization still requires a temporary receiver mesh containing selected faces, with full BSP geometry retained separately as an occluder/lighting contributor. This is not implemented and must not be described as faster yet.
+- Existing material code already separates modes: Original/Baked lightmap preview uses albedo multiplied by lightmap into Principled Emission, intentionally avoiding extra Blender scene illumination. Live Eevee/Cycles preview uses a diffuse Base Color and disconnects emission. Do not blindly convert Original/Baked to diffuse; this may double-light the Quake bake. Brightness diagnosis remains open.
+
+### Verification and installer
+
+- SLOPGATE 0.21.2 build commit: 4ea772c5068e373bcb38bb397efe807a8fa0e1bf.
+- Follow-up comment-only addon commit: 88e38b4fb8abce54704360b5b25b55305091c8fe.
+- QSS Python workflow 43537033763, job 132268411787: passed Python compilation, 232 standalone tests, package assembly and artifact upload.
+- Artifact ID 14090296445, Quake-Surface-Studio-v0.21.2-Blender-Install.zip, 264,768 bytes.
+- SHA-256: d2e168089a930d8eac260dd6aad6564567188c182557b6832765e2becbca0109.
+- GitHub artifact page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43537033763/artifacts/14090296445
+- Downloaded ZIP: sandbox:/mnt/data/SLOPGATE-v0.21.2-Blender-Install.zip.
+- Interactive Blender 5.2 context-menu behaviour, actual selective-bake speed, and preview appearance remain untested.
+
+### Next steps
+
+1. Implement true receiver-only Cycles baking using a temporary mesh of selected faces and full BSP geometry retained for occlusion; benchmark one face against a full map.
+2. Test both context-menu transitions in Blender 5.2, including multi-map scenes and mode/selection restoration.
+3. Measure Original/Baked and live Eevee/Cycles preview modes separately; preserve intentional emission for Quake source lightmaps.
+4. Test Only Selected Faces checkbox, empty selection handling, full-map bake, Undo and untouched-atlas pixel preservation.
+5. Continue delivering a verified install ZIP for each build, with exact commit, test status and SHA-256.
+
