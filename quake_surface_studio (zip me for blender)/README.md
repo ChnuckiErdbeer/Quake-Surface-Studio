@@ -1,3 +1,18 @@
+# SLOPGATE 0.21.3
+
+## 0.21.3 — Blender 5.3 fixes and Quake nodraw surfaces
+
+- Fixed a bake operator crash caused by an undefined scope label. The operator now derives the label from the selected-face checkbox before entering the object-mode bake path.
+- Fixed the Object Mode **Select Affected Faces** context action: selected SLOPGATE lights are resolved to their owning BSP through the per-map collection. The BSP no longer needs to be selected alongside the lights.
+- Integrated the Quake surface classifier into material creation, Original/Baked and live previews, Cycles baking, and Quake Direct light baking.
+- Compiler-only surfaces including trigger, clip, origin, hint, skip, null, nodraw, bevel and areaportal variants are transparent in the viewport/material preview, do not receive lightmaps, and do not block Quake Direct visibility rays.
+- The special blocklight surface is transparent to the camera and does not receive a lightmap, but remains opaque to lighting/shadow rays.
+- Cycles bake temporarily uses a Transparent BSDF for non-blocking nodraw materials. Blocklight remains opaque during baking, while its face UVs are excluded from the lightmap target.
+- Added standalone regression tests for the surface classifier and its receiver/occluder semantics.
+- This build does not implement true selected-face Cycles acceleration. The existing UV-isolation approach preserves other atlas pixels, but Cycles still evaluates the complete BSP mesh. A receiver-only temporary mesh with the full map retained as an occluder remains future work.
+- Live Eevee/Cycles previews already use diffuse materials. Their remaining brightness mismatch is not fixed in this release; the existing Quake-to-Blender lamp energy conversion still requires calibration.
+- Blender 5.3 interactive validation is based on the user's report that the add-on loads and **Select Affecting Lights** works. The new reverse context action and bake correction still need the user's runtime check.
+
 # SLOPGATE 0.21.2
 
 ## 0.21.2 — Context-driven selection workflow
