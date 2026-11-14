@@ -1,4 +1,4 @@
-# SLOPGATE 0.21.9
+# SLOPGATE 0.21.10
 
 ## 0.21.5 — visible bake timing and BSP inline-model placement
 
@@ -761,3 +761,15 @@ console.
 5. The report is saved as `~/Desktop/QSS_Blender_SelfTest.txt` (or the home folder if Desktop does not exist) and embedded in a Blender Text datablock named `QSS_Blender_SelfTest`.
 
 The benchmark is deliberately read-only. It does not bake into or modify the working lightmap atlas. On large maps it can take a while because ray-traced visibility is evaluated for each candidate light at each luxel. The current test map's roughly 3,782 luxels is a small workload.
+
+
+## 0.21.10 — generic inline shadow policy and undo boundaries
+
+- Replaces the classname-based moving-brush shadow exemption with BSP inline-model entity-key handling. All inline brush models default to non-shadow-casting, matching ericw; _shadow=1 enables full shadow casting and _shadow=-1 explicitly disables it.
+- Secret doors and mod-defined inline brush entities no longer need a classname whitelist entry to receive the default non-shadow-casting behavior.
+- _shadowself, _shadowworldonly, and _switchableshadow are detected and counted, but currently use conservative non-shadowing in Blender until source-model/hit-model-aware ray filtering is implemented. These special modes are not yet ericw-equivalent.
+- Corrects inverse inline-model transforms so the single angle key is treated as mover travel direction, not an initial model rotation, matching the forward transform and Quake brush-entity semantics.
+- Makes reversible texture/material visibility toggles, painted-texture switching, painted-lightmap switching, and closing a map participate in Blender undo.
+- Removes global UNDO from Texture Paint mode activation and direct Quake image-buffer baking. These operations alter paint context or image pixels through Python and are not safely represented by Blender's generic operator undo stack; native paint undo and explicit lightmap snapshots remain the intended recovery mechanisms.
+- Adds static undo-contract tests and inline shadow-key/transform regression tests.
+- Runtime Ctrl+Z/Ctrl+Shift+Z behavior, image-paint interaction, secret-door baking, and special shadow-key behavior still require Blender 5.3 validation.
