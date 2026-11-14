@@ -422,3 +422,11 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - Downloaded archive passed `unzip -t` with no corrupt members.
 - Timing display is now directly below the Bake Lightmap button in the Lighting panel, not in the collapsed STATS accordion.
 - The inline brush-model geometry placement pass is included in 0.21.6. It retains one combined map mesh; this does not yet provide independently selectable animated mover objects. User runtime validation in Blender 5.3 is required before treating placement as fully verified.
+
+
+### 0.21.7 — bake workload telemetry
+
+- Adds effective Cycles sample count, device, diffuse bounce count, lightmap atlas size, and receiver-face count to the visible last-bake box and diagnostics report.
+- Records both successful and attempted bake workload where possible. This is intended to distinguish a Cycles-time regression from a change in workload or SLOPGATE setup overhead.
+- No sample count, bounce, device, or other bake quality/performance setting is changed by this telemetry.
+- Source-level observation: the current bake path enforces a minimum of 96 Cycles samples (`scene.cycles.samples = max(96, old_cycles['samples'])`). This could be relevant to the reported time difference if older builds used fewer samples, but there is no verified historical settings comparison. Do not lower it without a quality comparison and user approval.
