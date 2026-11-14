@@ -488,3 +488,74 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - Latest bake: total **3m 34.0s**; Cycles **3m 30.0s**; non-Cycles overhead approximately **4.0s**. Compared with prior 0.21.9 test (3m 33.2s / 3m 30s), bake time is effectively unchanged. No evidence of a new performance regression from the shader correction.
 - Treat mover lighting as user-verified for the tested case, not as universal coverage of every Quake mover classname or map setup.
 - Next release-readiness work should prioritize: (1) inline-model/entity fixture coverage and independent object semantics/transform edge cases; (2) audit shadow-casting policy by classname and compare representative maps to ericw; (3) BSP2/2PSB support if included in 1.0 scope; (4) lighting-fidelity gap documentation/tests (radiosity/bounce, dirt, surface emitters, sky/sun, deviance/area sampling, lightstyles); (5) lightmap edge bleed and receiver-only bake efficiency; (6) clean install/upgrade, supported Blender-version matrix, and regression suite on representative maps. Do not make all compiler-fidelity features a hard 1.0 blocker unless the project explicitly promises ericw parity.
+
+
+---
+
+## 1.0 release-candidate scope and priorities — confirmed 2026-11-14
+
+### Release scope
+
+- User confirms **classic Quake 1 BSP29 only** for SLOPGATE 1.0 / 1.0 RC.
+- BSP2 and 2PSB, plus broader engine/BSP variants, are a core post-1.0 expansion track. Do not hold 1.0 RC for those formats.
+- The user considers lighting fidelity, workflow/usability, and reliable undo/redo important RC concerns; these must not be demoted to vague future polish.
+- Full bit-identical ericw feature parity is not promised for 1.0 unless the scope is explicitly changed. Core results must nevertheless be visually dependable and known limitations documented.
+
+### User-confirmed runtime status
+
+- Blender 5.3: affected-face selection works; Cycles bake works; trigger/clip faces are no longer visible in the intended workflow.
+- SLOPGATE 0.21.9: movable-object lighting now works for tested doors/platforms. User confirms the fix.
+- Secret doors still do not get the same behavior. The user confirms inline model placement/entity handling works for ordinary doors/platforms; do not misrepresent this as a general failure of inline model placement. Treat secret doors as the remaining entity-policy coverage issue.
+- Latest bake timings reported by the user: total 3m 34s; Cycles 3m 30s. Prior measurements are roughly the same; non-Cycles overhead is about 4 seconds. The main speed opportunity is inside Cycles, not Python setup.
+- User reports preview modes are still too bright compared with the reasonably accurate bake.
+- User reports blur/visible edge artifacts between some lightmapped faces.
+- Reliable undo and redo across editing workflows is a major usability priority.
+- The user asked whether Texture Paint has layers; clarify native Blender capability and SLOPGATE's current source/painted behavior (see below).
+
+### Important ericw-tools discovery: brush-model shadow rules are entity-key based, not classname based
+
+This supersedes the earlier SLOPGATE plan to keep growing a hard-coded list of exempt classnames.
+
+- ericw 'light' reads the entity definitions contained in the compiled BSP and computes light/shadow information from them. It does not consult an FGD at lighting time.
+- The relevant keys apply to **any entity with a brush model**:
+  - '_shadow': when 1, the bmodel casts shadows on other models and itself.
+  - '_shadowself' / '_selfshadow': self-shadow only.
+  - '_shadowworldonly': shadow the world only, not other bmodels.
+  - '_switchableshadow': dynamic/switchable shadow behavior with assigned lightstyle metadata.
+  - The documented default for these keys is 0.
+- ericw source confirms the actual rule: the world model is always included as an occluder; an inline model is only added to the solid/filter shadow geometry if one of 'shadow', 'shadowself', 'shadowworldonly', or 'switchableshadow' is enabled. The ray filter further distinguishes world-only and self-only blocking. Default inline bmodels therefore receive light but do not block other lighting rays.
+- This is why a custom mod classname needs no special compiler registration. If QBSP emits a proper inline model (model "*n") and its entity lump contains '_shadow' keys, ericw reads the key generically. An FGD can expose/document the property to TrenchBroom or another editor, but the FGD is not the mechanism the light compiler uses.
+- SLOPGATE 0.21.9 currently selects non-shadow material variants using a classname whitelist (func_door, func_plat, etc.). The missing secret-door class is a likely reason that the secret door is still an occluder. Do not add one classname as another special case.
+- Next implementation: resolve the face's inline-model ID to its BSP entity and apply a generic, key-driven shadow policy. Default brush models should not cast shadows; '_shadow' enables all-model blocking; '_shadowself', '_shadowworldonly', and '_switchableshadow' need their documented relationship/style semantics. 'func_detail'/'func_group' compiler merging and texture-level no-shadow flags need separate handling where applicable.
+- Caution: the current single combined Blender mesh plus per-face material shader cannot fully express all ericw source-vs-hit model distinctions ('_shadowself' and '_shadowworldonly', in particular). Evaluate separate model objects or bake-only ray-visibility proxies for exact behavior. Preserve the current working behavior while introducing this policy; compare against ericw's own test maps.
+- Source references:
+  - ericw light model entity keys: https://ericw-tools.readthedocs.io/en/latest/light.html#model-entity-keys
+  - ericw QBSP compiler-internal bmodels: https://ericw-tools.readthedocs.io/en/latest/qbsp.html
+  - ericw shadow model setup: https://github.com/ericwa/ericw-tools/blob/master/include/light/light.hh#L203-L260
+  - ericw per-model occluder construction and ray filtering: https://github.com/ericwa/ericw-tools/blob/master/light/trace_embree.cc#L304-L350 and https://github.com/ericwa/ericw-tools/blob/master/light/trace_embree.cc#L597-L692
+  - ericw regression map with '_shadow', '_shadowself' and '_shadowworldonly': https://github.com/ericwa/ericw-tools/blob/master/testmaps/deprecated/shadowself_shadow.map
+
+### 1.0 RC work packages, in implementation order
+
+1. **Generic inline-bmodel shadow policy (highest priority).** Remove classname-only behavior in favor of ericw-compatible entity model keys. Verify ordinary doors/platforms, secret doors, a custom mod-defined brush entity, 'func_wall' with '_shadow 1', self-only/world-only shadows, and switchable-shadow behavior or a documented limitation.
+2. **Lighting preview fidelity.** Preview modes currently use separate paths: Original/Baked material preview multiplies albedo by a lightmap through a Principled emission input; Eevee/Cycles Live previews use native Blender lights with converted energy/falloff approximations. The latter is intentionally not the same solver as the bake. Measure each path separately against the same BSP faces and bake; fix brightness/color-space/energy calibration without changing the accurate bake.
+3. **Lightmap seam/edge quality.** Investigate the reported blur and visible face boundaries. Audit atlas packing, gutter width, bake margin dilation, UV texel-center alignment, image interpolation, and resampling. Add a representative multi-face test map; verify after import, bake, painting, save/reopen, and BSP export. Keep atlas islands isolated and prevent black/neighbor-face bleed.
+4. **Reliable undo/redo.** Define a project-level edit transaction/history for destructive or stateful SLOPGATE operations (face detach/paint prep, image/UV/material changes, light edits/sync, bake/restore, resolution changes and export-side state). Ensure Ctrl+Z/Ctrl+Shift+Z or explicit SLOPGATE actions restore image pixels, UVs, material slots, metadata, source snapshots and light/scene state coherently. Existing **Undo Last Bake** is only a one-step bake snapshot, not comprehensive project undo. Preserve recoverability after failed operations and test save/reopen.
+5. **Bake performance.** Continue profiling because Cycles is ~98% of measured wall time. Benchmark fixed maps and workloads (samples, device, atlas size, receiver faces/material count/lights) and optimize a demonstrated bottleneck. Do not silently lower samples, bounce counts or image quality to meet a speed target. Compare visual error against the same ericw reference.
+6. **Release hardening.** Keep BSP29 as the only 1.0 target; exercise representative maps and mod content; test import/export round trips, texture/WAD workflow, lightmaps, custom entity keys, installation/upgrades and save/reopen in Blender 5.3; document unsupported ericw features; then freeze features and build the 1.0 RC package.
+
+Post-1.0: BSP2/2PSB support, expanded BSP dialect compatibility and any format-specific conversion/recovery work.
+
+### Blender Texture Paint layers — current understanding
+
+- Blender 5.3's built-in Texture Paint is image-based. A UV texture is an image; each UV texture has one image. A mesh may have multiple UV texture maps/images, but that is not a Photoshop-style non-destructive layer stack.
+- Blender 5.3 release notes mention improved Texture Paint Undo/Redo performance for high-resolution images and UDIMs; ordinary paint strokes should use Blender's native undo/redo.
+- SLOPGATE currently provides source-vs-painted toggles rather than a stack of named, independently blendable paint layers:
+  - Texture painting detaches selected BSP faces into face-local paint images/materials and preserves original material/UV data for toggling.
+  - Original and Baked lightmaps use separate painted image copies as overrides.
+  - These are reversible source/painted states, not multiple paint layers with opacity/blend modes and per-layer visibility.
+- A future SLOPGATE layer stack would require explicit image layers and a compositor/material-node composite, with a deterministic merged result for BSP/WAD export. Treat this as a distinct feature request; do not confuse multiple UV maps or paint slots with a true layer stack.
+- Blender 5.3 references:
+  - Texture Paint introduction: https://docs.blender.org/manual/en/5.3/sculpt_paint/texture_paint/introduction.html
+  - Blender 5.3 Texture Paint Undo/Redo release note: https://developer.blender.org/docs/release_notes/5.3/sculpt/
+
