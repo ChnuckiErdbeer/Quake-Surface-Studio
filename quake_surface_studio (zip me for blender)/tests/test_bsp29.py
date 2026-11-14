@@ -312,3 +312,12 @@ class InlineBrushModelTests(unittest.TestCase):
             self.assertAlmostEqual(actual, expected, places=6)
 
 
+    def test_inline_model_inverse_transform_round_trip(self):
+        entity = {'origin': '128 -64 32', 'angles': '25 90 -15'}
+        local = (13.5, -27.0, 41.25)
+        world = bsp.transform_inline_model_position(local, entity)
+        restored = bsp.inverse_transform_inline_model_position(world, entity)
+        for actual, expected in zip(restored, local):
+            self.assertAlmostEqual(actual, expected, places=6)
+
+
