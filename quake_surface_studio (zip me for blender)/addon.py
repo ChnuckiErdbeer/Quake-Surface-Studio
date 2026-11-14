@@ -4548,58 +4548,6 @@ class QSS_OT_browse_game_maps(Operator):
             return {'CANCELLED'}
 
 
-class QSS_OT_extract_game_paks(Operator):
-    bl_idname = "qss.extract_game_paks"
-    bl_label = "Extract All PAKs"
-    bl_description = "Extract each PAK archive into its own versioned SLOPGATE cache folder without modifying the originals"
-
-    _archives = []
-
-    def invoke(self, context, event):
-        try:
-            self.__class__._archives = quake_paths.discover_pak_archives(context.scene.qss_game_dir)
-        except Exception as exc:
-            self.report({'ERROR'}, f"Could not inspect PAK archives: {exc}")
-            return {'CANCELLED'}
-        if not self.__class__._archives:
-            self.report({'WARNING'}, "No valid pakN.pak archives found in the selected game folder.")
-            return {'CANCELLED'}
-        return context.window_manager.invoke_props_dialog(self, width=560)
-
-    def draw(self, context):
-        archives = self.__class__._archives
-        total_files = sum(int(item["entry_count"]) for item in archives)
-        total_bytes = sum(int(item["total_bytes"]) for item in archives)
-        layout = self.layout
-        layout.label(text=f"Archives: {len(archives)}")
-        for item in archives:
-            layout.label(
-                text=f"{item['name']}: {int(item['entry_count'])} files · {int(item['size']) / (1024 * 1024):.1f} MiB",
-                icon="PACKAGE",
-            )
-        layout.label(text=f"Total: {total_files} entries · {total_bytes / (1024 * 1024):.1f} MiB")
-        layout.label(text="Each archive becomes its own folder in Blender's SLOPGATE cache.", icon="INFO")
-
-    def execute(self, context):
-        game_dir = _qss_abspath(context.scene.qss_game_dir or "")
-        try:
-            cache_dir = bpy.utils.user_resource(
-                'DATAFILES', path=os.path.join('qss', 'pak_extracts'), create=True
-            )
-            results = quake_paths.extract_all_paks(game_dir, cache_dir)
-            files = sum(int(item["files_extracted"]) for item in results)
-            skipped = sum(int(item["files_skipped"]) for item in results)
-            output_root = os.path.dirname(results[0]["destination"]) if results else cache_dir
-            self.report(
-                {'INFO'},
-                f"Extracted {files} files from {len(results)} PAKs ({skipped} cached). Folder: {output_root}",
-            )
-            return {'FINISHED'}
-        except Exception as exc:
-            self.report({'ERROR'}, f"PAK extraction failed: {exc}")
-            return {'CANCELLED'}
-
-
 class QSS_OT_validate_bsp_export(Operator, ImportHelper):
     bl_idname = "qss.validate_bsp_export"
     bl_label = "Validate BSP Export"
@@ -8005,6 +7953,7 @@ class QSS_OT_bake_scene_lights(Operator):
             self.report({"ERROR"}, "Bake from Object Mode or Mesh Edit Mode.")
             return {"CANCELLED"}
 
+        self.only_selected_faces = bool(context.scene.qss_bake_only_selected_faces)
         target_faces = None
         if self.only_selected_faces:
             selected_faces = _qss_selected_face_indices(obj)
@@ -10865,6 +10814,15 @@ def _qss_draw_quake_palette_context_menu(self, context):
 
 def _qss_remove_context_menus():
     global _qss_context_menu_types
+    for menu_type, callback in (
+        (getattr(bpy.types, "VIEW3D_MT_object_context_menu", None), _qss_object_context_menu),
+        (getattr(bpy.types, "VIEW3D_MT_edit_mesh_context_menu", None), _qss_edit_mesh_context_menu),
+    ):
+        if menu_type is not None:
+            try:
+                menu_type.remove(callback)
+            except Exception:
+                pass
     for menu_type in tuple(_qss_context_menu_types):
         try:
             menu_type.remove(_qss_draw_quake_palette_context_menu)
@@ -11269,10 +11227,10 @@ class QSS_PT_lighting(Panel):
             depress=bool(obj.get("qss_source_lightmaps_enabled", True)),
         )
 
-        bake = layout.row(align=True)
+        bake = layout.column(align=True)
         bake.enabled = context.mode in {"OBJECT", "EDIT_MESH"} and mode in {"realtime", "cycles"} and obj.get("qss_light_entity_count", 0) > 0
-        bake.operator(QSS_OT_bake_scene_lights.bl_idname, text="Bake Lightmap", icon="RENDER_STILL").only_selected_faces = False
-        bake.operator(QSS_OT_bake_scene_lights.bl_idname, text="Bake Selected", icon="RENDER_STILL").only_selected_faces = True
+        bake.prop(context.scene, "qss_bake_only_selected_faces", text="Only Selected Faces")
+        bake.operator(QSS_OT_bake_scene_lights.bl_idname, text="Bake Lightmap", icon="RENDER_STILL")
         if mode == "realtime":
             layout.label(text="Eevee preview selected; baking currently uses the Cycles backend.", icon="INFO")
         if obj.get("qss_last_quake_bake_error"):
@@ -11367,7 +11325,7 @@ class QSS_PT_stats(Panel):
 
 
 CLASSES = (
-    QSS_OT_confirm_import, QSS_OT_import_bsp, QSS_OT_browse_game_maps, QSS_OT_extract_game_paks, QSS_OT_select_affected_faces, QSS_OT_select_affecting_lights, QSS_OT_validate_bsp_export,
+    QSS_OT_confirm_import, QSS_OT_import_bsp, QSS_OT_browse_game_maps, QSS_OT_select_affected_faces, QSS_OT_select_affecting_lights, QSS_OT_validate_bsp_export,
     QSS_OT_scan_game_maps, QSS_OT_run_python_tests, QSS_OT_run_map_audit,
     QSS_OT_launch_ironwail, QSS_OT_open_last_export, QSS_OT_test_in_ironwail, QSS_OT_open_config_text,
     QSS_OT_close_active_map, QSS_OT_load_quake_palette, QSS_OT_open_quake_palette,
@@ -11432,6 +11390,7 @@ def _remove_scene_properties():
         'qss_import_lightmap_resolution', 'qss_decoupled_world_units_per_luxel',
         'qss_bake_output_scale', 'qss_bake_bounces', 'qss_bake_match_source', 'qss_mmb_fps_walk',
         'qss_quake_bake_shadows', 'qss_quake_bake_gate', 'qss_paint_color_picker',
+        'qss_bake_only_selected_faces',
     ):
         if hasattr(bpy.types.Scene, name):
             try:
@@ -11655,6 +11614,11 @@ def register():
             description="0 = black; 1 = source-average after using Calibrate Live Scale to Source; higher values brighten live lights",
             default=1.0, min=0.0, max=1000000.0, precision=4,
             update=_on_light_energy_scale_changed,
+        )
+        bpy.types.Scene.qss_bake_only_selected_faces = BoolProperty(
+            name="Only Selected Faces",
+            description="Bake only selected BSP faces in Mesh Edit Mode; turn off to bake the entire map",
+            default=False,
         )
         bpy.types.Scene.qss_bake_output_scale = FloatProperty(
             name='Bake brightness', description='Linear post-bake multiplier for the generated lightmap; separate from actual lamp energy',
