@@ -29,7 +29,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils
 
 
-ADDON_VERSION = (0, 21, 6)
+ADDON_VERSION = (0, 21, 7)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -8355,6 +8355,10 @@ class QSS_OT_bake_scene_lights(Operator):
             bake_bounces = max(0, int(getattr(scene, 'qss_bake_bounces', 2)))
             scene.cycles.diffuse_bounces = bake_bounces
             scene.cycles.max_bounces = max(old_cycles['max_bounces'], bake_bounces + 1)
+            obj['qss_last_bake_attempt_samples'] = int(scene.cycles.samples)
+            obj['qss_last_bake_attempt_device'] = str(getattr(scene.cycles, 'device', 'DEFAULT'))
+            obj['qss_last_bake_attempt_diffuse_bounces'] = int(bake_bounces)
+            obj['qss_last_bake_attempt_atlas_size'] = int(image.size[0])
             _bake_progress(2, f'Configuring {len(mesh.materials)} material slots and {bake_bounces} diffuse bounces')
 
             for selected in list(context.selected_objects):
@@ -8393,6 +8397,7 @@ class QSS_OT_bake_scene_lights(Operator):
                 )
                 obj["qss_last_bake_scope"] = "FULL_WITH_NODRAW_EXCLUDED"
                 obj["qss_last_bake_target_face_count"] = len(receiver_face_indices)
+            obj['qss_last_bake_attempt_receiver_faces'] = int(len(receiver_face_indices))
 
             for mat in mesh.materials:
                 if mat is None:
@@ -8574,6 +8579,11 @@ class QSS_OT_bake_scene_lights(Operator):
             obj['qss_last_bake_backup'] = previous_snapshot.name
             obj['qss_bake_material_count'] = len(material_states)
             obj['qss_bake_light_count'] = updated_lights
+            obj['qss_last_bake_samples'] = int(scene.cycles.samples)
+            obj['qss_last_bake_device'] = str(getattr(scene.cycles, 'device', 'DEFAULT'))
+            obj['qss_last_bake_diffuse_bounces'] = int(bake_bounces)
+            obj['qss_last_bake_atlas_size'] = int(image.size[0])
+            obj['qss_last_bake_receiver_faces'] = int(len(receiver_face_indices))
             if old_previous_snapshot and old_previous_snapshot != previous_snapshot:
                 try:
                     bpy.data.images.remove(old_previous_snapshot)
@@ -9805,6 +9815,8 @@ def _qss_diagnostics_text(context, obj):
         f'Last bake: raw_mean={obj.get("qss_last_bake_raw_mean", "n/a")} source_mean={obj.get("qss_last_bake_source_mean", "n/a")} atlas_mean={obj.get("qss_last_bake_luxel_mean", "n/a")} max={obj.get("qss_last_bake_luxel_max", "n/a")} normalization={obj.get("qss_last_bake_output_scale", "n/a")}',
         f'Last successful bake timing: total={bake_stats_utils.format_duration(obj.get("qss_last_bake_duration_seconds"))}; Cycles operator={bake_stats_utils.format_duration(obj.get("qss_last_bake_cycles_seconds"))}',
         f'Last bake attempt timing: total={bake_stats_utils.format_duration(obj.get("qss_last_bake_attempt_duration_seconds"))}; Cycles operator={bake_stats_utils.format_duration(obj.get("qss_last_bake_attempt_cycles_seconds"))}',
+        f'Last successful bake workload: samples={obj.get("qss_last_bake_samples", "n/a")} device={obj.get("qss_last_bake_device", "n/a")} diffuse_bounces={obj.get("qss_last_bake_diffuse_bounces", "n/a")} atlas={obj.get("qss_last_bake_atlas_size", "n/a")}px receiver_faces={obj.get("qss_last_bake_receiver_faces", "n/a")}',
+        f'Last attempted bake workload: samples={obj.get("qss_last_bake_attempt_samples", "n/a")} device={obj.get("qss_last_bake_attempt_device", "n/a")} diffuse_bounces={obj.get("qss_last_bake_attempt_diffuse_bounces", "n/a")} atlas={obj.get("qss_last_bake_attempt_atlas_size", "n/a")}px receiver_faces={obj.get("qss_last_bake_attempt_receiver_faces", "n/a")}',
         f'Last attempted bake: scale={obj.get("qss_last_bake_attempt_scale", "n/a")} max_lamp_energy={obj.get("qss_last_bake_attempt_max_lamp_energy", "n/a")} sampled_luxels={obj.get("qss_last_bake_attempt_sample_count", "n/a")} sampled_mean={obj.get("qss_last_bake_attempt_raw_mean", "n/a")} image_stats={obj.get("qss_last_bake_attempt_image_stats", "n/a")}',
         f'Last attempted face coverage (raw bake): {obj.get("qss_last_bake_attempt_face_coverage", "n/a")}',
         f'Last Cycles bake operator result: {obj.get("qss_last_bake_attempt_operator_result", "n/a")}',
@@ -10582,6 +10594,11 @@ def _qss_rebuild_map_lightmap_resolution(obj, resolution):
         "qss_last_bake_calibration", "qss_last_bake_bounces",
         "qss_last_bake_duration_seconds", "qss_last_bake_cycles_seconds",
         "qss_last_bake_attempt_duration_seconds", "qss_last_bake_attempt_cycles_seconds",
+        "qss_last_bake_samples", "qss_last_bake_device", "qss_last_bake_diffuse_bounces",
+        "qss_last_bake_atlas_size", "qss_last_bake_receiver_faces",
+        "qss_last_bake_attempt_samples", "qss_last_bake_attempt_device",
+        "qss_last_bake_attempt_diffuse_bounces", "qss_last_bake_attempt_atlas_size",
+        "qss_last_bake_attempt_receiver_faces",
     ):
         if key in obj:
             del obj[key]
@@ -11481,6 +11498,12 @@ class QSS_PT_lighting(Panel):
             )
             bake_timing.label(
                 text=f"Cycles: {bake_stats_utils.format_duration(obj.get('qss_last_bake_cycles_seconds'))}"
+            )
+            bake_timing.label(
+                text=f"{obj.get('qss_last_bake_samples', 'n/a')} samples · "
+                     f"{obj.get('qss_last_bake_diffuse_bounces', 'n/a')} bounces · "
+                     f"{obj.get('qss_last_bake_device', 'DEFAULT')} · "
+                     f"{obj.get('qss_last_bake_receiver_faces', 'n/a')} faces"
             )
         else:
             bake_timing.label(text="No successful bake timing recorded yet.")
