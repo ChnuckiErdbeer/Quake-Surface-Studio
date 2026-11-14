@@ -439,3 +439,15 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - Installer artifact: `Quake-Surface-Studio-v0.21.7-Blender-Install`, artifact ID `14107189855`, 273,039 bytes, SHA-256 `229ce48691919e3c5004c2b239460961a7c60f32b499fb2b85ec9653bc037dd3`, expires 2027-02-12.
 - Downloaded archive passed `unzip -t`; source checks confirm version 0.21.7, visible LAST BAKE panel, workload telemetry, BSP face-model metadata, inline transforms, and inverse lightmap rebuild transform are included.
 - User should use 0.21.7 rather than 0.21.5/0.21.6 for the next Blender 5.3 test.
+
+
+### User feedback and 0.21.8 implementation — 2026-11-14
+
+- User confirms bake timing is now visible, but requests it be placed inside the existing STATS panel rather than in a separate box. 0.21.8 removes the standalone LAST BAKE box and adds last total, Cycles operator duration and workload summary under TEXTURES & LIGHTING in STATS.
+- User asks why statistics cannot be selected/copied. Added **Copy Stats to Clipboard** under EXPORT & DIAGNOSTICS. It copies the same full plain-text report built for Save Lighting Diagnostics, including bake timing, workload, map metadata and diagnostics. Save Lighting Diagnostics already also copies the report to Blender's clipboard, creates a Text datablock and saves a .txt file.
+- User's measured latest bake: total 3m 23.6s; Cycles operator 3m 19.5s. Therefore SLOPGATE overhead outside the Cycles operator was about 4.1 seconds.
+- User compared Cycles output with original ericw lighting and identified moving brush entities (doors/platforms/etc.) incorrectly occluding light. 0.21.8 introduces per-material shader variants for inline brush faces belonging to selected moving/illusionary entity classes. A Light Path node routes shadow rays to Transparent BSDF while camera/diffuse rays retain the original material shader. This is intended to stop moving brushes blocking static-world light while keeping their own visible surface shader. It does not hide geometry or disable diffuse reception.
+- Entity classes currently exempt from shadow casting: func_door, func_door_rotating, func_plat, func_train, func_rotating, func_button, func_bobbing, func_pendulum, func_water, func_illusionary. Confirm this policy against Quake/ericw semantics and representative maps; do not expand it blindly.
+- Imported material variants are assigned only to faces with those inline model IDs, so worldspawn geometry retains normal shadow behavior. Stats and diagnostics report the exempt face count/classes.
+- Important validation still required in Blender 5.3: verify Cycles Bake honors Is Shadow Ray on the shader path; compare door/platform shadows and static receiver lightmaps with ericw output; verify mover surfaces still receive expected lighting and display normally; test shared material reuse and export behavior. If Cycles bake treats Light Path differently than expected, use object-level Cycles visibility or a bake-only scene proxy approach.
+- Current build's bake timing from user: total 203.6s; Cycles 199.5s; non-Cycles overhead ~4.1s. No bake quality settings changed.
