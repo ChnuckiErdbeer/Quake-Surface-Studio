@@ -7345,10 +7345,22 @@ def _qss_source_bvh(obj, parsed, unit_scale, flip_z, context):
     vertices = parsed.vertices()
     edges = parsed.edges()
     surfedges = parsed.surfedges()
+    texinfos = parsed.texinfos()
+    miptextures = parsed.miptextures()
     world_vertices = [_qss_quake_to_world(obj, v, unit_scale, flip_z) for v in vertices]
     polygons = []
     for face in parsed.faces():
+        # Trigger/clip/origin/hint/nodraw surfaces are not world occluders.
+        # blocklight remains in the BVH even though it receives no lightmap.
         try:
+            texinfo_id = int(face[4])
+            miptex_id = int(texinfos[texinfo_id][8])
+            texture_name = (
+                miptextures[miptex_id].name
+                if 0 <= miptex_id < len(miptextures) else ""
+            )
+            if not surface_policy.casts_light_shadow(texture_name):
+                continue
             ids = parsed.face_vertex_indices(face, edges, surfedges)
         except Exception:
             continue
@@ -7527,6 +7539,8 @@ def _qss_run_ericw_direct_bake(context, obj):
     work = []
     total_luxels = 0
     for poly_index, poly in enumerate(mesh.polygons):
+        if not _qss_face_receives_light(obj, poly_index):
+            continue
         face_id = int(_qss_safe_collection_item(face_id_attr.data, poly_index, 'qss_bsp_face_id').value)
         face_info = _qss_read_source_face_sample(mesh, poly_index, face_id, parsed, light_sample_count)
         if face_info is None:
