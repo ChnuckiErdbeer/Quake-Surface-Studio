@@ -646,3 +646,10 @@ The gutter pass addresses atlas filtering/bleed inside Blender and makes per-fac
 
 - Before every journalled operation, refresh all image snapshots already associated with the current undo token, not only the image(s) the new operation will edit. This preserves native Texture Paint changes made between SLOPGATE operations, including when the next operation edits a different image.
 - Added a regression test for the sequence: SLOPGATE edit → native paint stroke → unrelated SLOPGATE edit → Ctrl+Z.
+
+### Undo journal storage and transition model
+
+- Image history is now stored as compressed float buffers in a temporary session directory, not retained as large Python byte strings in RAM or embedded in the .blend file.
+- The journal stores operation transitions: before/after snapshots only for images changed by that operation. Undo restores the transition's before side; redo restores its after side.
+- This deliberately avoids replaying stale snapshots for unrelated images. A Texture Paint stroke on texture A therefore remains intact when a later lighting operation edits image B.
+- History length follows Blender's configured undo-step preference (with a safe bound); temporary snapshot files are pruned when branches are discarded, history expires, the add-on is disabled or a .blend is loaded.
