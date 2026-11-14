@@ -1,8 +1,8 @@
-# SLOPGATE 0.21.8
+# SLOPGATE 0.21.9
 
 ## 0.21.5 — visible bake timing and BSP inline-model placement
 
-- Moves persistent last-bake timing and workload into the STATS panel. Adds a Copy Stats to Clipboard button that copies the full plain-text diagnostic report.
+- Moves persistent last-bake timing and workload into the STATS panel. Adds a Copy Stats to Clipboard button that copies the full plain-text diagnostic report. Fixes the bake-time shader override so inline mover materials remain transparent to Cycles shadow rays while retaining diffuse response for the bake.
 - Parses BSP29 dmodel_t records and validates per-model face ranges. Tracks each imported face's inline model ID and links `model "*n"` entity references. Moving/illusionary brush entities use a Cycles Light Path material wrapper that is transparent only to shadow rays, while retaining their regular surface shader for camera and diffuse rays.
 - Applies compiled entity origin and explicit three-component `angles` transforms to inline brush-model display geometry. The original model-local coordinates remain the source for texture UV construction and lightmap atlas generation.
 - Stores inline-model entity transform metadata and reverses the transform when rebuilding the lightmap atlas at a new resolution.
