@@ -472,3 +472,11 @@ Keep the first MAP round-trip strictly limited to lights and textures; never reg
 - Records count of mover-tagged materials that received the bake-time shadow override in object stats/diagnostics.
 - Blender documentation confirms Light Path exposes Is Shadow Ray in Cycles; transparent shader pass-through is a supported shader behavior. References: Blender 5.3 Light Path manual and Cycles baking manual. Runtime verification in Blender 5.3 remains necessary.
 - Next user validation: bake a map with func_door/func_plat/func_train entities and compare static world light behind them to ericw. Confirm movers themselves still receive light and their display materials are restored after bake.
+
+
+### SLOPGATE 0.21.9 verified installer
+
+- Source/version commit: `30fb6629ef83093cb9d9d6db1cd0d3de879a9d73`; 0.21.9 add-on version and README documented.
+- QSS Python workflow run `43582521377`, job `132410082968`: success. Python compilation passed; **246 standalone tests passed**; package assembled and artifact uploaded.
+- Installer: `Quake-Surface-Studio-v0.21.9-Blender-Install`, artifact ID `14109270675`, 274,686 bytes, SHA-256 `2c360b775700d67536b317def32c06d62185c9ea28675b4f91372cf308c7f1a2`, expires 2027-02-12. Downloaded ZIP passed `unzip -t`.
+- Runtime Cycles Bake behavior is not verifiable in CI; user's Blender 5.3 test remains the acceptance criterion.
