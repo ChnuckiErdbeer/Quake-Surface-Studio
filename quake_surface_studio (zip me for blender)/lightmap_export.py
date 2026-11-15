@@ -1062,3 +1062,105 @@ def world_chart_pixel_coordinates(
     pixel_x = origin_x + (luxel_s + 0.5) * block - 0.5
     pixel_top_y = origin_y + (luxel_t + 0.5) * block - 0.5
     return pixel_x, int(image_size) - 1.0 - pixel_top_y
+
+
+def sample_rgb_from_world_chart_positions(
+    pixels, image_size: int, working_resolution: int,
+    atlas_x: int, atlas_y: int, gutter: int, pixels_per_luxel: int,
+    positions, axis_s, axis_t, chart_s_min: float, chart_t_min: float,
+) -> bytes:
+    """Sample chart pixels at arbitrary Quake world positions.
+
+    The caller supplies points already solved on the BSP face plane. They are
+    projected into the chart's deterministic world-plane basis, then sampled
+    at the corresponding pixel centres. This is used to write classic BSP29
+    face-local luxel grids from a world-aligned Cycles chart without changing
+    the face's texinfo or lightmap dimensions.
+    """
+    if int(image_size) <= 0 or int(working_resolution) not in SUPPORTED_RESOLUTIONS:
+        raise ValueError("Invalid image size or working resolution.")
+    if min(int(atlas_x), int(atlas_y), int(gutter)) < 0 or int(pixels_per_luxel) <= 0:
+        raise ValueError("Invalid world-chart atlas rectangle.")
+    if len(pixels) != int(image_size) * int(image_size) * 4:
+        raise ValueError("World-chart RGBA buffer dimensions do not match pixel data.")
+    if len(axis_s) != 3 or len(axis_t) != 3:
+        raise ValueError("World-chart basis axes must have three components.")
+    coordinates = (
+        float(chart_s_min), float(chart_t_min),
+        *(float(value) for value in axis_s),
+        *(float(value) for value in axis_t),
+    )
+    if not all(math.isfinite(value) for value in coordinates):
+        raise ValueError("World-chart projection must contain finite values.")
+    output = bytearray()
+    for point in positions:
+        if len(point) < 3 or not all(math.isfinite(float(value)) for value in point[:3]):
+            raise ValueError("World-chart sample points must be finite XYZ coordinates.")
+        world_s = sum(float(point[i]) * float(axis_s[i]) for i in range(3))
+        world_t = sum(float(point[i]) * float(axis_t[i]) for i in range(3))
+        pixel_x, pixel_y = world_chart_pixel_coordinates(
+            world_s, world_t, atlas_x, atlas_y,
+            chart_s_min, chart_t_min, gutter,
+            pixels_per_luxel, working_resolution, image_size,
+        )
+        red, green, blue, _alpha = bilinear_sample_rgba(
+            pixels, int(image_size), int(image_size), pixel_x, pixel_y
+        )
+        output.extend(
+            max(0, min(255, int(round(channel * 255.0))))
+            for channel in (red, green, blue)
+        )
+    return bytes(output)
+
+
+def world_chart_grid_positions(
+    texinfo, plane_normal, plane_distance, s_coordinates, t_coordinates,
+):
+    """Solve a rectangular classic S/T grid into XYZ positions on a BSP face."""
+    if len(texinfo) < 8:
+        raise ValueError("A face texinfo requires two four-component projection axes.")
+    result = []
+    for t_value in t_coordinates:
+        for s_value in s_coordinates:
+            point = _solve_projection_plane(
+                texinfo[0:3], texinfo[4:7], plane_normal,
+                float(s_value) - float(texinfo[3]),
+                float(t_value) - float(texinfo[7]),
+                float(plane_distance),
+            )
+            if point is None:
+                raise ValueError("Face texinfo projection is singular on its BSP plane.")
+            result.append(point)
+    return result
+
+
+def _solve_projection_plane(s_axis, t_axis, plane_normal, s_value, t_value, plane_distance):
+    """Pure-Python solve for two projection equations plus a plane equation."""
+    a = tuple(float(value) for value in s_axis[:3])
+    b = tuple(float(value) for value in t_axis[:3])
+    c = tuple(float(value) for value in plane_normal[:3])
+    cross_bc = (
+        b[1] * c[2] - b[2] * c[1],
+        b[2] * c[0] - b[0] * c[2],
+        b[0] * c[1] - b[1] * c[0],
+    )
+    cross_ca = (
+        c[1] * a[2] - c[2] * a[1],
+        c[2] * a[0] - c[0] * a[2],
+        c[0] * a[1] - c[1] * a[0],
+    )
+    cross_ab = (
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    )
+    determinant = sum(a[i] * cross_bc[i] for i in range(3))
+    if abs(determinant) < 1e-10:
+        return None
+    inverse = 1.0 / determinant
+    return tuple(
+        (float(s_value) * cross_bc[i]
+         + float(t_value) * cross_ca[i]
+         + float(plane_distance) * cross_ab[i]) * inverse
+        for i in range(3)
+    )
