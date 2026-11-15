@@ -134,5 +134,43 @@ class LightmapExportTests(unittest.TestCase):
             )
 
 
+    def test_reconciles_mild_coplanar_edge_sample_differences(self):
+        source = bytes((100, 120, 140, 108, 128, 148, 40, 50, 60))
+        result, changed = lightmap_export.reconcile_shared_edge_samples(
+            source, [(0, 1)], max_channel_delta=16
+        )
+        self.assertEqual(result[:6], bytes((104, 124, 144, 104, 124, 144)))
+        self.assertEqual(result[6:], source[6:])
+        self.assertEqual(changed, 2)
+
+    def test_preserves_large_edge_discontinuities(self):
+        source = bytes((8, 12, 16, 180, 184, 188))
+        result, changed = lightmap_export.reconcile_shared_edge_samples(
+            source, [(0, 1)], max_channel_delta=16
+        )
+        self.assertEqual(result, source)
+        self.assertEqual(changed, 0)
+
+    def test_shared_edge_components_are_averaged_once_and_order_independently(self):
+        source = bytes((100, 100, 100, 110, 110, 110, 108, 108, 108))
+        first, first_changed = lightmap_export.reconcile_shared_edge_samples(
+            source, [(0, 1), (1, 2)], max_channel_delta=16
+        )
+        second, second_changed = lightmap_export.reconcile_shared_edge_samples(
+            source, [(1, 2), (0, 1)], max_channel_delta=16
+        )
+        self.assertEqual(first, second)
+        self.assertEqual([first[i] for i in (0, 3, 6)], [106, 106, 106])
+        self.assertEqual(first_changed, 3)
+        self.assertEqual(second_changed, 3)
+
+    def test_shared_edge_reconciliation_rejects_invalid_indices_and_buffers(self):
+        with self.assertRaisesRegex(ValueError, "complete RGB"):
+            lightmap_export.reconcile_shared_edge_samples(b"\\x00\\x01", [])
+        with self.assertRaisesRegex(ValueError, "outside"):
+            lightmap_export.reconcile_shared_edge_samples(bytes(3), [(0, 1)])
+        with self.assertRaisesRegex(ValueError, "two integer"):
+            lightmap_export.reconcile_shared_edge_samples(bytes(6), [(0,)])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

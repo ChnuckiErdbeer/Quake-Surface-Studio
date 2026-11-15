@@ -1,3 +1,13 @@
+# SLOPGATE 0.21.12
+
+## 0.21.12 — coplanar BSP edge continuity and live-preview brightness
+
+- Adds a Classic BSP29 export correction for adjacent faces that share an edge and have the same oriented plane. It matches luxels within an 8-unit boundary band and averages only small RGB differences (maximum 16 levels per channel). Larger discontinuities are left untouched to avoid erasing real shadow boundaries.
+- The correction is applied to the exported LIGHTING and QLIT RGB samples, not by blurring the atlas or changing source image pixels. Export diagnostics record candidate sample pairs and the number of luxels changed.
+- Adds a separate Live preview brightness control for Eevee/Cycles. Its initial value is 0.35; it affects imported lamp energy only while live preview is active, and is not used for Cycles baking, Quake Direct baking or BSP lightmap export. The existing Quake light energy scale remains the bake/solver control.
+- Adds pure-Python tests for mild seam reconciliation, strong shadow-edge preservation, order-independent shared-sample groups and invalid data.
+- CI verifies the geometry-independent seam reconciliation helper and package compilation. The new BSP face-pair matcher and final rendered appearance still require a Blender 5.3/Ironwail check on the user's seam-reproducing map.
+
 # SLOPGATE 0.21.11
 
 ## 0.21.11 — undo-safe lightmap commits and per-face atlas edge padding

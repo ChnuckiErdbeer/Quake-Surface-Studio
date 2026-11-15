@@ -29,7 +29,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils
 
 
-ADDON_VERSION = (0, 21, 11)
+ADDON_VERSION = (0, 21, 12)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -1518,7 +1518,7 @@ def _set_lighting_preview(context, obj, mode):
                     light_obj.hide_set(False)
                 except Exception:
                     pass
-        _apply_quake_light_energy_scale(context.scene)
+        _apply_quake_light_energy_scale(context.scene, live_preview=True)
     else:
         # QSS does not change visibility on user-authored scene lights.
         # Avoid restoring state that this preview path never modified.
@@ -2608,6 +2608,147 @@ def _qss_append_decoupled_classic_fallback(
     return faces_lump
 
 
+
+def _qss_export_face_luxel_grid(parsed, face, output_face, texinfos,
+                                     sample_width, sample_height, light_offset):
+    """Return world-space lightmap samples for one ordinary classic BSP face."""
+    try:
+        texinfo_id = int(output_face[4])
+        plane_id = int(output_face[0])
+        if texinfo_id < 0 or texinfo_id >= len(texinfos):
+            return None
+        planes = parsed.planes()
+        if plane_id < 0 or plane_id >= len(planes):
+            return None
+        vertex_ids = parsed.face_vertex_indices(face)
+        vertices = parsed.vertices()
+        if len(vertex_ids) < 3 or any(
+            vertex_id < 0 or vertex_id >= len(vertices) for vertex_id in vertex_ids
+        ):
+            return None
+        positions = [vertices[vertex_id] for vertex_id in vertex_ids]
+        texinfo = texinfos[texinfo_id]
+        s_min, t_min, extent_s, extent_t, _svec, _tvec = _calc_face_lightmap_extents(
+            positions, texinfo
+        )
+        expected_width = (extent_s >> 4) + 1
+        expected_height = (extent_t >> 4) + 1
+        if (expected_width, expected_height) != (sample_width, sample_height):
+            return None
+        plane = planes[plane_id]
+        sign = -1.0 if int(output_face[1]) else 1.0
+        normal = tuple(float(plane[index]) * sign for index in range(3))
+        distance = float(plane[3]) * sign
+        samples = []
+        for sample_y in range(sample_height):
+            t_value = t_min + sample_y * 16.0 - float(texinfo[7])
+            for sample_x in range(sample_width):
+                s_value = s_min + sample_x * 16.0 - float(texinfo[3])
+                point = lighting_utils.solve_texinfo_plane(
+                    texinfo[0:3], texinfo[4:7], normal,
+                    s_value, t_value, distance,
+                )
+                if point is None:
+                    return None
+                samples.append((
+                    tuple(float(value) for value in point),
+                    int(light_offset + sample_y * sample_width + sample_x),
+                ))
+        return {"vertex_ids": vertex_ids, "samples": samples}
+    except (IndexError, TypeError, ValueError, bsp.BSPError, OverflowError):
+        return None
+
+
+def _qss_coplanar_edge_sample_pairs(parsed, face_grids, band_distance=8.0):
+    """Find corresponding luxels near shared edges of coplanar faces in one model."""
+    if len(face_grids) < 2:
+        return []
+    faces = parsed.faces()
+    planes = parsed.planes()
+    vertices = parsed.vertices()
+    try:
+        model_ids = parsed.face_model_ids()
+    except (AttributeError, IndexError, TypeError, ValueError, bsp.BSPError):
+        return []
+    edge_faces = {}
+    for face_id, grid in face_grids.items():
+        vertex_ids = grid["vertex_ids"]
+        for index, vertex_a in enumerate(vertex_ids):
+            vertex_b = vertex_ids[(index + 1) % len(vertex_ids)]
+            key = (min(vertex_a, vertex_b), max(vertex_a, vertex_b))
+            edge_faces.setdefault(key, []).append(face_id)
+
+    band = max(0.0, float(band_distance))
+    band_sq = band * band
+    matched_pairs = set()
+    for (vertex_a, vertex_b), owners in edge_faces.items():
+        if len(owners) < 2:
+            continue
+        if vertex_a < 0 or vertex_b < 0 or vertex_a >= len(vertices) or vertex_b >= len(vertices):
+            continue
+        start = tuple(float(value) for value in vertices[vertex_a])
+        end = tuple(float(value) for value in vertices[vertex_b])
+        direction = tuple(end[i] - start[i] for i in range(3))
+        length_sq = sum(value * value for value in direction)
+        if length_sq <= 1e-10:
+            continue
+        edge_length = math.sqrt(length_sq)
+        for owner_index, face_a_id in enumerate(owners):
+            for face_b_id in owners[owner_index + 1:]:
+                if face_a_id == face_b_id or model_ids[face_a_id] != model_ids[face_b_id]:
+                    continue
+                face_a, face_b = faces[face_a_id], faces[face_b_id]
+                plane_a = planes[int(face_a[0])]
+                plane_b = planes[int(face_b[0])]
+                sign_a = -1.0 if int(face_a[1]) else 1.0
+                sign_b = -1.0 if int(face_b[1]) else 1.0
+                normal_a = tuple(float(plane_a[i]) * sign_a for i in range(3))
+                normal_b = tuple(float(plane_b[i]) * sign_b for i in range(3))
+                normal_dot = sum(normal_a[i] * normal_b[i] for i in range(3))
+                distance_a = float(plane_a[3]) * sign_a
+                distance_b = float(plane_b[3]) * sign_b
+                if normal_dot < 0.9999 or abs(distance_a - distance_b) > 0.125:
+                    continue
+
+                def edge_candidates(face_id):
+                    result = []
+                    for point, sample_index in face_grids[face_id]["samples"]:
+                        offset = tuple(point[i] - start[i] for i in range(3))
+                        raw_t = sum(offset[i] * direction[i] for i in range(3)) / length_sq
+                        endpoint_margin = band / edge_length if edge_length > 1e-8 else 0.0
+                        if raw_t < -endpoint_margin or raw_t > 1.0 + endpoint_margin:
+                            continue
+                        t_value = min(1.0, max(0.0, raw_t))
+                        closest = tuple(start[i] + t_value * direction[i] for i in range(3))
+                        distance_sq = sum((point[i] - closest[i]) ** 2 for i in range(3))
+                        if distance_sq <= band_sq + 1e-8:
+                            result.append((t_value, int(sample_index)))
+                    return sorted(result, key=lambda item: (item[0], item[1]))
+
+                candidates_a = edge_candidates(face_a_id)
+                candidates_b = edge_candidates(face_b_id)
+                if not candidates_a or not candidates_b:
+                    continue
+                unused_b = set(range(len(candidates_b)))
+                max_parameter_delta = min(1.0, band / edge_length)
+                for t_a, sample_a in candidates_a:
+                    best = None
+                    best_delta = None
+                    for candidate_index in unused_b:
+                        t_b, _sample_b = candidates_b[candidate_index]
+                        delta = abs(t_a - t_b)
+                        if best_delta is None or delta < best_delta:
+                            best = candidate_index
+                            best_delta = delta
+                    if best is None or best_delta > max_parameter_delta + 1e-8:
+                        continue
+                    sample_b = candidates_b[best][1]
+                    unused_b.remove(best)
+                    if sample_a != sample_b:
+                        matched_pairs.add((min(sample_a, sample_b), max(sample_a, sample_b)))
+    return sorted(matched_pairs)
+
+
 def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None, output_texinfo_lump=None):
     """Return (monochrome BSP lighting lump, QLIT v1 sidecar or None).
 
@@ -2681,6 +2822,7 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None, ou
         lit_rgb = bytearray(channel for sample in lighting for channel in (sample, sample, sample))
     else:
         lit_rgb = bytearray(source_lit_rgb)
+    face_sample_grids = {}
     for poly_index, poly in enumerate(mesh.polygons):
         if not has_attr.data[poly_index].value:
             continue
@@ -2701,6 +2843,20 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None, ou
                 int(obj.get('qss_lightmap_scale', 1)),
             )
             continue
+        if poly.material_index < 0 or poly.material_index >= len(mesh.materials):
+            export_material = None
+        else:
+            export_material = mesh.materials[poly.material_index]
+        if not (export_material is not None and export_material.get('qss_face_local_projection')):
+            output_face = struct.unpack_from("<Hhihh4Bi", faces_lump, face_id * bsp.SIZE_FACE)
+            if int(output_face[9]) >= 0 and int(output_face[5]) != 255:
+                grid = _qss_export_face_luxel_grid(
+                    parsed, face, output_face, output_texinfos,
+                    int(w_attr.data[poly_index].value),
+                    int(h_attr.data[poly_index].value), int(output_face[9]),
+                )
+                if grid is not None:
+                    face_sample_grids[face_id] = grid
         styles = face[5:9]
         light_offset = face[9]
         if light_offset < 0 or styles[0] == 255:
@@ -2749,6 +2905,25 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None, ou
             rgb_start, rgb_end = layer_start * 3, layer_end * 3
             if rgb_end <= len(lit_rgb):
                 lit_rgb[rgb_start:rgb_end] = bytes(block_size * 3)
+    edge_sample_pairs = _qss_coplanar_edge_sample_pairs(parsed, face_sample_grids)
+    edge_samples_reconciled = 0
+    if edge_sample_pairs:
+        try:
+            reconciled_rgb, edge_samples_reconciled = lightmap_export_utils.reconcile_shared_edge_samples(
+                lit_rgb, edge_sample_pairs, max_channel_delta=16
+            )
+        except ValueError as exc:
+            raise bsp.BSPError(f"Could not reconcile coplanar lightmap edge samples: {exc}") from exc
+        if edge_samples_reconciled:
+            lit_rgb[:] = reconciled_rgb
+            for sample_index in {index for pair in edge_sample_pairs for index in pair}:
+                sample_start = sample_index * 3
+                red, green, blue = lit_rgb[sample_start:sample_start + 3]
+                lighting[sample_index] = max(0, min(255, int(round(
+                    0.2126 * red + 0.7152 * green + 0.0722 * blue
+                ))))
+    obj["qss_last_export_coplanar_edge_pairs"] = len(edge_sample_pairs)
+    obj["qss_last_export_coplanar_edge_samples_reconciled"] = int(edge_samples_reconciled)
     # Classic BSP29 derives lightmap extents from texinfo. Detached faces
     # use a face-local texture projection, so append a replacement classic
     # lightmap block sampled through the original projection and redirect only
@@ -3205,9 +3380,11 @@ def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
         return False
 
 
-def _apply_quake_light_energy_scale(scene):
-    """Apply the user live-light slider and any explicit per-light calibration."""
+def _apply_quake_light_energy_scale(scene, live_preview=False):
+    """Apply Quake lamp energy, optionally applying the live-preview-only multiplier."""
     scale = max(0.0, float(getattr(scene, 'qss_light_energy_scale', 1.0)))
+    if live_preview:
+        scale *= max(0.0, float(getattr(scene, 'qss_live_preview_energy_scale', 0.35)))
     updated = 0
     for light_obj in scene.objects:
         role = light_obj.get('qss_light_role') if light_obj.type == 'LIGHT' else None
@@ -3274,9 +3451,26 @@ def _apply_quake_light_energy_scale(scene):
     return updated
 
 
+def _qss_live_preview_active(context):
+    obj = getattr(context, "object", None) if context is not None else None
+    return bool(
+        _qss_is_map_object(obj)
+        and str(obj.get("qss_preview_mode", "source")) in {"realtime", "cycles"}
+    )
+
+
 def _on_light_energy_scale_changed(self, context):
     if context and context.scene:
-        _apply_quake_light_energy_scale(context.scene)
+        _apply_quake_light_energy_scale(
+            context.scene, live_preview=_qss_live_preview_active(context)
+        )
+
+
+def _on_live_preview_energy_scale_changed(self, context):
+    if context and context.scene:
+        _apply_quake_light_energy_scale(
+            context.scene, live_preview=_qss_live_preview_active(context)
+        )
 
 
 def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
@@ -9181,7 +9375,9 @@ class QSS_OT_apply_light_energy_scale(Operator):
         return bool(obj and obj.get('qss_object_role') == 'quake_bsp29')
 
     def execute(self, context):
-        updated = _apply_quake_light_energy_scale(context.scene)
+        updated = _apply_quake_light_energy_scale(
+            context.scene, live_preview=_qss_live_preview_active(context)
+        )
         energies = [float(o.data.energy) for o in context.scene.objects
                     if o.type == 'LIGHT' and o.get('qss_light_role') in {'quake_entity_light', 'quake_world_sunlight'}]
         maximum = max(energies, default=0.0)
@@ -10023,6 +10219,8 @@ def _qss_diagnostics_text(context, obj):
         f'RGB source: {obj.get("qss_source_lighting_source", "unknown")}',
         f'BSPX lumps: {obj.get("qss_bspx_lump_names", "")}',
         f'Light energy scale: {getattr(context.scene, "qss_light_energy_scale", -1)}',
+        f'Live preview brightness: {getattr(context.scene, "qss_live_preview_energy_scale", 0.35)}',
+        f'Last export coplanar edge samples reconciled: {obj.get("qss_last_export_coplanar_edge_samples_reconciled", "n/a")} from {obj.get("qss_last_export_coplanar_edge_pairs", "n/a")} sample pairs',
         f'Source-match calibration: {obj.get("qss_light_energy_calibration", 1.0)}',
         f'Last bake: raw_mean={obj.get("qss_last_bake_raw_mean", "n/a")} source_mean={obj.get("qss_last_bake_source_mean", "n/a")} atlas_mean={obj.get("qss_last_bake_luxel_mean", "n/a")} max={obj.get("qss_last_bake_luxel_max", "n/a")} normalization={obj.get("qss_last_bake_output_scale", "n/a")}',
         f'Last successful bake timing: total={bake_stats_utils.format_duration(obj.get("qss_last_bake_duration_seconds"))}; Cycles operator={bake_stats_utils.format_duration(obj.get("qss_last_bake_cycles_seconds"))}',
@@ -11609,6 +11807,9 @@ class QSS_PT_lighting(Panel):
             button.enabled = value != "baked" or _qss_has_baked_lightmap(obj)
             op = button.operator(QSS_OT_set_lighting_mode.bl_idname, text=label, depress=(mode == value))
             op.mode = value
+        if mode in {"realtime", "cycles"}:
+            live_strength = layout.row(align=True)
+            live_strength.prop(context.scene, "qss_live_preview_energy_scale", text="Live preview brightness")
 
         selected_faces = False
         if context.mode == "EDIT_MESH":
@@ -11905,7 +12106,7 @@ def _remove_scene_properties():
         'qss_ironwail_executable', 'qss_ironwail_demo', 'qss_audit_enhanced_export',
         'qss_audit_quake_bake', 'qss_audit_cycles_bake', 'qss_audit_ericw_light', 'qss_audit_ericw_compile',
         'qss_audit_timeout', 'qss_quake_unit_scale', 'qss_nav_speed_quake',
-        'qss_nav_fast_factor', 'qss_light_energy_scale',
+        'qss_nav_fast_factor', 'qss_light_energy_scale', 'qss_live_preview_energy_scale',
         'qss_import_lightmap_resolution', 'qss_decoupled_world_units_per_luxel',
         'qss_bake_output_scale', 'qss_bake_bounces', 'qss_bake_match_source', 'qss_mmb_fps_walk',
         'qss_quake_bake_shadows', 'qss_quake_bake_gate', 'qss_paint_color_picker',
@@ -12133,6 +12334,12 @@ def register():
             description="0 = black; 1 = source-average after using Calibrate Live Scale to Source; higher values brighten live lights",
             default=1.0, min=0.0, max=1000000.0, precision=4,
             update=_on_light_energy_scale_changed,
+        )
+        bpy.types.Scene.qss_live_preview_energy_scale = FloatProperty(
+            name="Live preview brightness",
+            description="Separate Eevee/Cycles live-preview lamp multiplier. Does not change any bake or exported lightmap.",
+            default=0.35, min=0.0, max=10.0, precision=3,
+            update=_on_live_preview_energy_scale_changed,
         )
         bpy.types.Scene.qss_bake_only_selected_faces = BoolProperty(
             name="Only Selected Faces",

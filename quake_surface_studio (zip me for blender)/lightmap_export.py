@@ -381,6 +381,89 @@ def build_decoupled_lightmap_data(faces, texinfos, face_records, face_offsets):
     return bytes(output)
 
 
+
+def reconcile_shared_edge_samples(
+    rgb_samples: bytes | bytearray,
+    sample_pairs,
+    max_channel_delta: int = 16,
+) -> tuple[bytes, int]:
+    """Reconcile mild RGB differences between corresponding coplanar edge luxels.
+
+    sample_pairs contains pairs of RGB luxel indices (not byte offsets). Pairs
+    are merged as connected components so samples shared by several edges are
+    averaged once, independent of edge iteration order. Components with a
+    larger per-channel range than max_channel_delta are left untouched, which
+    preserves substantial lighting and shadow discontinuities.
+    """
+    data = bytearray(rgb_samples)
+    if len(data) % 3:
+        raise ValueError("RGB lightmap data must contain complete RGB triplets")
+    threshold = int(max_channel_delta)
+    if threshold < 0 or threshold > 255:
+        raise ValueError("Maximum edge sample channel delta must be between 0 and 255")
+
+    sample_count = len(data) // 3
+    parent = {}
+    rank = {}
+
+    def find(value):
+        while parent[value] != value:
+            parent[value] = parent[parent[value]]
+            value = parent[value]
+        return value
+
+    def union(left, right):
+        left_root, right_root = find(left), find(right)
+        if left_root == right_root:
+            return
+        if rank[left_root] < rank[right_root]:
+            left_root, right_root = right_root, left_root
+        parent[right_root] = left_root
+        if rank[left_root] == rank[right_root]:
+            rank[left_root] += 1
+
+    for pair in sample_pairs:
+        try:
+            left, right = pair
+            left, right = int(left), int(right)
+        except (TypeError, ValueError):
+            raise ValueError("Each shared-edge sample pair must contain two integer indices")
+        if left < 0 or right < 0 or left >= sample_count or right >= sample_count:
+            raise ValueError("Shared-edge RGB sample index is outside the lightmap buffer")
+        if left == right:
+            continue
+        for index in (left, right):
+            if index not in parent:
+                parent[index] = index
+                rank[index] = 0
+        union(left, right)
+
+    groups = {}
+    for sample_index in parent:
+        groups.setdefault(find(sample_index), []).append(sample_index)
+    changed_samples = 0
+    for indices in groups.values():
+        if len(indices) < 2:
+            continue
+        channels = [
+            [data[index * 3 + channel] for index in indices]
+            for channel in range(3)
+        ]
+        if any(max(values) - min(values) > threshold for values in channels):
+            continue
+        average = tuple(
+            int(math.floor(sum(values) / len(values) + 0.5))
+            for values in channels
+        )
+        for index in indices:
+            offset = index * 3
+            old = tuple(data[offset:offset + 3])
+            if old != average:
+                data[offset:offset + 3] = bytes(average)
+                changed_samples += 1
+    return bytes(data), changed_samples
+
+
 def build_lightmap_extension_data(
     face_count: int,
     face_records: Mapping[int, Mapping[str, Any]],
