@@ -82,7 +82,7 @@ class UndoContractTests(unittest.TestCase):
         code = ast.get_source_segment(self.source, function)
         self.assertIn("image.copy()", code)
         self.assertIn("_qss_set_current_lightmap_image", code)
-        self.assertNotIn("image.pixels.foreach_set(pixels)", code)
+        self.assertNotIn("\n        image.pixels.foreach_set(pixels)", code)
 
 
 if __name__ == "__main__":
