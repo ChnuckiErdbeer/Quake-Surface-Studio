@@ -4873,7 +4873,13 @@ class QSS_OT_browse_game_maps(Operator):
             self.report({'INFO'}, f"Imported {entry['path']} from {entry['source_label']}.")
             return {'FINISHED'}
         except Exception as exc:
-            self.report({'ERROR'}, f"Could not import {entry['path']}: {exc}")
+            diagnostic = _qss_record_import_failure(
+                entry.get("path", ""), exc, stage="Game-map browser import"
+            )
+            self.report(
+                {'ERROR'},
+                f"Could not import {entry['path']}: {exc} · full traceback: {diagnostic}"
+            )
             return {'CANCELLED'}
 
 
