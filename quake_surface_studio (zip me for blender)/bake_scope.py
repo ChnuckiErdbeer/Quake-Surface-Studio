@@ -210,14 +210,15 @@ def collapse_rgba_luxel_blocks(
     core_rectangles,
     block_size: int,
 ):
-    """Make every supersampled Quake luxel block hold one centre-sampled value.
+    """Reduce each supersampled luxel with a 2x2 sub-luxel quadrature.
 
-    Cycles renders into a higher-resolution working atlas. A Quake lightmap,
-    however, stores one value per luxel. Retaining small per-pixel variations
-    inside a luxel block makes the Blender preview look softer than the data
-    that will be written back to BSP. This reduces each block at its geometric
-    centre (bilinear 2x2 centre for even-sized blocks) and replicates that
-    value across the block.
+    A Quake lightmap stores one value per luxel. When the editable atlas stores
+    multiple pixels per luxel, sample the four quarter/three-quarter positions
+    across the block and average them into that one value. This preserves
+    sub-luxel coverage from Cycles (especially narrow spot-light cones) instead
+    of sampling only the block centre, which can miss illumination near an edge.
+    For a 2x block the four quadrature points coincide with its four pixels.
+    For larger blocks each point is bilinearly interpolated.
 
     Rectangles are bottom-up core pixel bounds with exclusive upper limits.
     Gutters and pixels outside the supplied face cores are never modified.
@@ -249,21 +250,42 @@ def collapse_rgba_luxel_blocks(
             if ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1:
                 raise ValueError("Face core rectangles overlap; atlas metadata is inconsistent.")
 
-    centre = ((block - 1) // 2, block // 2)
+    # Pixel indices denote pixel centres. These coordinates therefore land at
+    # the centres of the four quarter-block quadrants, not at the block centre.
+    sample_positions = (
+        (0.0,) if block == 1
+        else (block * 0.25 - 0.5, block * 0.75 - 0.5)
+    )
     processed = 0
     for x0, y0, x1, y1 in regions:
         for by in range(y0, y1, block):
             for bx in range(x0, x1, block):
-                # An even-sized block has its exact centre between four pixels.
-                # Averaging those four is a bilinear point sample at that centre;
-                # it is deliberately not an average of the whole block.
                 sample = [0.0, 0.0, 0.0, 0.0]
                 sample_count = 0
-                for sy in set(centre):
-                    for sx in set(centre):
-                        offset = ((by + sy) * width + bx + sx) * 4
+                for sample_y in sample_positions:
+                    sy0 = max(0, min(block - 1, int(math.floor(sample_y))))
+                    sy1 = min(sy0 + 1, block - 1)
+                    fy = max(0.0, min(1.0, sample_y - sy0))
+                    for sample_x in sample_positions:
+                        sx0 = max(0, min(block - 1, int(math.floor(sample_x))))
+                        sx1 = min(sx0 + 1, block - 1)
+                        fx = max(0.0, min(1.0, sample_x - sx0))
+                        offsets = (
+                            ((by + sy0) * width + bx + sx0) * 4,
+                            ((by + sy0) * width + bx + sx1) * 4,
+                            ((by + sy1) * width + bx + sx0) * 4,
+                            ((by + sy1) * width + bx + sx1) * 4,
+                        )
                         for channel in range(4):
-                            sample[channel] += float(pixels[offset + channel])
+                            top = (
+                                float(pixels[offsets[0] + channel]) * (1.0 - fx)
+                                + float(pixels[offsets[1] + channel]) * fx
+                            )
+                            bottom = (
+                                float(pixels[offsets[2] + channel]) * (1.0 - fx)
+                                + float(pixels[offsets[3] + channel]) * fx
+                            )
+                            sample[channel] += top * (1.0 - fy) + bottom * fy
                         sample_count += 1
                 inverse_count = 1.0 / sample_count
                 sample = [value * inverse_count for value in sample]

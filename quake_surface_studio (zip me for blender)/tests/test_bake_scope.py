@@ -194,6 +194,23 @@ class AtlasGutterDilationTests(unittest.TestCase):
                             offset = (y * width + x) * 4
                             self.assertEqual(tuple(pixels[offset:offset + 4]), first)
 
+    def test_luxel_block_quadrature_preserves_light_near_outer_quadrants(self):
+        # A narrow spot can hit the outer quarters of a luxel while missing
+        # its centre. Centre-only reduction lost this sample on a 4x atlas.
+        width = height = 4
+        pixels = array.array("f", [0.0, 0.0, 0.0, 1.0] * (width * height))
+        for x, y in ((0, 0), (3, 0), (0, 3), (3, 3)):
+            offset = (y * width + x) * 4
+            pixels[offset:offset + 4] = array.array("f", (1.0, 1.0, 1.0, 1.0))
+
+        count = bake_scope.collapse_rgba_luxel_blocks(
+            pixels, width, height, [(0, 0, 4, 4)], block_size=4
+        )
+        self.assertEqual(count, 1)
+        for offset in range(0, len(pixels), 4):
+            for channel in range(3):
+                self.assertAlmostEqual(pixels[offset + channel], 0.25, places=6)
+
     def test_luxel_block_canonicalization_rejects_partial_blocks(self):
         pixels = array.array("f", [0.0, 0.0, 0.0, 1.0] * 16)
         with self.assertRaisesRegex(ValueError, "exact multiples"):
