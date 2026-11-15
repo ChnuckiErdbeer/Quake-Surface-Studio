@@ -4346,7 +4346,9 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
             baseline = image.get('qss_import_hash', '')
             if source_texture_id == -1:
                 material_key = mat.as_pointer()
-                image_key = image.as_pointer()
+                # Temporary per-face crops are deleted after encoding; key them by
+                # material identity so Blender pointer reuse cannot alias two faces.
+                image_key = mat.as_pointer() if temporary_face_image else image.as_pointer()
                 if image_key not in new_texture_for_image:
                     fallback = f"qss_{len(entries):05d}"
                     tex_name = _safe_texture_name(mat.get('qss_export_name', ''), fallback)
