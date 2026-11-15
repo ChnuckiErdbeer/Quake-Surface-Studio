@@ -621,3 +621,42 @@ The user requested implementation of Ctrl+Z/Ctrl+Shift+Z handling and the report
 - Verify lightmap edges on E1M1 and a seam-reproducing map in Original, Baked, Texture Paint, save/reopen and BSP export states.
 - Continue auditing destructive operations (face detach, painted-texture toggles, lightmap-resolution rebuild and MAP synchronization) for multi-datablock undo consistency.
 - Preview brightness calibration and Cycles profiling remain open; no sample-count or quality reductions were made.
+
+## SLOPGATE 0.21.12 implementation pass — 2026-11-15
+
+The user clarified that the visible Ironwail edge artifact persists with a point light and is not spotlight-specific. The user also called attention to brighter Eevee/Cycles live previews versus imported/baked atlases and ericw reference lightmaps.
+
+### Findings
+
+- The earlier Enhanced-only half-luxel BSPX rim does not affect the classic BSP29 samples read by Ironwail. Atlas gutters and dilation likewise improve Blender atlas sampling but do not enlarge the per-face Classic BSP lightmap sample rectangle.
+- The committed test fixture contains adjacent coplanar faces sharing geometry edges. Their compiled edge luxels can differ slightly; the BSP renderer's per-face lightmap blur/filtering can reveal those differences.
+- Live Eevee/Cycles lamps use approximate Blender energy/falloff parameters. The existing bake path has a separate image-atlas source-mean normalization. Those two controls should not be coupled.
+
+### Changes on feature/0.21.12-coplanar-edge-preview-brightness
+
+- Added Classic BSP29 export-time reconciliation for luxels on shared, coplanar, same-model face edges. Candidate pairs are matched in world space within an 8 Quake-unit edge band.
+- Only RGB groups with a maximum per-channel range of 16/255 or less are averaged. Larger differences remain untouched to avoid erasing real lighting and shadow discontinuities. The correction updates both the standard monochrome LIGHTING samples and RGB .lit output.
+- Custom detached/face-local projected faces and decoupled faces are excluded from this Classic face-edge matcher; Enhanced output retains its independent DECOUPLED_LM data path.
+- Export diagnostics record candidate edge sample pairs and the number of modified luxels.
+- Added a separate Live preview brightness Scene control, default 0.35, active only in Eevee/Cycles live-light preview. It is excluded from Cycles bake and Quake Direct bake energy calculation and does not change exported BSP lightmaps.
+- Added four pure-Python tests covering mild differences, preservation of strong edges, order-independent averaging and malformed input.
+- Corrected one stale source-inspection test that matched the baked_image.pixels identifier as though it were an in-place image.pixels write.
+
+### Build verification
+
+- Source commit: 72c66d392b99bef3d3ff32374186c7437a0179fd.
+- QSS Python workflow run 43765229796 completed successfully. Python compilation, standalone unit tests (259 passed), add-on folder assembly and installer upload passed.
+- Installer artifact 14181713039, Quake-Surface-Studio-v0.21.12-Blender-Install, 283,967 bytes. SHA-256: c8b1d77a002bf8d5a3afde84e6df7530e6ce2e291db4063b96bb3b72251831f5. The downloaded ZIP passes unzip -t and includes quake_surface_studio/__init__.py at its root package path; metadata reports SLOPGATE 0.21.12.
+- Local repeat of the packaged standalone suite also passed all 259 tests; packaged modules compile successfully.
+- Blender 5.3 interactive export, Ironwail rendering and user-side brightness comparison have not been performed. Automated tests validate the pure reconciliation helper, not the visual edge matcher/render result.
+
+### First runtime test
+
+On a copy of the seam-reproducing map:
+1. Import in SLOPGATE 0.21.12 and export Classic BSP29.
+2. Inspect the export log/diagnostics for candidate coplanar edge sample pairs and the reconciled sample count.
+3. Test the exported map in Ironwail using the same normal point light, view, and lighting conditions as the previous test.
+4. Compare the edge before/after. Also compare live Eevee/Cycles preview using the new Live preview brightness control; this is independent from the existing Quake light energy scale used for baking.
+5. Check a deliberate hard shadow boundary across coplanar faces to confirm large RGB differences remain distinct.
+
+Do not treat this build as visually verified until the user tests it in Blender/Ironwail.
