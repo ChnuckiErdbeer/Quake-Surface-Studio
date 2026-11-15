@@ -205,5 +205,102 @@ class LightmapExportTests(unittest.TestCase):
 
 
 
+class CoplanarEdgeStitchTests(unittest.TestCase):
+    def setUp(self):
+        # Two adjacent 16x32 coplanar faces. Edge 1 is shared; its only
+        # interior 16-unit luxel lies at world position (16, 16, 0).
+        self.faces = [
+            (0, 0, 0, 4, 0, 0, 255, 255, 255, 0),
+            (0, 0, 4, 4, 0, 0, 255, 255, 255, 6),
+        ]
+        self.texinfos = [
+            (1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0, 0)
+        ]
+        self.vertices = [
+            (0.0, 0.0, 0.0),
+            (16.0, 0.0, 0.0),
+            (16.0, 32.0, 0.0),
+            (0.0, 32.0, 0.0),
+            (32.0, 0.0, 0.0),
+            (32.0, 32.0, 0.0),
+        ]
+        self.edges = [
+            (0, 1), (1, 2), (2, 3), (3, 0),
+            (1, 4), (4, 5), (5, 2),
+        ]
+        self.surfedges = [0, 1, 2, 3, 4, 5, 6, -1]
+        self.planes = [(0.0, 0.0, 1.0, 0.0, 2)]
+        self.model_ids = [0, 0]
+        self.lighting = bytearray(12)
+        self.lit_rgb = bytearray(12 * 3)
+        self.lighting[3] = 20
+        self.lighting[8] = 60
+        self.lit_rgb[9:12] = bytes((20, 20, 20))
+        self.lit_rgb[24:27] = bytes((60, 60, 60))
+
+    def _stitch(self):
+        return lightmap_export.stitch_coplanar_edge_samples(
+            self.faces, self.texinfos, self.vertices, self.edges,
+            self.surfedges, self.planes, self.model_ids,
+            self.lighting, self.lit_rgb,
+        )
+
+    def test_shared_coplanar_edge_samples_are_averaged_without_blurring_faces(self):
+        result = self._stitch()
+        self.assertEqual(result["shared_coplanar_edges"], 1)
+        self.assertEqual(result["matched_sample_pairs"], 1)
+        self.assertEqual(result["changed_sample_pairs"], 1)
+        self.assertEqual(self.lighting[3], 40)
+        self.assertEqual(self.lighting[8], 40)
+        self.assertEqual(self.lit_rgb[9:12], bytes((40, 40, 40)))
+        self.assertEqual(self.lit_rgb[24:27], bytes((40, 40, 40)))
+        self.assertEqual(self.lighting[2], 0)
+        self.assertEqual(self.lighting[9], 0)
+
+    def test_does_not_stitch_non_coplanar_faces(self):
+        planes = list(self.planes)
+        planes.append((0.0, 1.0, 0.0, 0.0, 1))
+        faces = list(self.faces)
+        faces[1] = (1, 0, 4, 4, 0, 0, 255, 255, 255, 6)
+        result = lightmap_export.stitch_coplanar_edge_samples(
+            faces, self.texinfos, self.vertices, self.edges, self.surfedges,
+            planes, self.model_ids, self.lighting, self.lit_rgb,
+        )
+        self.assertEqual(result["matched_sample_pairs"], 0)
+        self.assertEqual(self.lighting[3], 20)
+        self.assertEqual(self.lighting[8], 60)
+
+    def test_does_not_stitch_faces_with_different_styles_or_models(self):
+        styled = list(self.faces)
+        styled[1] = (0, 0, 4, 4, 0, 32, 255, 255, 255, 6)
+        result = lightmap_export.stitch_coplanar_edge_samples(
+            styled, self.texinfos, self.vertices, self.edges, self.surfedges,
+            self.planes, self.model_ids, self.lighting, self.lit_rgb,
+        )
+        self.assertEqual(result["matched_sample_pairs"], 0)
+        result = lightmap_export.stitch_coplanar_edge_samples(
+            self.faces, self.texinfos, self.vertices, self.edges, self.surfedges,
+            self.planes, [0, 1], self.lighting, self.lit_rgb,
+        )
+        self.assertEqual(result["matched_sample_pairs"], 0)
+
+    def test_does_not_interpolate_when_classic_luxel_grids_do_not_align(self):
+        shifted_texinfos = [
+            self.texinfos[0],
+            (1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 8.0, 0, 0),
+        ]
+        faces = [
+            self.faces[0],
+            (0, 0, 4, 4, 1, 0, 255, 255, 255, 6),
+        ]
+        result = lightmap_export.stitch_coplanar_edge_samples(
+            faces, shifted_texinfos, self.vertices, self.edges, self.surfedges,
+            self.planes, self.model_ids, self.lighting, self.lit_rgb,
+        )
+        self.assertEqual(result["matched_sample_pairs"], 0)
+        self.assertEqual(self.lighting[3], 20)
+        self.assertEqual(self.lighting[8], 60)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

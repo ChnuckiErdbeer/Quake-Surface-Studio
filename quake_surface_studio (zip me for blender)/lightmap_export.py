@@ -532,3 +532,266 @@ def build_lightmap_extension_data(
         "LIGHTING_APPEND": bytes(appended_mono),
         "enhanced_sample_count": sample_offset - base_sample_count,
     }
+
+
+def stitch_coplanar_edge_samples(
+    faces,
+    texinfos,
+    vertices,
+    edges,
+    surfedges,
+    planes,
+    face_model_ids,
+    lighting,
+    lit_rgb,
+    *,
+    sample_spacing: int = 16,
+    plane_tolerance: float = 1e-4,
+    edge_tolerance: float = 0.05,
+    grid_tolerance: float = 1e-4,
+    endpoint_tolerance: float = 1e-5,
+):
+    """Reconcile matching classic luxels on shared, coplanar BSP face edges.
+
+    This is deliberately not a blur. It touches only pairs of samples that
+    occupy the same 3D point on an edge used by exactly two lightmapped faces.
+    Both faces must belong to the same BSP model, have the same oriented plane
+    and identical light-style bytes, and their 16-unit sample grids must
+    actually intersect the shared edge at matching positions. Corners,
+    non-coplanar edges, differently styled faces and unaligned grids are left
+    unchanged.
+
+    lighting and lit_rgb are mutable BSP29 mono and QLIT sample buffers.
+    The RGB average is written to both faces; the mono fallback is rebuilt
+    from that averaged RGB value. Returns counts useful for diagnostics/tests.
+    """
+    spacing = int(sample_spacing)
+    if spacing <= 0:
+        raise ValueError("Classic lightmap sample spacing must be positive.")
+    if len(face_model_ids) != len(faces):
+        raise ValueError("Face model IDs must contain one entry per BSP face.")
+    if len(lit_rgb) < len(lighting) * 3:
+        raise ValueError("RGB lightmap buffer is shorter than the classic lighting buffer.")
+
+    def _oriented_plane(face):
+        plane_id = int(face[0])
+        if plane_id < 0 or plane_id >= len(planes):
+            return None
+        plane = planes[plane_id]
+        if len(plane) < 4:
+            return None
+        sign = -1.0 if int(face[1]) else 1.0
+        normal = [float(plane[i]) * sign for i in range(3)]
+        distance = float(plane[3]) * sign
+        length = math.sqrt(sum(value * value for value in normal))
+        if not math.isfinite(length) or length <= 1e-12:
+            return None
+        return tuple(value / length for value in normal), distance / length
+
+    def _project(point, axis):
+        return (
+            float(point[0]) * float(axis[0])
+            + float(point[1]) * float(axis[1])
+            + float(point[2]) * float(axis[2])
+            + float(axis[3])
+        )
+
+    grids = {}
+    edge_users = {}
+    for face_id, face in enumerate(faces):
+        light_offset = int(face[9])
+        styles = tuple(int(value) for value in face[5:9])
+        active_styles = tuple(value for value in styles if value != 255)
+        texinfo_id = int(face[4])
+        if light_offset < 0 or not active_styles:
+            continue
+        if texinfo_id < 0 or texinfo_id >= len(texinfos):
+            continue
+        if len(texinfos[texinfo_id]) < 8:
+            continue
+        first_edge, edge_count = int(face[2]), int(face[3])
+        if (
+            first_edge < 0 or edge_count < 3
+            or first_edge + edge_count > len(surfedges)
+        ):
+            continue
+        edge_ids = []
+        points = []
+        valid = True
+        for signed_edge in surfedges[first_edge:first_edge + edge_count]:
+            edge_id = abs(int(signed_edge))
+            if edge_id >= len(edges):
+                valid = False
+                break
+            edge = edges[edge_id]
+            vertex_id = int(edge[0] if signed_edge >= 0 else edge[1])
+            if vertex_id < 0 or vertex_id >= len(vertices):
+                valid = False
+                break
+            edge_ids.append(edge_id)
+            points.append(vertices[vertex_id])
+        if not valid or len(points) < 3:
+            continue
+        texinfo = texinfos[texinfo_id]
+        s_values = [_project(point, texinfo[0:4]) for point in points]
+        t_values = [_project(point, texinfo[4:8]) for point in points]
+        if not all(math.isfinite(value) for value in (*s_values, *t_values)):
+            continue
+        s_min = math.floor(min(s_values) / spacing + 1e-7) * spacing
+        t_min = math.floor(min(t_values) / spacing + 1e-7) * spacing
+        s_max = math.ceil(max(s_values) / spacing - 1e-7) * spacing
+        t_max = math.ceil(max(t_values) / spacing - 1e-7) * spacing
+        width = (s_max - s_min) // spacing + 1
+        height = (t_max - t_min) // spacing + 1
+        if width < 1 or height < 1:
+            continue
+        block_size = width * height
+        if light_offset + block_size * len(active_styles) > min(
+            len(lighting), len(lit_rgb) // 3
+        ):
+            continue
+        plane = _oriented_plane(face)
+        if plane is None:
+            continue
+        grid = {
+            "face_id": face_id,
+            "styles": styles,
+            "active_styles": active_styles,
+            "light_offset": light_offset,
+            "width": width,
+            "height": height,
+            "s_min": float(s_min),
+            "t_min": float(t_min),
+            "texinfo": texinfo,
+            "plane": plane,
+            "model_id": int(face_model_ids[face_id]),
+            "edges": set(edge_ids),
+        }
+        grids[face_id] = grid
+        for edge_id in grid["edges"]:
+            edge_users.setdefault(edge_id, []).append(face_id)
+
+    considered = 0
+    matched = 0
+    changed = 0
+    for edge_id, face_ids in edge_users.items():
+        if len(face_ids) != 2:
+            continue
+        grid_a, grid_b = (grids[face_id] for face_id in face_ids)
+        if grid_a["model_id"] != grid_b["model_id"]:
+            continue
+        if grid_a["styles"] != grid_b["styles"]:
+            continue
+        normal_a, distance_a = grid_a["plane"]
+        normal_b, distance_b = grid_b["plane"]
+        if (
+            max(abs(normal_a[i] - normal_b[i]) for i in range(3)) > plane_tolerance
+            or abs(distance_a - distance_b) > plane_tolerance
+        ):
+            continue
+
+        considered += 1
+        edge = edges[edge_id]
+        vertex_a, vertex_b = int(edge[0]), int(edge[1])
+        if (
+            vertex_a < 0 or vertex_a >= len(vertices)
+            or vertex_b < 0 or vertex_b >= len(vertices)
+        ):
+            continue
+        point_a = tuple(float(value) for value in vertices[vertex_a])
+        point_b = tuple(float(value) for value in vertices[vertex_b])
+        direction = tuple(point_b[i] - point_a[i] for i in range(3))
+        length_squared = sum(value * value for value in direction)
+        if length_squared <= 1e-12:
+            continue
+        edge_length = math.sqrt(length_squared)
+
+        def _edge_luxels(grid):
+            texinfo = grid["texinfo"]
+            s0, s1 = _project(point_a, texinfo[0:4]), _project(point_b, texinfo[0:4])
+            t0, t1 = _project(point_a, texinfo[4:8]), _project(point_b, texinfo[4:8])
+            ds, dt = s1 - s0, t1 - t0
+            found = []
+            width, height = grid["width"], grid["height"]
+            if abs(ds) >= abs(dt) and abs(ds) > 1e-10:
+                lower = max(0, int(math.ceil(
+                    (min(s0, s1) - grid["s_min"]) / spacing - grid_tolerance
+                )))
+                upper = min(width - 1, int(math.floor(
+                    (max(s0, s1) - grid["s_min"]) / spacing + grid_tolerance
+                )))
+                for x in range(lower, upper + 1):
+                    u = (grid["s_min"] + x * spacing - s0) / ds
+                    if u <= endpoint_tolerance or u >= 1.0 - endpoint_tolerance:
+                        continue
+                    t = t0 + u * dt
+                    y_float = (t - grid["t_min"]) / spacing
+                    y = int(round(y_float))
+                    if 0 <= y < height and abs(y_float - y) <= grid_tolerance:
+                        found.append((u, y * width + x))
+            elif abs(dt) > 1e-10:
+                lower = max(0, int(math.ceil(
+                    (min(t0, t1) - grid["t_min"]) / spacing - grid_tolerance
+                )))
+                upper = min(height - 1, int(math.floor(
+                    (max(t0, t1) - grid["t_min"]) / spacing + grid_tolerance
+                )))
+                for y in range(lower, upper + 1):
+                    u = (grid["t_min"] + y * spacing - t0) / dt
+                    if u <= endpoint_tolerance or u >= 1.0 - endpoint_tolerance:
+                        continue
+                    s = s0 + u * ds
+                    x_float = (s - grid["s_min"]) / spacing
+                    x = int(round(x_float))
+                    if 0 <= x < width and abs(x_float - x) <= grid_tolerance:
+                        found.append((u, y * width + x))
+            return sorted(found)
+
+        samples_a = _edge_luxels(grid_a)
+        samples_b = _edge_luxels(grid_b)
+        if not samples_a or not samples_b:
+            continue
+        used_b = set()
+        for u_a, index_a in samples_a:
+            best_index = None
+            best_delta = float("inf")
+            for u_b, index_b in samples_b:
+                if index_b in used_b:
+                    continue
+                delta = abs(u_a - u_b) * edge_length
+                if delta < best_delta:
+                    best_delta = delta
+                    best_index = index_b
+            if best_index is None or best_delta > edge_tolerance:
+                continue
+            used_b.add(best_index)
+            matched += 1
+            offset_a = grid_a["light_offset"] + index_a
+            offset_b = grid_b["light_offset"] + best_index
+            rgb_a = offset_a * 3
+            rgb_b = offset_b * 3
+            average = tuple(
+                max(0, min(255, int(round(
+                    (int(lit_rgb[rgb_a + channel]) + int(lit_rgb[rgb_b + channel])) * 0.5
+                ))))
+                for channel in range(3)
+            )
+            if (
+                tuple(lit_rgb[rgb_a:rgb_a + 3]) == average
+                and tuple(lit_rgb[rgb_b:rgb_b + 3]) == average
+            ):
+                continue
+            lit_rgb[rgb_a:rgb_a + 3] = bytes(average)
+            lit_rgb[rgb_b:rgb_b + 3] = bytes(average)
+            luminance = max(0, min(255, int(round(
+                0.2126 * average[0] + 0.7152 * average[1] + 0.0722 * average[2]
+            ))))
+            lighting[offset_a] = luminance
+            lighting[offset_b] = luminance
+            changed += 1
+
+    return {
+        "shared_coplanar_edges": considered,
+        "matched_sample_pairs": matched,
+        "changed_sample_pairs": changed,
+    }
