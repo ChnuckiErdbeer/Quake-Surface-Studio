@@ -302,5 +302,93 @@ class CoplanarEdgeStitchTests(unittest.TestCase):
         self.assertEqual(self.lighting[8], 60)
 
 
+class WorldAlignedLightmapChartTests(unittest.TestCase):
+    def setUp(self):
+        self.faces = [
+            (0, 0, 0, 4, 0, 0, 255, 255, 255, 0),
+            (0, 0, 4, 4, 0, 0, 255, 255, 255, 4),
+        ]
+        self.planes = [(0.0, 0.0, 1.0, 0.0, 2)]
+        self.vertices = [
+            (0.0, 0.0, 0.0), (16.0, 0.0, 0.0),
+            (16.0, 16.0, 0.0), (0.0, 16.0, 0.0),
+            (32.0, 0.0, 0.0), (32.0, 16.0, 0.0),
+        ]
+        self.edges = [
+            (0, 1), (1, 2), (2, 3), (3, 0),
+            (1, 4), (4, 5), (5, 2),
+        ]
+        self.surfedges = [0, 1, 2, 3, 4, 5, 6, -1]
+        self.texinfo = (1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0, 0)
+        self.records = [
+            {
+                "face_id": 0, "positions": self.vertices[:4],
+                "styles": (0, 255, 255, 255), "texinfo": self.texinfo,
+                "s_min": 0, "t_min": 0, "width": 2, "height": 2,
+                "samples_rgb": [(20, 20, 20)] * 4,
+            },
+            {
+                "face_id": 1, "positions": [
+                    self.vertices[1], self.vertices[4],
+                    self.vertices[5], self.vertices[2],
+                ],
+                "styles": (0, 255, 255, 255), "texinfo": self.texinfo,
+                "s_min": 16, "t_min": 0, "width": 2, "height": 2,
+                "samples_rgb": [(60, 60, 60)] * 4,
+            },
+        ]
+
+    def test_world_plane_frame_uses_world_xy_for_horizontal_surface(self):
+        frame = lightmap_export.world_plane_frame(self.planes[0], 0)
+        self.assertEqual(frame["normal"], (0.0, 0.0, 1.0))
+        self.assertEqual(frame["axis_s"], (1.0, 0.0, 0.0))
+        self.assertEqual(frame["axis_t"], (0.0, 1.0, 0.0))
+        flipped = lightmap_export.world_plane_frame(self.planes[0], 1)
+        self.assertEqual(flipped["axis_s"], frame["axis_s"])
+        self.assertEqual(flipped["axis_t"], frame["axis_t"])
+
+    def test_adjacent_faces_share_one_world_anchored_chart(self):
+        charts, face_to_chart, _records = lightmap_export.build_coplanar_face_charts(
+            self.records, self.faces, self.planes, self.edges, self.surfedges, [0, 0]
+        )
+        self.assertEqual(len(charts), 1)
+        chart = charts[0]
+        self.assertEqual(chart["face_ids"], (0, 1))
+        self.assertEqual((chart["s_min"], chart["t_min"]), (0.0, 0.0))
+        self.assertEqual((chart["width"], chart["height"]), (3, 2))
+        self.assertEqual(face_to_chart[0], face_to_chart[1])
+
+    def test_shared_edge_source_samples_become_one_averaged_chart_luxel(self):
+        charts, _face_to_chart, records = lightmap_export.build_coplanar_face_charts(
+            self.records, self.faces, self.planes, self.edges, self.surfedges, [0, 0]
+        )
+        samples, valid = lightmap_export.resample_coplanar_chart_sources(charts[0], records)
+        self.assertEqual(len(samples), 6)
+        self.assertEqual(samples[1], (40, 40, 40))
+        self.assertEqual(samples[4], (40, 40, 40))
+        self.assertEqual(samples[0], (20, 20, 20))
+        self.assertEqual(samples[2], (60, 60, 60))
+        self.assertEqual(valid, bytes((1, 1, 1, 1, 1, 1)))
+
+    def test_different_models_or_styles_do_not_share_a_chart(self):
+        charts, _mapping, _records = lightmap_export.build_coplanar_face_charts(
+            self.records, self.faces, self.planes, self.edges, self.surfedges, [0, 1]
+        )
+        self.assertEqual(len(charts), 2)
+        styled = list(self.faces)
+        styled[1] = (0, 0, 4, 4, 0, 32, 255, 255, 255, 4)
+        charts, _mapping, _records = lightmap_export.build_coplanar_face_charts(
+            self.records, styled, self.planes, self.edges, self.surfedges, [0, 0]
+        )
+        self.assertEqual(len(charts), 2)
+
+    def test_world_chart_coordinates_return_stable_pixel_centres(self):
+        first = lightmap_export.world_chart_pixel_coordinates(
+            16.0, 16.0, 10, 20, 0.0, 0.0, 2, 2, 2, 1024
+        )
+        self.assertAlmostEqual(first[0], 49.5)
+        self.assertAlmostEqual(first[1], 974.5)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
