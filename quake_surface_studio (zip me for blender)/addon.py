@@ -29,7 +29,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils, image_undo
 
 
-ADDON_VERSION = (0, 21, 15)
+ADDON_VERSION = (0, 21, 16)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -2952,6 +2952,36 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None, ou
         if style_count > 1:
             lighting.extend(bytes(block_size * (style_count - 1)))
             lit_rgb.extend(bytes(block_size * 3 * (style_count - 1)))
+
+    # Reconcile matching luxels only where two lightmapped BSP faces share
+    # the same coplanar geometric edge. This avoids blurring corners or
+    # unrelated lighting boundaries while preventing a false seam between
+    # separate lightmaps on one continuous plane.
+    try:
+        stitch_faces = list(struct.iter_unpack("<Hhihh4Bi", faces_lump))
+        stitch_result = lightmap_export_utils.stitch_coplanar_edge_samples(
+            stitch_faces,
+            output_texinfos,
+            vertices,
+            parsed.edges(),
+            parsed.surfedges(),
+            parsed.planes(),
+            parsed.face_model_ids(),
+            lighting,
+            lit_rgb,
+        )
+    except ValueError as exc:
+        raise bsp.BSPError(
+            f"Could not reconcile shared classic lightmap edges: {exc}"
+        ) from exc
+    if stitch_result["changed_sample_pairs"]:
+        _qss_log(
+            "INFO", "lightmap_export",
+            "Reconciled "
+            f"{stitch_result['changed_sample_pairs']} of "
+            f"{stitch_result['matched_sample_pairs']} matching luxel pairs on "
+            f"{stitch_result['shared_coplanar_edges']} shared coplanar BSP edges."
+        )
 
     if enhanced:
         enhanced_lighting, enhanced_lit, enhanced_bspx = _build_enhanced_lightmap_payload(
