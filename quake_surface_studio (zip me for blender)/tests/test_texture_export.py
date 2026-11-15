@@ -100,23 +100,12 @@ class TextureExportHelperTests(unittest.TestCase):
         # A 2x2 tile at bottom-left-based atlas coordinate (1, 1) contains
         # red, green / blue, white. Surrounding atlas pixels are black.
         pixels = []
+        black = (0.0, 0.0, 0.0, 1.0)
         colors = [
-            (0.0, 0.0, 0.0, 1.0),
-            (0.0, 0.0, 0.0, 1.0),
-            (0.0, 0.0, 0.0, 1.0),
-            (0.0, 0.0, 0.0, 1.0),
-            (1.0, 0.0, 0.0, 1.0),
-            (0.0, 1.0, 0.0, 1.0),
-            (0.0, 0.0, 1.0, 1.0),
-            (1.0, 1.0, 1.0, 1.0),
-            (0.0, 0.0, 0.0, 1.0),
-            (0.0, 0.0, 0.0, 1.0),
-            (0.0, 0.0, 0.0, 1.0),
-            (0.0, 0.0, 0.0, 1.0),
-            (0.0, 0.0, 0.0, 1.0),
-            (0.0, 0.0, 0.0, 1.0),
-            (0.0, 0.0, 0.0, 1.0),
-            (0.0, 0.0, 0.0, 1.0),
+            black, black, black, black,
+            black, (1.0, 0.0, 0.0, 1.0), (0.0, 1.0, 0.0, 1.0), black,
+            black, (0.0, 0.0, 1.0, 1.0), (1.0, 1.0, 1.0, 1.0), black,
+            black, black, black, black,
         ]
         for color in colors:
             pixels.extend(color)
