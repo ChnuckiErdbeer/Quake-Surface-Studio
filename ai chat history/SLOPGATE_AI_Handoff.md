@@ -722,3 +722,38 @@ features.
 5. Blender GUI baking, rerelease runtime, and Ironwail runtime have not been
    tested by the assistant.
 
+### User runtime result — 0.21.13 edge-rim test (2026-11-15)
+
+The user exported with BSPX and tested the map in both the Quake 2021 rerelease
+and Ironwail. They reported **no visible difference**; the original face-edge
+artifact remains.
+
+Interpretation:
+- This confirms the 0.21.13 half-luxel rim is not affecting either of the
+  user's tested render paths.
+- Ironwail source was inspected: its classic lightmap packing and drawing path
+  derives each face rectangle from classic texture extents and has no
+  `DECOUPLED_LM` reader. A BSPX rim is therefore ignored by this path.
+- Public QuakeSpasm code documents 2021 rerelease/Q64 compatibility, but has no
+  `DECOUPLED_LM` reader either. This does not prove the proprietary rerelease
+  executable has identical internals; the user's no-change result is the
+  direct evidence for that target.
+- BSPX's DECOUPLED_LM format is documented and implemented by FTE and ezQuake.
+  That offers a separate renderer in which to verify whether the SLOPGATE
+  expanded dimensions/projection are read, but it does not solve the user's
+  two target engines.
+
+Do not keep adjusting the Enhanced-only border and calling it a fix. The next
+candidate must affect classic BSP29 samples consumed by both renderers. Classic
+BSP29 couples texture projection and lightmap extents; a data-only extra border
+cannot be expressed independently the way DECOUPLED_LM can. A likely
+compatibility strategy is to investigate boundary-aware blending of samples
+between BSP faces that share an actual geometric edge. This could soften
+discontinuities in the classic lightmap data, but risks light leaking across
+true lighting/shadow boundaries and needs to be tested against the user's
+actual source map before implementation.
+
+Request the original source BSP and the exported BSPX-edited BSP, plus a
+screenshot with the offending edge identified, before implementing a
+map-specific or global boundary-blending algorithm. No classic-edge fix is
+implemented yet.
