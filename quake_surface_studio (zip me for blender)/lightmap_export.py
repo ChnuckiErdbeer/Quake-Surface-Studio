@@ -795,3 +795,270 @@ def stitch_coplanar_edge_samples(
         "matched_sample_pairs": matched,
         "changed_sample_pairs": changed,
     }
+
+
+def world_plane_frame(plane, side: int = 0):
+    """Return a deterministic world-anchored 2D basis for a BSP plane."""
+    if len(plane) < 4:
+        raise ValueError("A BSP plane requires a normal and distance.")
+    sign = -1.0 if int(side) else 1.0
+    normal = [float(plane[i]) * sign for i in range(3)]
+    distance = float(plane[3]) * sign
+    length = math.sqrt(sum(value * value for value in normal))
+    if not math.isfinite(length) or length <= 1e-12 or not math.isfinite(distance):
+        raise ValueError("BSP plane normal and distance must be finite and non-zero.")
+    normal = [value / length for value in normal]
+    distance /= length
+    major = max(range(3), key=lambda index: (abs(normal[index]), -index))
+    if normal[major] < 0.0:
+        normal = [-value for value in normal]
+        distance = -distance
+    reference_axes = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    projected = []
+    for axis_index, reference in enumerate(reference_axes):
+        dot = sum(normal[i] * reference[i] for i in range(3))
+        tangent = tuple(reference[i] - normal[i] * dot for i in range(3))
+        projected.append((sum(value * value for value in tangent), -axis_index, tangent))
+    tangent_length_sq, _order, tangent = max(projected, key=lambda item: (item[0], item[1]))
+    if tangent_length_sq <= 1e-12:
+        raise ValueError("Could not construct a stable tangent basis for the BSP plane.")
+    inverse_length = 1.0 / math.sqrt(tangent_length_sq)
+    axis_s = tuple(value * inverse_length for value in tangent)
+    axis_t = (
+        normal[1] * axis_s[2] - normal[2] * axis_s[1],
+        normal[2] * axis_s[0] - normal[0] * axis_s[2],
+        normal[0] * axis_s[1] - normal[1] * axis_s[0],
+    )
+    return {
+        "normal": tuple(normal), "distance": distance,
+        "axis_s": axis_s, "axis_t": axis_t,
+    }
+
+
+def build_coplanar_face_charts(
+    face_records, faces, planes, edges, surfedges, face_model_ids,
+    *, sample_spacing: int = 16, plane_tolerance: float = 1e-4,
+):
+    """Group adjacent classic lightmapped faces into shared world-space charts.
+
+    face_records must provide face_id and polygon positions. Components join
+    only across a shared BSP edge when model ownership, oriented plane and all
+    four classic style bytes match. Chart origins are snapped to one global
+    world-space sample lattice instead of each face's texinfo origin.
+    """
+    spacing = int(sample_spacing)
+    if spacing <= 0:
+        raise ValueError("World chart sample spacing must be positive.")
+    if len(face_model_ids) != len(faces):
+        raise ValueError("Face model IDs must contain one entry per BSP face.")
+    records_by_face, keys, frames, edge_users = {}, {}, {}, {}
+    for record in face_records:
+        face_id = int(record.get("face_id", -1))
+        if face_id < 0 or face_id >= len(faces):
+            continue
+        face = faces[face_id]
+        first_edge, edge_count = int(face[2]), int(face[3])
+        plane_id = int(face[0])
+        if (first_edge < 0 or edge_count < 3 or first_edge + edge_count > len(surfedges)
+                or plane_id < 0 or plane_id >= len(planes)):
+            continue
+        try:
+            frame = world_plane_frame(planes[plane_id], int(face[1]))
+        except ValueError:
+            continue
+        plane_key = tuple(round(value / plane_tolerance) for value in (
+            *frame["normal"], frame["distance"]
+        ))
+        keys[face_id] = (
+            int(face_model_ids[face_id]), tuple(int(value) for value in face[5:9]), plane_key
+        )
+        positions = tuple(tuple(float(value) for value in point) for point in record.get("positions", ()))
+        if len(positions) < 3:
+            continue
+        edge_ids, valid = set(), True
+        for signed_edge in surfedges[first_edge:first_edge + edge_count]:
+            edge_id = abs(int(signed_edge))
+            if edge_id >= len(edges):
+                valid = False
+                break
+            edge_ids.add(edge_id)
+        if not valid:
+            keys.pop(face_id, None)
+            continue
+        records_by_face[face_id] = dict(record)
+        records_by_face[face_id]["positions"] = positions
+        frames[face_id] = frame
+        for edge_id in edge_ids:
+            edge_users.setdefault(edge_id, []).append(face_id)
+
+    parent = {face_id: face_id for face_id in records_by_face}
+
+    def find(face_id):
+        while parent[face_id] != face_id:
+            parent[face_id] = parent[parent[face_id]]
+            face_id = parent[face_id]
+        return face_id
+
+    for users in edge_users.values():
+        if len(users) == 2 and keys[users[0]] == keys[users[1]]:
+            root_a, root_b = find(users[0]), find(users[1])
+            if root_a != root_b:
+                parent[max(root_a, root_b)] = min(root_a, root_b)
+
+    components = {}
+    for face_id in records_by_face:
+        components.setdefault(find(face_id), []).append(face_id)
+
+    charts, face_to_chart = [], {}
+    for chart_index, root in enumerate(sorted(components)):
+        face_ids = sorted(components[root])
+        frame = frames[face_ids[0]]
+        projected = [
+            (sum(point[i] * frame["axis_s"][i] for i in range(3)),
+             sum(point[i] * frame["axis_t"][i] for i in range(3)))
+            for face_id in face_ids for point in records_by_face[face_id]["positions"]
+        ]
+        s_min = math.floor(min(point[0] for point in projected) / spacing + 1e-7) * spacing
+        t_min = math.floor(min(point[1] for point in projected) / spacing + 1e-7) * spacing
+        s_max = math.ceil(max(point[0] for point in projected) / spacing - 1e-7) * spacing
+        t_max = math.ceil(max(point[1] for point in projected) / spacing - 1e-7) * spacing
+        chart_id = len(faces) + chart_index
+        chart = {
+            "chart_id": chart_id, "face_ids": tuple(face_ids),
+            "model_id": int(face_model_ids[face_ids[0]]),
+            "styles": tuple(int(value) for value in faces[face_ids[0]][5:9]),
+            "normal": frame["normal"], "distance": frame["distance"],
+            "axis_s": frame["axis_s"], "axis_t": frame["axis_t"],
+            "s_min": float(s_min), "t_min": float(t_min),
+            "width": int((s_max - s_min) // spacing + 1),
+            "height": int((t_max - t_min) // spacing + 1),
+        }
+        charts.append(chart)
+        for face_id in face_ids:
+            face_to_chart[face_id] = chart_id
+    return charts, face_to_chart, records_by_face
+
+
+def point_in_polygon_2d(point, polygon, tolerance: float = 1e-7) -> bool:
+    """Return True for points inside or on the boundary of a 2D polygon."""
+    px, py = float(point[0]), float(point[1])
+    vertices = tuple((float(p[0]), float(p[1])) for p in polygon)
+    if len(vertices) < 3:
+        return False
+    inside = False
+    for index, first in enumerate(vertices):
+        second = vertices[(index + 1) % len(vertices)]
+        dx, dy = second[0] - first[0], second[1] - first[1]
+        length_sq = dx * dx + dy * dy
+        if length_sq > 1e-20:
+            projection = max(0.0, min(1.0, ((px - first[0]) * dx + (py - first[1]) * dy) / length_sq))
+            nearest_x = first[0] + projection * dx
+            nearest_y = first[1] + projection * dy
+            if math.hypot(px - nearest_x, py - nearest_y) <= tolerance:
+                return True
+        if (first[1] > py) != (second[1] > py):
+            crossing_x = first[0] + (py - first[1]) * dx / (second[1] - first[1])
+            if px < crossing_x:
+                inside = not inside
+    return inside
+
+
+def bilinear_sample_rgb_grid(samples, width: int, height: int, x: float, y: float):
+    """Bilinearly sample a row-major RGB luxel grid, clamping to its edge."""
+    w, h = int(width), int(height)
+    if w <= 0 or h <= 0 or len(samples) != w * h:
+        raise ValueError("RGB luxel grid dimensions do not match its samples.")
+    if not math.isfinite(float(x)) or not math.isfinite(float(y)):
+        raise ValueError("RGB luxel grid coordinates must be finite.")
+    x = min(max(float(x), 0.0), w - 1.0)
+    y = min(max(float(y), 0.0), h - 1.0)
+    x0, y0 = int(math.floor(x)), int(math.floor(y))
+    x1, y1 = min(w - 1, x0 + 1), min(h - 1, y0 + 1)
+    fx, fy = x - x0, y - y0
+    corners = (
+        samples[y0 * w + x0], samples[y0 * w + x1],
+        samples[y1 * w + x0], samples[y1 * w + x1],
+    )
+    return tuple(max(0, min(255, int(round(
+        (float(corners[0][c]) * (1.0 - fx) + float(corners[1][c]) * fx) * (1.0 - fy)
+        + (float(corners[2][c]) * (1.0 - fx) + float(corners[3][c]) * fx) * fy
+    )))) for c in range(3))
+
+
+def resample_coplanar_chart_sources(chart, face_records, *, sample_spacing: int = 16):
+    """Resample per-face source lightmaps onto a shared world-space chart.
+
+    Matching samples on a shared geometric edge contribute to one chart luxel;
+    their RGB values are averaged. Empty cells are marked invalid and left to
+    the caller's atlas background/gutter.
+    """
+    spacing = int(sample_spacing)
+    width, height = int(chart["width"]), int(chart["height"])
+    if spacing <= 0 or width <= 0 or height <= 0:
+        raise ValueError("World chart dimensions and sample spacing must be positive.")
+    count = width * height
+    accum, weights = [0.0] * (count * 3), [0] * count
+    axis_s, axis_t = chart["axis_s"], chart["axis_t"]
+    normal, distance = chart["normal"], float(chart["distance"])
+    s_min, t_min = float(chart["s_min"]), float(chart["t_min"])
+
+    for face_id in chart["face_ids"]:
+        record = face_records[face_id]
+        polygon = [
+            (sum(point[i] * axis_s[i] for i in range(3)),
+             sum(point[i] * axis_t[i] for i in range(3)))
+            for point in record["positions"]
+        ]
+        min_x = max(0, int(math.floor((min(p[0] for p in polygon) - s_min) / spacing)) - 1)
+        max_x = min(width - 1, int(math.ceil((max(p[0] for p in polygon) - s_min) / spacing)) + 1)
+        min_y = max(0, int(math.floor((min(p[1] for p in polygon) - t_min) / spacing)) - 1)
+        max_y = min(height - 1, int(math.ceil((max(p[1] for p in polygon) - t_min) / spacing)) + 1)
+        texinfo = record["texinfo"]
+        for gy in range(min_y, max_y + 1):
+            world_t = t_min + gy * spacing
+            for gx in range(min_x, max_x + 1):
+                world_s = s_min + gx * spacing
+                if not point_in_polygon_2d((world_s, world_t), polygon):
+                    continue
+                point = tuple(
+                    axis_s[i] * world_s + axis_t[i] * world_t + normal[i] * distance
+                    for i in range(3)
+                )
+                source_s = sum(point[i] * texinfo[i] for i in range(3)) + float(texinfo[3])
+                source_t = sum(point[i] * texinfo[i + 4] for i in range(3)) + float(texinfo[7])
+                source_x = (source_s - float(record["s_min"])) / spacing
+                source_y = (source_t - float(record["t_min"])) / spacing
+                rgb = bilinear_sample_rgb_grid(
+                    record["samples_rgb"], record["width"], record["height"],
+                    source_x, source_y,
+                )
+                offset = (gy * width + gx) * 3
+                accum[offset] += rgb[0]
+                accum[offset + 1] += rgb[1]
+                accum[offset + 2] += rgb[2]
+                weights[gy * width + gx] += 1
+    output, valid = [], bytearray(count)
+    for index, weight in enumerate(weights):
+        if weight:
+            valid[index] = 1
+            output.append(tuple(max(0, min(255, int(round(
+                accum[index * 3 + channel] / weight
+            )))) for channel in range(3)))
+        else:
+            output.append((0, 0, 0))
+    return output, bytes(valid)
+
+
+def world_chart_pixel_coordinates(
+    world_s, world_t, atlas_x, atlas_y, chart_s_min, chart_t_min,
+    gutter, lightmap_scale, resolution, image_size,
+):
+    """Map world-plane coordinates to the bottom-up image pixel centre."""
+    block = max(1, int(lightmap_scale)) * max(1, int(resolution))
+    origin_x = (int(atlas_x) + int(gutter)) * max(1, int(resolution))
+    origin_y = (int(atlas_y) + int(gutter)) * max(1, int(resolution))
+    luxel_s = (float(world_s) - float(chart_s_min)) / 16.0
+    luxel_t = (float(world_t) - float(chart_t_min)) / 16.0
+    pixel_x = origin_x + (luxel_s + 0.5) * block - 0.5
+    pixel_top_y = origin_y + (luxel_t + 0.5) * block - 0.5
+    return pixel_x, int(image_size) - 1.0 - pixel_top_y
