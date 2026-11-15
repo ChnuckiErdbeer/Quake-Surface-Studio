@@ -1,4 +1,12 @@
-# SLOPGATE 0.21.15
+# SLOPGATE 0.21.16
+
+## 0.21.16 — coplanar BSP lightmap edge reconciliation
+
+- Adds a narrowly scoped classic BSP29 export pass for luxels at shared BSP edges.
+- Only pairs on the same oriented plane, within the same BSP model, with identical style bytes and matching 16-unit world-space sample positions are reconciled. Corners, non-coplanar joins, differently styled surfaces, unaligned grids and face interiors are not blurred.
+- Reconciles both RGB QLIT samples and the monochrome BSP29 fallback so Ironwail's classic lighting path receives the same boundary values on both adjacent faces.
+- Adds unit tests for the stitch, non-coplanar/style/model rejection and misaligned sample-grid rejection.
+- This targets the remaining mismatch found in the committed spottest01 source BSP. Blender 5.3 and Ironwail runtime validation are still required before calling the visual artefact fixed.
 
 ## 0.21.15 — classic BSP29 detached-face lightmap alignment
 
