@@ -390,5 +390,36 @@ class WorldAlignedLightmapChartTests(unittest.TestCase):
         self.assertAlmostEqual(first[1], 974.5)
 
 
+class WorldChartSamplingTests(unittest.TestCase):
+    def test_classic_face_grid_samples_map_to_shared_world_chart_positions(self):
+        # The two face-local grids use different S offsets, but the shared
+        # physical point (16, 16, 0) must read the same chart pixel.
+        size = 16
+        pixels = [0.0] * (size * size * 4)
+        for i in range(size * size):
+            pixels[i * 4:i * 4 + 4] = [0.25, 0.5, 0.75, 1.0]
+        first = lightmap_export.sample_rgb_from_world_chart_positions(
+            pixels, size, 1, 2, 3, 1, 1,
+            [(16.0, 16.0, 0.0)], (1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0), 0.0, 0.0,
+        )
+        second = lightmap_export.sample_rgb_from_world_chart_positions(
+            pixels, size, 1, 2, 3, 1, 1,
+            [(16.0, 16.0, 0.0)], (1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0), 0.0, 0.0,
+        )
+        self.assertEqual(first, bytes((64, 128, 191)))
+        self.assertEqual(first, second)
+
+    def test_world_chart_grid_positions_solve_classic_texinfo_coordinates(self):
+        texinfo = (0.0, 1.0, 0.0, -32.0, 0.0, 0.0, -1.0, 0.0)
+        positions = lightmap_export.world_chart_grid_positions(
+            texinfo, (1.0, 0.0, 0.0), 496.0,
+            (0.0, 16.0), (0.0, 16.0),
+        )
+        self.assertEqual(positions[0], (496.0, 32.0, 0.0))
+        self.assertEqual(positions[-1], (496.0, 48.0, -16.0))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
