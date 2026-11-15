@@ -6,6 +6,8 @@ atlas-region updates can be covered by the standalone Python test suite.
 
 from __future__ import annotations
 
+import math
+
 
 def resolve_target_faces(
     face_count: int,
