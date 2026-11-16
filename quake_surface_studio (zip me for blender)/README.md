@@ -1,4 +1,13 @@
-# SLOPGATE 0.21.17
+# SLOPGATE 0.21.18
+
+## 0.21.18 — large-map chart sampling performance
+
+- Cache source BSP face, plane, edge, vertex, texinfo and resolved light-style metadata once per bake/diagnostic pass. Avoids rebuilding full-map arrays and resolving all face styles for every single face, which caused near-quadratic work on large maps.
+- Reuse the same parsed source cache for post-Cycles luxel statistics, face-coverage validation and source-lightmap comparison.
+- Reuse the same precomputed face metadata in the Quake direct-light bake path.
+- Add an affine world-chart sampling fast path: solve a face's texinfo/plane mapping once, then step pixel coordinates across its classic luxel grid without allocating an XYZ tuple for every sample.
+- Add regression coverage comparing the affine sampler with the previous XYZ reference sampler.
+- This is a performance correction; Blender 5.3 and Ironwail runtime validation remain required. The residual edge artefact is not yet claimed fixed.
 
 ## 0.21.17 — world-aligned coplanar lightmap charts
 
