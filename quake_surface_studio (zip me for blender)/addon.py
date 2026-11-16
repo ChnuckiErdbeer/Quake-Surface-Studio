@@ -7640,12 +7640,47 @@ class QSS_OT_preview_bsp_lightmaps(Operator):
             return {'CANCELLED'}
 
 
+
+def _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed=None):
+    """Read one face's original BSP luxel grid from its shared world chart."""
+    mesh = obj.data
+    world_attr = mesh.attributes.get('qss_lm_world_chart')
+    if world_attr is None or poly_index >= len(world_attr.data) or not world_attr.data[poly_index].value:
+        return None
+    source_path = bpy.path.abspath(str(obj.get('qss_source_path', '') or ''))
+    if parsed is None:
+        if not source_path or not os.path.isfile(source_path):
+            raise bsp.BSPError('The source BSP is required to sample world-aligned lightmap charts.')
+        parsed = bsp.BSP29.from_file(source_path)
+    face_attr = mesh.attributes.get('qss_bsp_face_id')
+    if face_attr is None or poly_index >= len(face_attr.data):
+        raise bsp.BSPError('BSP face IDs are missing while sampling a world-aligned chart.')
+    face_id = int(face_attr.data[poly_index].value)
+    info = _qss_read_source_face_sample(mesh, poly_index, face_id, parsed)
+    if info is None or info.get('decoupled_lmvecs') is not None:
+        return None
+    sample_s = [float(info['s_min']) + sx * 16.0 for sx in range(info['width'])]
+    sample_t = [float(info['t_min']) + sy * 16.0 for sy in range(info['height'])]
+    positions = lightmap_export_utils.world_chart_grid_positions(
+        info['texinfo'], info['plane_normal'], info['plane_distance'],
+        sample_s, sample_t,
+    )
+    size = int(image.size[0])
+    return lightmap_export_utils.sample_rgb_from_world_chart_positions(
+        pixels, size, _qss_lightmap_pixel_scale(obj, image),
+        info['atlas_x'], info['atlas_y'],
+        int(obj.get('qss_lightmap_gutter', 2)),
+        max(1, int(obj.get('qss_lightmap_scale', 1))),
+        positions, info['chart_axis_s'], info['chart_axis_t'],
+        info['chart_s_min'], info['chart_t_min'],
+    )
+
 def _lightmap_sample_luminances(obj, image, face_indices=None):
     """Read only real luxel centers, excluding atlas gutters and empty space."""
     mesh = obj.data
     attrs = _qss_validate_face_domain_attributes(
         mesh, ('qss_lm_has_data', 'qss_lm_atlas_x', 'qss_lm_atlas_y',
-               'qss_lm_sample_w', 'qss_lm_sample_h'),
+               'qss_lm_sample_w', 'qss_lm_sample_h', 'qss_lm_world_chart'),
         'sample lightmap luxels'
     )
     size = int(image.size[0])
@@ -7666,6 +7701,13 @@ def _lightmap_sample_luminances(obj, image, face_indices=None):
         y0 = int(_qss_safe_collection_item(attrs['qss_lm_atlas_y'].data, poly_index, 'qss_lm_atlas_y').value) * resolution + gutter
         width = int(_qss_safe_collection_item(attrs['qss_lm_sample_w'].data, poly_index, 'qss_lm_sample_w').value)
         height = int(_qss_safe_collection_item(attrs['qss_lm_sample_h'].data, poly_index, 'qss_lm_sample_h').value)
+        if bool(attrs['qss_lm_world_chart'].data[poly_index].value):
+            chart_rgb = _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index)
+            if chart_rgb is not None:
+                for offset in range(0, len(chart_rgb), 3):
+                    r, g, b = chart_rgb[offset:offset + 3]
+                    values.append((0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0)
+                continue
         for sy in range(height):
             top_y = y0 + sy * scale + (scale - 1) // 2
             blender_y = size - 1 - top_y
@@ -7684,7 +7726,7 @@ def _lightmap_face_coverage(obj, image, threshold=1e-8, face_indices=None):
     mesh = obj.data
     attrs = _qss_validate_face_domain_attributes(
         mesh, ('qss_lm_has_data', 'qss_lm_atlas_x', 'qss_lm_atlas_y',
-               'qss_lm_sample_w', 'qss_lm_sample_h'),
+               'qss_lm_sample_w', 'qss_lm_sample_h', 'qss_lm_world_chart'),
         'measure lightmap face coverage'
     )
     size = int(image.size[0])
@@ -7719,6 +7761,21 @@ def _lightmap_face_coverage(obj, image, threshold=1e-8, face_indices=None):
         ).value)
         face_lit = 0
         face_max = 0.0
+        if bool(attrs['qss_lm_world_chart'].data[poly_index].value):
+            chart_rgb = _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index)
+            if chart_rgb is not None:
+                total_luxels += len(chart_rgb) // 3
+                for offset in range(0, len(chart_rgb), 3):
+                    r, g, b = chart_rgb[offset:offset + 3]
+                    luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
+                    face_max = max(face_max, luminance)
+                    if luminance > threshold:
+                        face_lit += 1
+                        lit_luxels += 1
+                if face_lit:
+                    lit_faces += 1
+                face_max_luminance = max(face_max_luminance, face_max)
+                continue
         for sy in range(height):
             top_y = y0 + sy * scale + (scale - 1) // 2
             blender_y = size - 1 - top_y
