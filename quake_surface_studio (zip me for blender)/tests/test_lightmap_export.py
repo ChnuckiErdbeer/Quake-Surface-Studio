@@ -425,6 +425,28 @@ class WorldAlignedLightmapChartTests(unittest.TestCase):
 
 
 class WorldChartSamplingTests(unittest.TestCase):
+    def test_float_sampling_preserves_hdr_values_while_export_stays_byte_clamped(self):
+        size = 16
+        pixels = [0.0] * (size * size * 4)
+        for index in range(size * size):
+            pixels[index * 4:index * 4 + 4] = (0.25, 1.5, 3.0, 1.0)
+        args = (
+            pixels, size, 1, 2, 2, 1, 1,
+            (0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0),
+            (1.0, 0.0, 0.0), 0.0,
+            0.0, 0.0, 1, 1,
+            (0.0, 1.0, 0.0), (0.0, 0.0, 1.0), 0.0, 0.0,
+        )
+        exported = lightmap_export.sample_classic_face_grid_from_world_chart(*args)
+        measured = lightmap_export.sample_classic_face_grid_from_world_chart(
+            *args, preserve_float=True
+        )
+        self.assertEqual(exported, bytes((64, 255, 255)))
+        self.assertEqual(len(measured), 3)
+        self.assertAlmostEqual(measured[0], 0.25)
+        self.assertAlmostEqual(measured[1], 1.5)
+        self.assertAlmostEqual(measured[2], 3.0)
+
     def test_classic_face_grid_samples_map_to_shared_world_chart_positions(self):
         # The two face-local grids use different S offsets, but the shared
         # physical point (16, 16, 0) must read the same chart pixel.
