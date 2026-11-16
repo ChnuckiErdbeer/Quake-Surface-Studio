@@ -1,4 +1,15 @@
-# SLOPGATE 0.21.16
+# SLOPGATE 0.21.17
+
+## 0.21.17 — world-aligned coplanar lightmap charts
+
+- Connected coplanar BSP29 faces with matching model ownership and resolved light styles share a deterministic world-plane luxel lattice for the Blender lightmap atlas.
+- Cycles UV assignment now maps face vertices into shared chart coordinates rather than restarting the texinfo-derived lightmap grid independently on each face.
+- Original per-face BSP29 texture projections and sample extents are retained; classic export samples those required face-local grids from the shared chart, so no nonstandard BSP29 fields are introduced.
+- Quake direct-light baking and Enhanced BSPX export read chart-space pixels. Partial bake scopes expand to all faces belonging to a shared chart.
+- Faces that are not eligible for a shared classic chart retain the existing independent atlas path.
+- Automated tests and Blender 5.3 / Ironwail runtime validation are required before the edge artefact can be declared fixed.
+
+## 0.21.16 — coplanar BSP lightmap edge reconciliation
 
 ## 0.21.16 — coplanar BSP lightmap edge reconciliation
 
