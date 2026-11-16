@@ -1,11 +1,11 @@
-# Quake-Surface-Studio
+# SLOPGATE
 
 ## Current development build
 
-SLOPGATE **0.21.18** — BSP29-only development build.
+SLOPGATE **0.21.19** — BSP29-only development build.
 
-The 0.21.17 world-aligned coplanar chart implementation is retained. This build removes repeated full-BSP face/style reconstruction from per-face sampling in post-Cycles diagnostics and the Quake direct-light bake, reusing one parsed metadata cache per pass. Classic face-grid sampling from a shared chart now uses an affine fast path that avoids constructing an XYZ tuple for each luxel. GitHub Actions compiles the add-on, runs the standalone suite, and assembles the Blender ZIP. Blender 5.3 and Ironwail runtime validation remain outstanding; the residual edge artefact is not yet claimed fixed.
+This candidate changes how Cycles handles Quake delay-0 lights. The experimental custom falloff used by the previous build is disabled for these lights; Cycles now uses Blender's regular point-light falloff with SLOPGATE's existing energy calibration. This is a deliberate reliability-first approximation, not an attempt to reproduce ericw lighting exactly. The delay-5 correction remains unchanged.
 
-The detached-face local-texture export correction from 0.21.15 is retained. The earlier 0.21.13 half-luxel rim remains limited to Enhanced BSPX DECOUPLED_LM; it does not change the classic BSP29 fallback.
+This change targets the single non-finite luxel reported during the e1m1 bake. It must still be tested in Blender 5.3 against e1m1 and the one-light spottest before the lighting issue can be considered resolved. The failed-bake rollback and face/light diagnostics remain enabled.
 
-Python tests and package assembly are checked in GitHub Actions. Blender 5.3 export/bake and Ironwail/Quake rerelease comparisons are not claimed as runtime-tested until performed.
+The world-aligned coplanar lightmap charts, detached-face local-texture export correction, classic BSP29 seam handling and large-map sampling improvements are retained. Automated tests and package assembly run in GitHub Actions; CI does not replace Blender GUI bake or Ironwail runtime validation.

@@ -6,6 +6,21 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import lighting
 
 
+class CyclesFalloffPolicyTests(unittest.TestCase):
+    def test_delay_zero_uses_native_blender_falloff(self):
+        self.assertFalse(lighting.cycles_uses_ericw_falloff_correction(0))
+
+    def test_delay_five_keeps_its_existing_correction(self):
+        self.assertTrue(lighting.cycles_uses_ericw_falloff_correction(5))
+
+    def test_other_delays_use_the_native_fallback(self):
+        for delay in (1, 2, 3, 4, 6, -1):
+            self.assertFalse(lighting.cycles_uses_ericw_falloff_correction(delay))
+
+    def test_invalid_delay_uses_the_native_fallback(self):
+        self.assertFalse(lighting.cycles_uses_ericw_falloff_correction("invalid"))
+
+
 class LightingHelpersTests(unittest.TestCase):
     def test_energy_scale_is_applied_as_a_live_multiplier(self):
         self.assertAlmostEqual(lighting.scaled_quake_light_energy(300, 0.01), 3.0)

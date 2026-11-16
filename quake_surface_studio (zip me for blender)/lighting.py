@@ -206,6 +206,20 @@ def ericw_light_value(light_value: float, delay: int, distance: float,
     return min(0.0, light + value)
 
 
+def cycles_uses_ericw_falloff_correction(delay: int) -> bool:
+    """Return whether Cycles should use the experimental ericw light shader.
+
+    Delay-0 lights use Blender's native point-light falloff. The custom
+    delay-0 node graph is intentionally disabled because it has produced
+    non-finite lightmap samples in real BSP bakes. Delay 5 retains its
+    existing correction; all other delays use the native approximation.
+    """
+    try:
+        return int(delay) == 5
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def ericw_cycles_light_falloff_correction(
     delay: int,
     distance: float,

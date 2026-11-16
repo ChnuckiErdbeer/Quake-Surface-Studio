@@ -29,7 +29,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils, image_undo
 
 
-ADDON_VERSION = (0, 21, 18)
+ADDON_VERSION = (0, 21, 19)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -3426,17 +3426,21 @@ def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
 
 
 def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
-    """Enable/update the Cycles correction for ericw delay 0 and delay 5 only."""
+    """Enable the experimental Cycles correction only for delay-5 lights."""
     light_data = light_obj.data
-    marker = int(light_data.get("qss_cycles_delay_falloff_version", 0))
 
-    if int(delay) not in {0, 5}:
-        # Do not disturb unrelated or user-authored light node trees. Only
-        # disable a complete node tree installed by this SLOPGATE helper.
+    if not lighting_utils.cycles_uses_ericw_falloff_correction(delay):
+        # Delay-0 lights use Blender's regular point-light falloff. The custom
+        # correction has produced a single non-finite luxel in the user's
+        # e1m1 bake, so remove only node graphs owned by this helper. Never
+        # touch a user-authored light node tree.
         if _qss_cycles_falloff_tree_is_owned(light_data):
             light_data.use_nodes = False
         light_obj["qss_cycles_falloff_active"] = False
-        light_obj["qss_cycles_falloff_profile"] = "native_fallback"
+        light_obj["qss_cycles_falloff_profile"] = (
+            "native_fallback_delay0" if int(delay) == 0 else "native_fallback"
+        )
+        light_obj["qss_cycles_falloff_error"] = ""
         return False
 
     if not hasattr(light_data, "use_nodes"):
