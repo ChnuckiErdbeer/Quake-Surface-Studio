@@ -3700,7 +3700,9 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
             cone = _parse_entity_float(entity, 'angle', _parse_entity_float(entity, '_cone', 40.0))
             soft_angle = _parse_entity_float(entity, '_softangle', 0.0)
             light_data.spot_size = math.radians(max(1.0, min(179.0, cone)))
-            light_data.spot_blend = max(0.0, min(1.0, 1.0 - max(0.0, soft_angle) / max(0.1, cone)))
+            light_data.spot_blend = lighting_utils.blender_spot_blend_from_ericw_angles(
+                cone, soft_angle
+            )
             direction = _entity_spot_direction(entity, targets)
             raw_direction = tuple(float(v) for v in direction.normalized())
             if flip_z:
@@ -7641,8 +7643,16 @@ class QSS_OT_preview_bsp_lightmaps(Operator):
 
 
 
-def _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed=None, source_cache=None):
-    """Read one face's original BSP luxel grid from its shared world chart."""
+def _qss_world_chart_face_rgb_samples(
+    obj, image, pixels, poly_index, parsed=None, source_cache=None,
+    preserve_float=False,
+):
+    """Read a face's original BSP luxels from its shared world chart.
+
+    The default return remains clamped RGB bytes for BSP export. Bake
+    calibration can request linear floats so HDR Cycles samples are not clipped
+    before the source-match factor is calculated.
+    """
     mesh = obj.data
     world_attr = mesh.attributes.get('qss_lm_world_chart')
     if world_attr is None or poly_index >= len(world_attr.data) or not world_attr.data[poly_index].value:
@@ -7673,6 +7683,7 @@ def _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed=Non
         info['s_min'], info['t_min'], info['width'], info['height'],
         info['chart_axis_s'], info['chart_axis_t'],
         info['chart_s_min'], info['chart_t_min'],
+        preserve_float=bool(preserve_float),
     )
 
 def _lightmap_sample_luminances(obj, image, face_indices=None, parsed_source=None, source_cache=None):
@@ -7715,11 +7726,14 @@ def _lightmap_sample_luminances(obj, image, face_indices=None, parsed_source=Non
         width = int(_qss_safe_collection_item(attrs['qss_lm_sample_w'].data, poly_index, 'qss_lm_sample_w').value)
         height = int(_qss_safe_collection_item(attrs['qss_lm_sample_h'].data, poly_index, 'qss_lm_sample_h').value)
         if bool(attrs['qss_lm_world_chart'].data[poly_index].value):
-            chart_rgb = _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed_source, source_cache)
+            chart_rgb = _qss_world_chart_face_rgb_samples(
+                obj, image, pixels, poly_index, parsed_source, source_cache,
+                preserve_float=True,
+            )
             if chart_rgb is not None:
                 for offset in range(0, len(chart_rgb), 3):
                     r, g, b = chart_rgb[offset:offset + 3]
-                    values.append((0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0)
+                    values.append(0.2126 * r + 0.7152 * g + 0.0722 * b)
                 continue
         for sy in range(height):
             top_y = y0 + sy * scale + (scale - 1) // 2
@@ -7788,12 +7802,15 @@ def _lightmap_face_coverage(obj, image, threshold=1e-8, face_indices=None, parse
         face_lit = 0
         face_max = 0.0
         if bool(attrs['qss_lm_world_chart'].data[poly_index].value):
-            chart_rgb = _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed_source, source_cache)
+            chart_rgb = _qss_world_chart_face_rgb_samples(
+                obj, image, pixels, poly_index, parsed_source, source_cache,
+                preserve_float=True,
+            )
             if chart_rgb is not None:
                 total_luxels += len(chart_rgb) // 3
                 for offset in range(0, len(chart_rgb), 3):
                     r, g, b = chart_rgb[offset:offset + 3]
-                    luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
+                    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
                     face_max = max(face_max, luminance)
                     if luminance > threshold:
                         face_lit += 1
@@ -7895,7 +7912,8 @@ def _qss_collect_direct_lights(context, obj, unit_scale, flip_z):
     inv_scale = 1.0 / max(1e-9, float(unit_scale))
     inverse_map = obj.matrix_world.inverted_safe()
     inverse_map_3x3 = inverse_map.to_3x3()
-    for light_obj in context.scene.objects:
+    active_map_objects = _qss_active_map_objects(context.scene, obj)
+    for light_obj in active_map_objects:
         role = light_obj.get('qss_light_role') if light_obj.type == 'LIGHT' else None
         if role not in {'quake_entity_light', 'quake_world_sunlight'}:
             continue
@@ -10729,8 +10747,10 @@ def _qss_diagnostics_text(context, obj):
                     uv_maps.append(f'{node.get("qss_role", "")}: {node.uv_map}')
         lines.append(f'  slot {slot} {mat.name}: base={base_images} lightmap={light_images} uv={uv_maps}')
 
-    lines.append('IMPORTED LIGHTS:')
-    for light_obj in context.scene.objects:
+    lines.append('IMPORTED LIGHTS (active BSP map only):')
+    active_map_objects = _qss_active_map_objects(context.scene, obj)
+    active_map_lights = 0
+    for light_obj in active_map_objects:
         if light_obj.type != 'LIGHT' or light_obj.get('qss_light_role') not in {'quake_entity_light', 'quake_world_sunlight'}:
             continue
         lines.append('  {} type={} color={} energy={:.6g} W style={} inferred={} value={} delay={} range={} manual_calibration={}'.format(
@@ -10739,6 +10759,8 @@ def _qss_diagnostics_text(context, obj):
             light_obj.get('qss_quake_style_was_inferred', False), light_obj.get('qss_quake_light_value', ''),
             light_obj.get('qss_quake_light_delay', 0), light_obj.get('qss_quake_range', ''),
             light_obj.get('qss_manual_energy_calibration', 1.0)))
+        active_map_lights += 1
+    lines.append(f'Active-map imported light count: {active_map_lights}')
     world = context.scene.world
     lines.append(f'World: {world.name if world else "None"}')
     if world and world.use_nodes and world.node_tree:
