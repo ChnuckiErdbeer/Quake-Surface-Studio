@@ -21351,10 +21351,19 @@ addresses the actual partial-luxel geometry, and the large-map path no longer
 repeatedly reconstructs the entire BSP for every face.
 
 
+## 2026-11-16 — Standing requirement: keep both project records current
 
+**User**
+> Ok From now on ALWAYS keep both files up to date.
 
+**Assistant**
+Agreed. For every SLOPGATE work session, I will maintain both project records as part of the work rather than treating documentation as optional cleanup:
 
+- Append the relevant user dialogue and assistant technical decisions/results to `Slipgate_Chat_History_Clean.md`. Preserve the existing archive; do not rewrite or silently omit prior history.
+- Review and update `SLOPGATE_AI_Handoff.md` so it reflects the current implementation baseline, active branches/PR dependencies, decisions, known issues, test evidence, runtime-validation status, and next steps. If a session makes no engineering change, record that accurately rather than implying otherwise.
+- Keep both files consistent with each other and with the actual repository state. Do not claim tests, runtime validation, commits, or builds that did not happen.
+- Verify both writes succeeded and check the resulting branch head and file contents before reporting completion.
 
+This is a standing requirement for subsequent SLOPGATE sessions, not a one-time documentation task.
 
-
-
+**Scope of this session:** documentation/process update only. No add-on source changes, version change, build, test run, or pull-request merge was requested or performed.
