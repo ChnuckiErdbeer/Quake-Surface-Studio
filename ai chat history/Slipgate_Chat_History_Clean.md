@@ -21367,3 +21367,93 @@ Agreed. For every SLOPGATE work session, I will maintain both project records as
 This is a standing requirement for subsequent SLOPGATE sessions, not a one-time documentation task.
 
 **Scope of this session:** documentation/process update only. No add-on source changes, version change, build, test run, or pull-request merge was requested or performed.
+
+
+## 2026-11-16 — Investigated severe Cycles lightmap overbrightness using testressource26.11.16_01
+
+**User report (verbatim)**
+
+> Ok! 
+> There are a lot of problems with the current build. 
+>
+> I made more extensive tests and screenshots. 
+> I tested e1ma as well as a new testmap called spottest01
+> e1m1 is the official map from the remaster. I wont provide it because of 
+> copyright.
+> spottest02 is provided along the sceenshots as map and bsp.
+>
+> Spottest has a wall lit scewed  by a light "600" spotlight. The wall ist made 
+> of different brushes textured with different single colored textures.
+> The screenshots for spottest01 crop everything except this wall. For the 
+> blender screenshots i left all faces selected so the face boudaries are easy to 
+> see. The irnowail screenshots are also cropping everything except this wall. 
+>
+> The map coordinates of the top left corner of the wall are (496, -16 304)
+> The map coordinates of the bottom right corner are (496 -368 16)
+>
+> i also included the original and baked lightmaps
+>
+> Things are way differen thist time. No edge problems but the light levels are 
+> all over the place. Cycles lightmaps are very bright to the point that in 
+> ironwail they look nearly fullbright. 
+>
+> Also while baking is a bit faster now (e1m1: total 3m1s cycle 2 m 49s) testing 
+> in ironwail takes about 25 s to export (also e1m1). 
+>
+> You'll find the screenshots, map, bsp, and the blender status reports at the 
+> newly to the repo pushed folder:
+> https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/tree/fix/v0.11.1-metadata-style-order-test/testressource26.11.16_01
+
+**Evidence inspected**
+
+- Resource directory: `testressource26.11.16_01` on `fix/v0.11.1-metadata-style-order-test`. The supplied MAP/BSP/statistics filenames identify the test compilation as `spottest02-compile`; the user's narrative also references spottest01. The official Remaster e1m1 BSP/MAP was not supplied, as requested.
+- `spottest02-compile.map` has one targeted spotlight: origin `392 -128 264`, target `lighttarget`, `light` value 600. Target entity origin `456 -160 200`. It has no explicit `_softangle`, so ericw's default is zero (hard edge); no explicit `angle`, so default outer cone is 40 degrees.
+- The ericw compile log states the command line set bounce to 1. The SLOPGATE report reads 36 receiver faces / 3,858 luxels, 512px atlas, 4,096 Cycles samples, GPU, and 2 Cycles diffuse bounces.
+- The SLOPGATE test report records raw sampled mean 0.16068266601612133, source mean 0.023759135587879527, final atlas mean 0.03195092448591671, normalization 0.14786371285061806, and whole-atlas maximum channel 12.572527885437012. The final atlas mean is about 1.345 times the source mean, i.e. 34.5% above the intended mean.
+- User-reported e1m1 timing: 3m01s total, 2m49s inside the Cycles bake operator. This implies roughly 12 seconds outside the Cycles operator, but does not identify the stage. The reported 25-second export/test interval is not present in the supplied SLOPGATE report; the exact measured operation remains ambiguous.
+
+**Code defects identified and corrected on the PR #5 feature branch**
+
+Active code branch: `fix/0.21.17-world-aligned-lightmap-charts`; resulting head `8ddee09dd7027045360a163aef6c2f08d3de6ec1`. Add-on version declarations remain 0.21.18; this is still a candidate build in draft PR #5, not an official release.
+
+1. The world-chart sampler used for source matching returned 8-bit RGB bytes. It clipped HDR Cycles luxels above 1.0 before calculating the bake mean. It now has an opt-in `preserve_float=True` mode returning unbounded linear float RGB. The default byte-clamped return is unchanged for BSP export.
+2. Bake source-match calibration was measured before `collapse_rgba_luxel_blocks`, while the exported classic BSP luxels are taken after that reduction. It now collapses the working bake first, writes the reduced float atlas back to the scratch bake image, then measures the actual classic luxel grid and calculates the normalization from those post-reduction HDR samples.
+3. The import path mapped ericw `_softangle=0` to Blender `spot_blend=1`, which means the softest/widest edge transition. ericw defines zero as disabled; Blender Blend 0 is the sharp edge. A helper now maps zero/invalid to hard edge (Blend 0) and positive inner angles proportionally.
+4. Quake Direct's collector scanned every QSS light in the scene instead of only the active BSP collection. It now collects from `_qss_active_map_objects(context.scene, obj)`.
+5. The diagnostics report also listed all QSS lights from the scene, which is why the spottest02 report appeared to contain 253 lights despite a one-light MAP. It now reports the active BSP's lights only. Importantly, the Cycles bake path already used active-map scoping and hid other map lights; the 253-light diagnostics count is not evidence those lights contaminated that Cycles bake. The collector change fixes the separate Quake Direct path and the report no longer misleads.
+
+Changes were committed as:
+- `87640e1a9197239b17144179315a1ef3394a0016` — preserve HDR samples in world-chart sampler.
+- `98753c71756fcd7e039578764da56beb2dfbb92d` — add ericw-to-Blender spot blend mapping.
+- `ecda44b5aa6f274428c6b43d399fca2d6ed3c9f5` — test HDR sample preservation.
+- `4d5caaeb61c6158d7eff500ee6412d2414331d05` — test hard/soft spot-angle mapping.
+- `fbd760c774464b3567786cf2e42fd9c52ee11430` — apply HDR sampling, spot mapping, active-map Quake Direct collection and active-map diagnostics in addon.
+- `8ddee09dd7027045360a163aef6c2f08d3de6ec1` — calibrate after luxel reduction.
+
+**Additional identified factor — not changed in this pass**
+
+The spottest02 Cycles bake used two diffuse bounces. Its ericw compile log says one bounce was enabled by command line. The map's SLOPGATE diagnostics show worldspawn `Compiler bounce: 0`, but that field does not represent the command-line override. Blender's documentation warns that Linear/Constant Light Falloff can add more light at each global-illumination bounce and can become extremely bright. Since the QSS Cycles light for Quake delay 0 uses a custom linear-falloff shader, multiple Cycles bounces may further amplify/smear light. No bounce default or user setting was changed; compare a direct-only bake with the existing 2-bounce bake before deciding how the SLOPGATE/ericw bounce conventions should interact.
+
+References consulted:
+- ericw spotlight `_softangle` default and bounce documentation: https://ericw-tools.readthedocs.io/en/latest/light.html
+- Blender 5.3 spot Blend semantics: https://docs.blender.org/manual/en/5.3/render/lights/light_object.html
+- Blender Light Falloff node warning about Linear/Constant energy across GI bounces: https://docs.blender.org/manual/en/4.3/render/shader_nodes/color/light_falloff.html
+
+**CI and candidate installer**
+
+- GitHub Actions run `43885001364`, job `133360636369`, passed Python compilation, 294 standalone tests, BSP export integrity checks, Blender package assembly and artifact upload. A duplicate run `43885021350` also completed successfully on the same head.
+- Artifact: `Quake-Surface-Studio-v0.21.18-Blender-Install`, ID `14233422720`, 309,344 bytes.
+- SHA-256 from the upload log and GitHub artifact metadata: `e38fd4cef1288fcaaef7a20e912a2ea1f7be4339910071518fc21204453eb3a2`.
+- Install artifact: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43885001364/artifacts/14233422720
+- CI did not run Blender GUI or Ironwail. The changes are not runtime-validated; do not claim the excessive brightness is fixed until the user re-bakes and compares in Ironwail.
+
+**Next validation**
+
+1. Install this exact 0.21.18 candidate; re-bake spottest02 and e1m1 in Blender 5.3.
+2. Confirm post-normalization `atlas_mean` is close to `source_mean`; inspect the new raw mean and max without the old byte clamp. Look at luxels that used to saturate in Ironwail.
+3. Compare the default hard-edged spotlight against ericw for the one-light test.
+4. Run one controlled direct-only (0 diffuse bounce) bake and compare it with 1/2 bounces; do not change the default bounce policy until the effect is measured.
+5. Capture total bake time, Cycles operator time, and time after Cycles returns on e1m1.
+6. Clarify whether the 25-second interval is SLOPGATE's BSP export operation or Ironwail loading/testing after export; the supplied report does not log that interval.
+
+No copyrighted e1m1 source map/BSP was requested, received or copied. No PR was merged.
