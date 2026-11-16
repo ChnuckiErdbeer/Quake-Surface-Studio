@@ -21457,3 +21457,7 @@ References consulted:
 6. Clarify whether the 25-second interval is SLOPGATE's BSP export operation or Ironwail loading/testing after export; the supplied report does not log that interval.
 
 No copyrighted e1m1 source map/BSP was requested, received or copied. No PR was merged.
+
+## 2026-11-16 — User clarification: multi-BSP scene explains aggregate light/bake counts
+
+The user points out that both BSPs were probably imported into the same SLOPGATE/Blender scene. Therefore the reported additional lights (253) and two registered bakes may simply be scene-wide totals spanning both imported maps. The diagnostic fields may not currently discriminate every statistic by active BSP. This is a plausible explanation and supersedes the earlier inference that the count itself demonstrated a diagnostics-scope defect. Do not treat the aggregate light count or bake count as evidence of cross-map Cycles contamination. Verify the actual ownership/scope of each report field before changing or interpreting it. Keep active-map isolation in Quake Direct as a separate code-path question; test with both BSPs present and compare against a clean one-map scene if needed.
