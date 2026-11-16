@@ -1115,6 +1115,90 @@ def sample_rgb_from_world_chart_positions(
     return bytes(output)
 
 
+
+def sample_classic_face_grid_from_world_chart(
+    pixels, image_size: int, working_resolution: int,
+    atlas_x: int, atlas_y: int, gutter: int, pixels_per_luxel: int,
+    texinfo, plane_normal, plane_distance: float,
+    s_min: float, t_min: float, sample_width: int, sample_height: int,
+    axis_s, axis_t, chart_s_min: float, chart_t_min: float,
+) -> bytes:
+    """Sample a classic face grid without allocating an XYZ tuple per luxel.
+
+    The texinfo/plane intersection is affine. Solve its origin and two basis
+    steps once per face, then advance the world-chart pixel coordinates with
+    additions. This is materially cheaper than constructing and projecting a
+    Python XYZ tuple for every BSP luxel on large maps.
+    """
+    if sample_width <= 0 or sample_height <= 0:
+        raise ValueError("Classic face sample dimensions must be positive.")
+    if len(texinfo) < 8 or len(axis_s) != 3 or len(axis_t) != 3:
+        raise ValueError("Invalid texinfo or world-chart basis.")
+    base = _solve_projection_plane(
+        texinfo[0:3], texinfo[4:7], plane_normal,
+        float(s_min) - float(texinfo[3]),
+        float(t_min) - float(texinfo[7]),
+        float(plane_distance),
+    )
+    step_s = _solve_projection_plane(
+        texinfo[0:3], texinfo[4:7], plane_normal,
+        float(s_min + 16.0) - float(texinfo[3]),
+        float(t_min) - float(texinfo[7]),
+        float(plane_distance),
+    )
+    step_t = _solve_projection_plane(
+        texinfo[0:3], texinfo[4:7], plane_normal,
+        float(s_min) - float(texinfo[3]),
+        float(t_min + 16.0) - float(texinfo[7]),
+        float(plane_distance),
+    )
+    if base is None or step_s is None or step_t is None:
+        raise ValueError("Face texinfo projection is singular on its BSP plane.")
+
+    def chart_projection(point):
+        return (
+            sum(point[i] * float(axis_s[i]) for i in range(3)),
+            sum(point[i] * float(axis_t[i]) for i in range(3)),
+        )
+
+    origin_s, origin_t = chart_projection(base)
+    ds_s, ds_t = chart_projection(tuple(step_s[i] - base[i] for i in range(3)))
+    dt_s, dt_t = chart_projection(tuple(step_t[i] - base[i] for i in range(3)))
+    block = max(1, int(pixels_per_luxel)) * max(1, int(working_resolution))
+    origin_x = (int(atlas_x) + int(gutter)) * max(1, int(working_resolution))
+    origin_y = (int(atlas_y) + int(gutter)) * max(1, int(working_resolution))
+    chart_origin_s = (origin_s - float(chart_s_min)) / 16.0
+    chart_origin_t = (origin_t - float(chart_t_min)) / 16.0
+    px_origin = origin_x + (chart_origin_s + 0.5) * block - 0.5
+    py_origin = int(image_size) - 1.0 - (
+        origin_y + (chart_origin_t + 0.5) * block - 0.5
+    )
+    px_step_s = ds_s * block / 16.0
+    py_step_s = -ds_t * block / 16.0
+    px_step_t = dt_s * block / 16.0
+    py_step_t = -dt_t * block / 16.0
+
+    if len(pixels) != int(image_size) * int(image_size) * 4:
+        raise ValueError("World-chart RGBA buffer dimensions do not match pixel data.")
+    output = bytearray()
+    row_px, row_py = px_origin, py_origin
+    for _sy in range(int(sample_height)):
+        px, py = row_px, row_py
+        for _sx in range(int(sample_width)):
+            red, green, blue, _alpha = bilinear_sample_rgba(
+                pixels, int(image_size), int(image_size), px, py
+            )
+            output.extend(
+                max(0, min(255, int(round(channel * 255.0))))
+                for channel in (red, green, blue)
+            )
+            px += px_step_s
+            py += py_step_s
+        row_px += px_step_t
+        row_py += py_step_t
+    return bytes(output)
+
+
 def world_chart_grid_positions(
     texinfo, plane_normal, plane_distance, s_coordinates, t_coordinates,
 ):
