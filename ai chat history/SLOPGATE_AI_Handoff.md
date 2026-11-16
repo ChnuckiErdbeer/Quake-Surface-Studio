@@ -42,10 +42,10 @@ The archive filename and some historic headings contain the old spelling “Slip
 
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
 - The official 1.0 scope remains classic Quake 1 BSP29 only. BSP2/2PSB remain post-1.0.
-- Do not describe any 0.21.x build as an official release. The latest candidate is still version 0.21.18 on open draft PR #5. Its latest 2026-11-16 localized non-finite luxel attribution diagnostics have a 296-test CI/package pass, but the one-luxel NaN root cause and Blender 5.3/Ironwail runtime acceptance remain outstanding.
+- Do not describe any 0.21.x build as an official release. The latest candidate is still version 0.21.18 on open draft PR #5. Its latest 0.21.19 delay-0 native-falloff candidate has a 300-test CI/package pass. The one-luxel failure has been traced to BSP face 5828 at Quake position (-80, 640, 96), near three delay-0 lights; whether the native-falloff experiment removes it remains unverified in Blender 5.3.
 - The repository default branch main is still at b6936a58c5159dbe79a60d5778ad40df42e126f5 and is not the active development baseline. Do not start new feature work from main.
 - PR #1 is the long-running development PR against main. Its branch is fix/v0.11.1-metadata-style-order-test; the archive and handoff are maintained on this branch. The latest underlying add-on code on that branch remains c63205dc4974c313103ef9b8b7def5131b8680f1. Treat the live GitHub branch ref as authoritative for the latest documentation commit.
-- The active lightmap feature sequence is a stacked draft PR chain: PR #3 (0.21.15) → PR #4 (0.21.16) → PR #5 (0.21.18). The latest PR #5 head is bdae11b81140c9b70a332c3a78a179fe5ebeb22e. It includes HDR sampling/calibration-order, hard-spotlight and active-map scoping, the Cycles Light Falloff NaN guard, non-finite diagnostics, Test in Ironwail export-stage timings, the bake_values assignment-order correction/regression test, and diagnostics that map NaN atlas pixels to BSP face/luxel/world positions and nearest active-map lights. It includes the PR #3 and PR #4 base work and is the most advanced candidate for the next runtime test. These PRs are not merged.
+- The active lightmap feature sequence is a stacked draft PR chain: PR #3 (0.21.15) → PR #4 (0.21.16) → PR #5 (0.21.18). The latest PR #5 head is a781e3f43d24e42bb19145cda13da3973d5044cd. It includes HDR sampling/calibration-order, hard-spotlight and active-map scoping, non-finite diagnostics, Test in Ironwail export-stage timings, face/luxel/world-position/nearest-light attribution, and a 0.21.19 experiment that uses Blender's normal Cycles point-light falloff for Quake delay-0 lights while retaining the delay-5 correction. It includes the PR #3 and PR #4 base work. PRs #3–#5 remain open and draft.
 - PR #2 is a separate draft diagnostic branch, fix/0.21.15-bsp-import-array-trace, head 66767f0fe7d34db7a29204af1d13dc383ec300ce. Its branch name is not an add-on version. It is based on c63205d and is not part of the PR #3–#5 lightmap chain.
 - Version metadata on the PR #1 development base is inconsistent: the package __init__.py reports bl_info version 0.21.14, while addon.py ADDON_VERSION and README still report 0.21.13. A 0.21.14 installer was generated from the diagnostic branch, but do not treat it as a clean versioned release. The PR #3 branch repairs the version declarations at 0.21.15; PR #4 synchronizes them at 0.21.16; PR #5 synchronizes __init__.py, addon.py and README to 0.21.18.
 - The 0.21.18 candidate ZIP was produced from PR #5 head 7f182cf97cc1a3aa35c15408d429a478f87e08c2. GitHub Actions QSS Python run 43783467279 / job 133025758521 passed Python compilation, 290 standalone tests, BSP export integrity checks, package assembly and artifact upload. Artifact: Quake-Surface-Studio-v0.21.18-Blender-Install, ID 14188889199, 308,296 bytes. The Actions run and artifact page are https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43783467279 and https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43783467279/artifacts/14188889199.
@@ -1128,3 +1128,54 @@ Do not clamp/zero the bad luxel or alter all imported lights as a workaround. Ke
 - Add-on version remains 0.21.18 candidate.
 - Latest CI: 296 tests passed; this does not substitute for Blender 5.3 bake validation.
 - No new source commit, test run, installer, or PR merge was made for this report.
+
+
+## 2026-11-17 — e1m1 face 5828 traced; 0.21.19 delay-0 falloff experiment
+
+### User test findings
+
+The user supplied the face/luxel attribution from the latest 0.21.18 candidate:
+- One bad sampled luxel out of 165,763; zero bad source luxels.
+- Four non-finite atlas pixels: `(1594, 2000)`, `(1595, 2000)`, `(1594, 2001)`, `(1595, 2001)`.
+- BSP face 5828, Blender polygon 5828, local luxel (9, 3), atlas sample centre (1594.5, 2000.5).
+- Quake world position: `(-80, 640, 96)`.
+- Nearest imported lights:
+  1. `QSS_light_405`, 64.4981 units away, origin (-120,624,144), delay 0, value 1000, wait 1, falloff 0.
+  2. `QSS_light_330`, 77.5629 units, origin (-128,584,72), delay 0, value 200, wait 1, falloff 0.
+  3. `QSS_light_404`, 80.399 units, origin (-48,696,144), delay 0, value 1000, wait 1, falloff 0.
+- Therefore, the invalid sample is not coincident with a light origin. The previous exact-zero-distance Light Falloff explanation is not supported by the reported world position and nearest-light distances.
+- Source luxel sampling remains fully finite; only the baked result is invalid. Atlas rollback is still working.
+- The post-failure diagnostics also show zero entries for the mesh face attributes and UV layers. Since the diagnostic helper successfully used those attributes to report face 5828 during the bake failure, the zero-length attributes may be due to bake cleanup/rollback or the diagnostics inspection occurring after they were invalidated. Treat this as a separate post-failure reporting/cleanup issue; do not conclude that the mesh started without attributes.
+
+### Targeted 0.21.19 code experiment
+
+The three nearest lights all use delay 0. The PR #5 custom Cycles shader attempted to bend Blender's normal inverse-square point-light falloff into ericw's linear curve. The prior distance-expression adjustment did not remove the same bad luxel.
+
+Commit `a781e3f43d24e42bb19145cda13da3973d5044cd` on `fix/0.21.17-world-aligned-lightmap-charts` makes a narrow test change:
+- Delay-0 lights now use Blender's regular Cycles point-light falloff instead of the experimental custom node graph.
+- Existing Quake-to-Blender light energy calibration, cutoff range and global light-energy slider remain.
+- Delay-5 custom falloff remains unchanged.
+- Separate Quake Direct CPU lighting remains unchanged.
+- Only QSS-owned custom node graphs are disabled; user-authored light nodes are preserved.
+- Added policy tests and synchronized visible version metadata to 0.21.19 in `__init__.py`, `addon.py` and README.
+- Failure detection and atlas/calibration rollback remain in place. No bad luxel is clamped or silently accepted.
+
+This is an isolation experiment, not a proven final lighting fix. It intentionally trades exact ericw delay-0 curve matching in the Cycles bake for the established native Blender approximation. Compare final brightness and falloff in e1m1 and the one-light spottest after the bake test. Do not claim ericw parity.
+
+### CI and installer
+
+- PR #5 is still open/draft; head `a781e3f43d24e42bb19145cda13da3973d5044cd`, based on PR #4. No merge.
+- Run [43983168256](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43983168256): succeeded on the exact source head.
+- Python compilation and **300 standalone tests** passed; add-on package assembled and uploaded.
+- Installer artifact [Quake-Surface-Studio-v0.21.19-Blender-Install, ID 14283692364](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43983168256/artifacts/14283692364).
+- Size 312,721 bytes; SHA-256 `4451116ff2fb4af0e3b8ae1955d596249778b4d630afa4f467fe55927543417a`.
+- No Blender 5.3 interactive bake or Ironwail comparison by the assistant. The experiment requires the user's runtime test.
+
+### Next validation
+
+1. Install 0.21.19 and re-import e1m1 so all imported light objects are recreated and the native delay-0 falloff path is applied.
+2. Bake e1m1. Verify that the previous one-luxel NaN either disappears or is reported at a new location.
+3. If successful, compare wall/floor light levels and overall brightness with the original source lightmaps, then inspect the exported BSP in Ironwail.
+4. Retest `spottest02` to confirm that its hard-edged value-600 spotlight and coverage remain reasonable under the native delay-0 approximation.
+5. If it still fails, inspect the new report and source/luxel attribution; do not clamp the bad sample. Also trace why face attributes are zero in the report after failure.
+
