@@ -9217,17 +9217,6 @@ class QSS_OT_bake_scene_lights(Operator):
                 _qss_source_face_sample_cache(source_bsp_for_samples)
                 if source_bsp_for_samples is not None else None
             )
-            bake_values = _lightmap_sample_luminances(
-                obj, bake_target, receiver_face_indices,
-                parsed_source=source_bsp_for_samples, source_cache=source_sample_cache,
-            )
-            raw_bake_mean = (sum(bake_values) / len(bake_values)) if bake_values else 0.0
-            raw_image_stats = _image_rgb_statistics(bake_target)
-            raw_face_coverage = _lightmap_face_coverage(
-                obj, bake_target, face_indices=receiver_face_indices,
-                parsed_source=source_bsp_for_samples, source_cache=source_sample_cache,
-            )
-            obj['qss_last_bake_attempt_face_coverage'] = str(raw_face_coverage)
             source_image = bpy.data.images.get(obj.get('qss_original_lightmap_backup', ''))
             source_values = (
                 _lightmap_sample_luminances(
@@ -9240,37 +9229,10 @@ class QSS_OT_bake_scene_lights(Operator):
             max_energy_after_bake = max((float(o.data.energy) for o in imported_lights), default=0.0)
             obj['qss_last_bake_attempt_scale'] = energy_scale
             obj['qss_last_bake_attempt_max_lamp_energy'] = max_energy_after_bake
-            obj['qss_last_bake_attempt_sample_count'] = len(bake_values)
-            obj['qss_last_bake_attempt_raw_mean'] = float(raw_bake_mean)
-            obj['qss_last_bake_attempt_image_stats'] = str(raw_image_stats)
             if energy_scale <= 0.0:
                 raise bsp.BSPError(
                     'Live light scale is exactly 0. Set it to 1.0 (or higher), click Apply Light Energy Scale, '
                     'confirm the Live Lights preview is illuminated, then bake again.'
-                )
-            if not bake_values or raw_bake_mean <= 1e-8:
-                obj['qss_last_bake_attempt_lights'] = '; '.join(
-                    f'{lamp.name}: {float(lamp.data.energy):.6g}W type={lamp.data.type} '
-                    f'hide_render={bool(lamp.hide_render)} hide_viewport={bool(lamp.hide_viewport)} '
-                    f'hide_get={bool(lamp.hide_get())} cutoff={float(getattr(lamp.data, "cutoff_distance", 0.0)):.4g}'
-                    for lamp in imported_lights
-                )
-                raise bsp.BSPError(
-                    'Cycles completed without producing any nonzero sampled BSP lightmap luxels. '
-                    f'Energy scale={energy_scale:g}; output scale={float(getattr(scene, "qss_bake_output_scale", 1.0)):.6g}; '
-                    f'imported lamps={len(imported_lights)}; max lamp energy={max_energy_after_bake:.6g} W; '
-                    f'sampled luxels={len(bake_values)}; source mean={source_mean:.6g}; '
-                    f'whole atlas nonzero pixels={raw_image_stats["nonzero_pixels"]}/{raw_image_stats["pixels"]}; '
-                    f'whole atlas max RGB={raw_image_stats["max_channel"]:.6g}. '
-                    'The failed bake was discarded. Use Save Lighting Diagnostics and send the report.'
-                )
-            if bool(getattr(scene, 'qss_bake_match_source', True)) and source_mean > 1e-8:
-                # Source matching is an image-atlas operation only. Preserve
-                # imported lamp energies and the user's live energy slider.
-                obj['qss_calibration_source_mean'] = source_mean
-                obj['qss_calibration_bake_mean'] = raw_bake_mean
-                obj['qss_last_bake_atlas_match_scale'] = (
-                    lighting_utils.bake_atlas_match_scale(source_mean, raw_bake_mean)
                 )
 
             # Copy the completed float bake into the project's current atlas.
@@ -9295,6 +9257,49 @@ class QSS_OT_bake_scene_lights(Operator):
                     core_rectangles, block_size=luxel_block_size,
                 )
             )
+            # Source-match calibration must measure the exact luxel-reduced
+            # image that is about to be exported. Measuring the supersampled
+            # raster here can differ from the final Quake luxel mean.
+            bake_target.pixels.foreach_set(baked)
+            bake_target.update()
+            bake_values = _lightmap_sample_luminances(
+                obj, bake_target, receiver_face_indices,
+                parsed_source=source_bsp_for_samples, source_cache=source_sample_cache,
+            )
+            raw_bake_mean = (sum(bake_values) / len(bake_values)) if bake_values else 0.0
+            raw_image_stats = _image_rgb_statistics(bake_target)
+            raw_face_coverage = _lightmap_face_coverage(
+                obj, bake_target, face_indices=receiver_face_indices,
+                parsed_source=source_bsp_for_samples, source_cache=source_sample_cache,
+            )
+            obj['qss_last_bake_attempt_face_coverage'] = str(raw_face_coverage)
+            obj['qss_last_bake_attempt_sample_count'] = len(bake_values)
+            obj['qss_last_bake_attempt_raw_mean'] = float(raw_bake_mean)
+            obj['qss_last_bake_attempt_image_stats'] = str(raw_image_stats)
+            if not bake_values or raw_bake_mean <= 1e-8:
+                obj['qss_last_bake_attempt_lights'] = '; '.join(
+                    f'{lamp.name}: {float(lamp.data.energy):.6g}W type={lamp.data.type} '
+                    f'hide_render={bool(lamp.hide_render)} hide_viewport={bool(lamp.hide_viewport)} '
+                    f'hide_get={bool(lamp.hide_get())} cutoff={float(getattr(lamp.data, "cutoff_distance", 0.0)):.4g}'
+                    for lamp in imported_lights
+                )
+                raise bsp.BSPError(
+                    'Cycles completed without producing any nonzero sampled BSP lightmap luxels. '
+                    f'Energy scale={energy_scale:g}; output scale={float(getattr(scene, "qss_bake_output_scale", 1.0)):.6g}; '
+                    f'imported lamps={len(imported_lights)}; max lamp energy={max_energy_after_bake:.6g} W; '
+                    f'sampled luxels={len(bake_values)}; source mean={source_mean:.6g}; '
+                    f'whole atlas nonzero pixels={raw_image_stats["nonzero_pixels"]}/{raw_image_stats["pixels"]}; '
+                    f'whole atlas max RGB={raw_image_stats["max_channel"]:.6g}. '
+                    'The failed bake was discarded. Use Save Lighting Diagnostics and send the report.'
+                )
+            if bool(getattr(scene, 'qss_bake_match_source', True)) and source_mean > 1e-8:
+                # Preserve the lamp energy and slider; normalize the completed
+                # reduced atlas only, using unclamped HDR luxel samples.
+                obj['qss_calibration_source_mean'] = source_mean
+                obj['qss_calibration_bake_mean'] = raw_bake_mean
+                obj['qss_last_bake_atlas_match_scale'] = (
+                    lighting_utils.bake_atlas_match_scale(source_mean, raw_bake_mean)
+                )
             # Re-dilate each receiver from its own core luxels. This makes
             # padding deterministic across Cycles versions and partial bakes.
             core_rectangles = _qss_partial_lightmap_rectangles(
