@@ -1101,3 +1101,30 @@ User-facing explanations should:
 The latest 0.21.18 candidate has a 296-test CI pass and diagnostics that should identify the face, luxel location, map-space position and nearby lights for the remaining single bad lighting sample. This is diagnostic progress, not a lighting fix. Blender 5.3 runtime validation is still outstanding. The 25-second Test in Ironwail pause was traced to SLOPGATE preparing the temporary BSP before launching Ironwail; the new timings are intended to reveal which export step is taking the time.
 
 This session changed documentation only. No add-on source, installer, automated test result or merge status changed.
+
+
+## 2026-11-17 — e1m1 still fails on the same single bad luxel
+
+The user re-tested e1m1 and reported the same failure:
+`baked=1/165763, source=0/165763, non-finite atlas RGB values=12, non-finite atlas pixels=4`; bad atlas pixels remain `(1594, 2000), (1595, 2000), (1594, 2001), (1595, 2001)`. All 165,763 original source samples are finite and the failed bake restores the previous atlas/calibration.
+
+### Important clarification from live source review
+
+On PR #5 head `bdae11b81140c9b70a332c3a78a179fe5ebeb22e`, the short bake error dialog is deliberately generic. The face/light details are stored on the active BSP object before raising the error:
+- `qss_last_bake_attempt_nonfinite_details`
+- `qss_last_bake_attempt_lights`
+
+The Save Lighting Diagnostics report includes both values under:
+- `Last attempted lamp states`
+- `Non-finite luxel face/world/light matches`
+
+Therefore, seeing the same short popup does not establish whether the added attribution worked. The required next step is to save the diagnostic report immediately after the failed e1m1 bake, with the e1m1 BSP object active, and inspect the face/luxel/map-coordinate/nearest-light section. It should list the three closest imported lights. If it instead reports no matching face/luxel or cannot access the source BSP, that identifies a separate problem in the new tracing helper.
+
+Do not clamp/zero the bad luxel or alter all imported lights as a workaround. Keep the rollback behaviour. Only after reading the map position and nearby lights should the relevant Cycles light/shader calculation be changed.
+
+### Current source / PR status
+
+- PR #5 remains open/draft, branch `fix/0.21.17-world-aligned-lightmap-charts`, head `bdae11b81140c9b70a332c3a78a179fe5ebeb22e`, base PR #4.
+- Add-on version remains 0.21.18 candidate.
+- Latest CI: 296 tests passed; this does not substitute for Blender 5.3 bake validation.
+- No new source commit, test run, installer, or PR merge was made for this report.
