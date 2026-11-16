@@ -21739,3 +21739,10 @@ Install 0.21.19 and re-import e1m1 so its lights are recreated under the new fal
 
 The report's zero-length face attributes after failure should also be investigated before relying on later face-statistics sections. Do not infer that the original imported mesh was missing its data from the post-failure report alone.
 
+
+
+## 2026-11-17 — Clarification: zero-length mesh attributes in the diagnostics report
+
+The earlier report lists the face attributes and UV collections as zero entries after the failed bake. Source review shows the bake operator restores the user's original mode; if the user started in Edit Mode, SLOPGATE switches back to Edit Mode before returning. The diagnostics report reads the regular Mesh attribute/UV collections rather than the active Edit Mode BMesh data. The reported zero lengths may therefore be an Edit Mode reporting limitation, not deleted mesh data.
+
+Do not diagnose mesh metadata loss from that report alone. For the next diagnostics capture, switch the e1m1 BSP object to **Object Mode** after the failed bake, then run Save Lighting Diagnostics. This should let the report inspect the normal face attributes and UV layers. The face 5828 attribution itself was successfully produced during the bake and remains valid.
