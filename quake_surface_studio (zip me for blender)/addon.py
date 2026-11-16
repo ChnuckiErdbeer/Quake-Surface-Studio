@@ -7950,6 +7950,14 @@ def _qss_describe_nonfinite_luxels(
 ):
     """Map non-finite atlas pixels to BSP face/luxel/world position and nearest lights."""
     mesh = obj.data
+    if parsed_source is None:
+        source_path = bpy.path.abspath(str(obj.get('qss_source_path', '') or ''))
+        if not source_path or not os.path.isfile(source_path):
+            return 'Source BSP unavailable; unable to map bad atlas pixels to BSP faces.'
+        parsed_source = bsp.BSP29.from_file(source_path)
+        source_cache = _qss_source_face_sample_cache(parsed_source)
+    elif source_cache is None:
+        source_cache = _qss_source_face_sample_cache(parsed_source)
     attrs = _qss_validate_face_domain_attributes(
         mesh,
         ('qss_bsp_face_id', 'qss_lm_has_data', 'qss_lm_atlas_x',
@@ -8063,10 +8071,13 @@ def _qss_describe_nonfinite_luxels(
             point = match['world_quake']
             closest = sorted(
                 (
-                    math.sqrt(sum((point[i] - light['origin'][i]) ** 2 for i in range(3))),
-                    light,
-                )
-                for light in lights
+                    (
+                        math.sqrt(sum((point[i] - light['origin'][i]) ** 2 for i in range(3))),
+                        light,
+                    )
+                    for light in lights
+                ),
+                key=lambda item: item[0],
             )[:3]
             for distance, light in closest:
                 lines.append(
