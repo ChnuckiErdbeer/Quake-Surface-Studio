@@ -96,6 +96,16 @@ class LightingHelpersTests(unittest.TestCase):
 
 
 class BlenderLivePreviewCalibrationTests(unittest.TestCase):
+    def test_default_ericw_softangle_maps_to_hard_blender_spot_edge(self):
+        self.assertEqual(lighting.blender_spot_blend_from_ericw_angles(40, 0), 0.0)
+
+    def test_positive_ericw_softangle_maps_to_proportional_blender_blend(self):
+        self.assertAlmostEqual(lighting.blender_spot_blend_from_ericw_angles(40, 30), 0.25)
+        self.assertEqual(lighting.blender_spot_blend_from_ericw_angles(40, 40), 0.0)
+
+    def test_invalid_spot_angles_use_hard_edge(self):
+        self.assertEqual(lighting.blender_spot_blend_from_ericw_angles(float('nan'), 0), 0.0)
+
     def test_cycles_margin_scales_with_atlas_resolution(self):
         self.assertEqual(lighting.lightmap_bake_margin_pixels(2, 1), 2)
         self.assertEqual(lighting.lightmap_bake_margin_pixels(2, 4), 8)
