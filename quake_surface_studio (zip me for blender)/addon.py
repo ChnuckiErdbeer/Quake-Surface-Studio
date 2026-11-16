@@ -8422,9 +8422,37 @@ def _qss_restore_lightmap_uvs(obj, uv_layer, backup):
     obj.data.update()
 
 
+def _qss_expand_world_chart_face_scope(obj, face_indices):
+    """Expand partial bake scopes to every face sharing a world-aligned chart."""
+    mesh = obj.data
+    selected = {int(index) for index in face_indices}
+    world_attr = mesh.attributes.get("qss_lm_world_chart")
+    x_attr = mesh.attributes.get("qss_lm_atlas_x")
+    y_attr = mesh.attributes.get("qss_lm_atlas_y")
+    if not all(attr is not None and len(attr.data) == len(mesh.polygons)
+               for attr in (world_attr, x_attr, y_attr)):
+        raise bsp.BSPError("World-chart metadata is missing or stale; re-import the BSP.")
+    chart_keys = set()
+    for index in selected:
+        if 0 <= index < len(mesh.polygons) and bool(world_attr.data[index].value):
+            chart_keys.add((
+                int(x_attr.data[index].value), int(y_attr.data[index].value)
+            ))
+    if not chart_keys:
+        return sorted(selected)
+    for index in range(len(mesh.polygons)):
+        if not bool(world_attr.data[index].value):
+            continue
+        key = (int(x_attr.data[index].value), int(y_attr.data[index].value))
+        if key in chart_keys:
+            selected.add(index)
+    return sorted(selected)
+
+
 def _qss_partial_lightmap_rectangles(obj, image, face_indices, padding=0):
     mesh = obj.data
-    required = ("qss_lm_atlas_x", "qss_lm_atlas_y", "qss_lm_sample_w", "qss_lm_sample_h")
+    required = ("qss_lm_atlas_x", "qss_lm_atlas_y", "qss_lm_sample_w", "qss_lm_sample_h",
+                "qss_lm_world_chart", "qss_lm_chart_width", "qss_lm_chart_height")
     attributes = {}
     for name in required:
         attribute = mesh.attributes.get(name)
@@ -8432,12 +8460,20 @@ def _qss_partial_lightmap_rectangles(obj, image, face_indices, padding=0):
             raise bsp.BSPError(f"Face attribute {name} is missing or invalid; re-import the BSP.")
         attributes[name] = attribute
     resolution = _qss_lightmap_pixel_scale(obj, image)
-    return bake_scope_utils.face_luxel_rectangles(
+    widths, heights = [], []
+    for index in range(len(mesh.polygons)):
+        if bool(attributes["qss_lm_world_chart"].data[index].value):
+            widths.append(int(attributes["qss_lm_chart_width"].data[index].value))
+            heights.append(int(attributes["qss_lm_chart_height"].data[index].value))
+        else:
+            widths.append(int(attributes["qss_lm_sample_w"].data[index].value))
+            heights.append(int(attributes["qss_lm_sample_h"].data[index].value))
+    rectangles = bake_scope_utils.face_luxel_rectangles(
         face_indices,
         [int(item.value) for item in attributes["qss_lm_atlas_x"].data],
         [int(item.value) for item in attributes["qss_lm_atlas_y"].data],
-        [int(item.value) for item in attributes["qss_lm_sample_w"].data],
-        [int(item.value) for item in attributes["qss_lm_sample_h"].data],
+        widths,
+        heights,
         image_width=int(image.size[0]),
         image_height=int(image.size[1]),
         resolution=resolution,
@@ -8445,6 +8481,7 @@ def _qss_partial_lightmap_rectangles(obj, image, face_indices, padding=0):
         gutter=max(0, int(obj.get("qss_lightmap_gutter", 0))) * resolution,
         padding=max(0, int(padding)),
     )
+    return list(dict.fromkeys(tuple(int(value) for value in rect) for rect in rectangles))
 
 
 def _qss_map_for_selected_lights(context, lights):
@@ -8911,7 +8948,9 @@ class QSS_OT_bake_scene_lights(Operator):
                 if _qss_face_receives_light(obj, poly.index)
             ]
             if target_face_indices is not None:
-                requested_faces = {int(index) for index in target_face_indices}
+                requested_faces = set(_qss_expand_world_chart_face_scope(
+                    obj, target_face_indices
+                ))
                 receiver_face_indices = [
                     index for index in receiver_face_indices if index in requested_faces
                 ]
