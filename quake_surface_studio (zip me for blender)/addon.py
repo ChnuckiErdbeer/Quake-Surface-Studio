@@ -2864,7 +2864,9 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None, ou
     mesh = obj.data
     face_attrs = _qss_validate_face_domain_attributes(
         mesh, ('qss_bsp_face_id', 'qss_lm_has_data', 'qss_lm_atlas_x',
-               'qss_lm_atlas_y', 'qss_lm_sample_w', 'qss_lm_sample_h'),
+               'qss_lm_atlas_y', 'qss_lm_sample_w', 'qss_lm_sample_h',
+               'qss_lm_world_chart', 'qss_lm_chart_s_min', 'qss_lm_chart_t_min',
+               'qss_lm_chart_axis_s', 'qss_lm_chart_axis_t'),
         'export the lightmap'
     )
     face_attr = face_attrs['qss_bsp_face_id']
@@ -2873,6 +2875,11 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None, ou
     y_attr = face_attrs['qss_lm_atlas_y']
     w_attr = face_attrs['qss_lm_sample_w']
     h_attr = face_attrs['qss_lm_sample_h']
+    world_chart_attr = face_attrs['qss_lm_world_chart']
+    chart_s_min_attr = face_attrs['qss_lm_chart_s_min']
+    chart_t_min_attr = face_attrs['qss_lm_chart_t_min']
+    chart_axis_s_attr = face_attrs['qss_lm_chart_axis_s']
+    chart_axis_t_attr = face_attrs['qss_lm_chart_axis_t']
     size = int(image.size[0])
     if image.size[0] != image.size[1]:
         raise bsp.BSPError("Lightmap atlas must remain square; do not resize it in the Image Editor.")
@@ -2930,6 +2937,59 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None, ou
         atlas_x = int(x_attr.data[poly_index].value) * resolution + gutter
         atlas_y = int(y_attr.data[poly_index].value) * resolution + gutter
         block_size = sample_w * sample_h
+        if bool(world_chart_attr.data[poly_index].value):
+            texinfo_id = int(face[4])
+            if texinfo_id < 0 or texinfo_id >= len(texinfos):
+                raise bsp.BSPError(f"Face {face_id} has invalid texinfo for world-chart export.")
+            vertex_ids = parsed.face_vertex_indices(face)
+            if len(vertex_ids) < 3 or any(index < 0 or index >= len(vertices) for index in vertex_ids):
+                raise bsp.BSPError(f"Face {face_id} has invalid vertices for world-chart export.")
+            positions = [vertices[index] for index in vertex_ids]
+            s_min, t_min, extent_s, extent_t, _svec, _tvec = _calc_face_lightmap_extents(
+                positions, texinfos[texinfo_id]
+            )
+            expected_w, expected_h = (extent_s >> 4) + 1, (extent_t >> 4) + 1
+            if (sample_w, sample_h) != (expected_w, expected_h):
+                raise bsp.BSPError(
+                    f"Face {face_id} classic sample dimensions {sample_w}x{sample_h} "
+                    f"do not match its BSP29 extents {expected_w}x{expected_h}."
+                )
+            plane = parsed.planes()[int(face[0])]
+            plane_sign = -1.0 if int(face[1]) else 1.0
+            plane_normal = tuple(float(plane[i]) * plane_sign for i in range(3))
+            plane_distance = float(plane[3]) * plane_sign
+            texinfo = texinfos[texinfo_id]
+            sample_s = [float(s_min) + sx * 16.0 for sx in range(sample_w)]
+            sample_t = [float(t_min) + sy * 16.0 for sy in range(sample_h)]
+            sample_positions = lightmap_export_utils.world_chart_grid_positions(
+                texinfo[:8], plane_normal, plane_distance, sample_s, sample_t
+            )
+            rgb_data = lightmap_export_utils.sample_rgb_from_world_chart_positions(
+                px, size, resolution,
+                int(x_attr.data[poly_index].value),
+                int(y_attr.data[poly_index].value),
+                int(obj.get('qss_lightmap_gutter', 2)),
+                int(obj.get('qss_lightmap_scale', 1)),
+                sample_positions,
+                tuple(float(value) for value in chart_axis_s_attr.data[poly_index].vector),
+                tuple(float(value) for value in chart_axis_t_attr.data[poly_index].vector),
+                float(chart_s_min_attr.data[poly_index].value),
+                float(chart_t_min_attr.data[poly_index].value),
+            )
+            for sample_index in range(block_size):
+                rgb = rgb_data[sample_index * 3:sample_index * 3 + 3]
+                lit_rgb[(light_offset + sample_index) * 3:(light_offset + sample_index) * 3 + 3] = rgb
+                mono = int(round(0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]))
+                lighting[light_offset + sample_index] = max(0, min(255, mono))
+            for layer_index in range(1, style_count):
+                layer_start = light_offset + layer_index * block_size
+                layer_end = layer_start + block_size
+                if layer_end <= len(lighting):
+                    lighting[layer_start:layer_end] = bytes(block_size)
+                rgb_start, rgb_end = layer_start * 3, layer_end * 3
+                if rgb_end <= len(lit_rgb):
+                    lit_rgb[rgb_start:rgb_end] = bytes(block_size * 3)
+            continue
         style_count = sum(1 for style in styles if style != 255)
         if sample_w <= 0 or sample_h <= 0 or light_offset + block_size * style_count > len(lighting):
             raise bsp.BSPError(f"Face {face_id} has invalid lightmap sample bounds.")
