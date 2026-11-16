@@ -8003,6 +8003,7 @@ def _qss_run_ericw_direct_bake(context, obj):
         raise bsp.BSPError(f'qss_bsp_face_id has {count} entries for {len(mesh.polygons)} polygons; exit Edit Mode and re-import if this persists.')
     # Keep exact per-atlas sample positions and source pixels for brightness matching.
     work = []
+    seen_chart_pixels = set()
     total_luxels = 0
     for poly_index, poly in enumerate(mesh.polygons):
         if not _qss_face_receives_light(obj, poly_index):
@@ -8039,17 +8040,32 @@ def _qss_run_ericw_direct_bake(context, obj):
                     local_normal.z = -local_normal.z
                 world_normal = (obj.matrix_world.to_3x3().inverted_safe().transposed() @ local_normal).normalized()
                 world_point = _qss_quake_to_world(obj, qpoint, unit_scale, flip_z)
-                top_y = y0 + sy * scale + (scale - 1) // 2
-                pixel_y = size - 1 - top_y
-                pixel_x = x0 + sx * scale + (scale - 1) // 2
+                if face_info.get('world_chart', False):
+                    world_s = sum(qpoint[i] * face_info['chart_axis_s'][i] for i in range(3))
+                    world_t = sum(qpoint[i] * face_info['chart_axis_t'][i] for i in range(3))
+                    pixel_x_float, pixel_y_float = lightmap_export_utils.world_chart_pixel_coordinates(
+                        world_s, world_t, face_info['atlas_x'], face_info['atlas_y'],
+                        face_info['chart_s_min'], face_info['chart_t_min'],
+                        int(obj.get('qss_lightmap_gutter', 0)), max(1, int(obj.get('qss_lightmap_scale', 1))),
+                        resolution, size,
+                    )
+                    pixel_x, pixel_y = int(round(pixel_x_float)), int(round(pixel_y_float))
+                else:
+                    top_y = y0 + sy * scale + (scale - 1) // 2
+                    pixel_y = size - 1 - top_y
+                    pixel_x = x0 + sx * scale + (scale - 1) // 2
                 pixel_index = (pixel_y * size + pixel_x) * 4
                 source_luma = 0.0
                 if original_pixels is not None:
                     source_luma = (0.2126 * original_pixels[pixel_index] +
                                    0.7152 * original_pixels[pixel_index + 1] +
                                    0.0722 * original_pixels[pixel_index + 2])
-                work.append((face_id, face_info['styles'], qpoint, face_info['plane_normal'],
-                             world_point, world_normal, pixel_index, source_luma))
+                # Adjacent faces in a shared chart can address the same boundary
+                # luxel. Evaluate/write that physical chart pixel once.
+                if pixel_index not in seen_chart_pixels:
+                    seen_chart_pixels.add(pixel_index)
+                    work.append((face_id, face_info['styles'], qpoint, face_info['plane_normal'],
+                                 world_point, world_normal, pixel_index, source_luma))
         total_luxels += face_info['width'] * face_info['height']
     if not work:
         raise bsp.BSPError('No valid lightmap luxels were found. Check BSP face styles and UV metadata.')
