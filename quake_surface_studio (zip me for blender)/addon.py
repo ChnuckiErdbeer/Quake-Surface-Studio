@@ -2106,6 +2106,9 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
             'samples': combined_mono,
             'samples_rgb': combined_rgb,
             'decoupled_lmvecs': lmvecs,
+            'positions': tuple(tuple(float(value) for value in point) for point in positions_lookup[face_id]),
+            'texinfo': tuple(float(value) for value in texinfos[texinfo_id][:8]),
+            'styles': tuple(int(value) for value in active_styles),
         })
 
     # Diagnose colour/brightness after summing every active face style.
@@ -2133,7 +2136,46 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
 
     resolution = material_utils.validate_lightmap_resolution(resolution)
     max_base_size = material_utils.MAX_LIGHTMAP_IMAGE_SIZE // resolution
-    packed = _pack_lightmap_rectangles(records, max_atlas_size=max_base_size)
+
+    # A classic face's local texinfo projection is retained for BSP29 export,
+    # but connected coplanar faces share one deterministic world-plane chart
+    # while Blender rasterizes and bakes the lightmap atlas.
+    classic_records = [rec for rec in records if rec['decoupled_lmvecs'] is None]
+    decoupled_records = [rec for rec in records if rec['decoupled_lmvecs'] is not None]
+    try:
+        charts, face_to_chart, chart_face_records = lightmap_export_utils.build_coplanar_face_charts(
+            classic_records, faces, parsed.planes(), parsed.edges(), parsed.surfedges(),
+            parsed.face_model_ids(),
+        )
+        chart_pack_records = []
+        chart_by_id = {}
+        for chart in charts:
+            chart_samples, chart_valid = lightmap_export_utils.resample_coplanar_chart_sources(
+                chart, chart_face_records
+            )
+            chart_record = {
+                'face_id': chart['chart_id'],
+                'width': chart['width'],
+                'height': chart['height'],
+                'samples_rgb': chart_samples,
+                'valid': chart_valid,
+                'world_chart': chart,
+            }
+            chart_pack_records.append(chart_record)
+            chart_by_id[chart['chart_id']] = chart_record
+    except (KeyError, TypeError, ValueError) as exc:
+        raise bsp.BSPError(f"Could not construct world-aligned lightmap charts: {exc}") from exc
+
+    pack_records = list(chart_pack_records)
+    pack_records.extend({
+        'face_id': rec['face_id'],
+        'width': rec['width'],
+        'height': rec['height'],
+        'samples_rgb': rec['samples_rgb'],
+        'valid': None,
+        'world_chart': None,
+    } for rec in decoupled_records)
+    packed = _pack_lightmap_rectangles(pack_records, max_atlas_size=max_base_size)
     if packed is None:
         obj['qss_lightmap_image_name'] = ''
         obj['qss_lightmap_faces'] = 0
@@ -2144,14 +2186,18 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
     image_size = material_utils.lightmap_resolution_dimensions(atlas_size, resolution)
     rgba = array.array('f', [1.0]) * (image_size * image_size * 4)  # white = unlightmapped
     record_by_face = {r['face_id']: r for r in records}
-    for rec in records:
-        x0, y0 = placements[rec['face_id']]
-        x0 = (x0 + gutter) * resolution
-        y0 = (y0 + gutter) * resolution
-        effective_scale = scale * resolution
-        for sy in range(rec['height']):
-            for sx in range(rec['width']):
-                sample_rgb = rec['samples_rgb'][sy * rec['width'] + sx]
+    effective_scale = scale * resolution
+
+    def _write_chart_record(pack_record):
+        ax, ay = placements[pack_record['face_id']]
+        x0, y0 = (ax + gutter) * resolution, (ay + gutter) * resolution
+        valid = pack_record['valid']
+        for sy in range(pack_record['height']):
+            for sx in range(pack_record['width']):
+                sample_index = sy * pack_record['width'] + sx
+                if valid is not None and not valid[sample_index]:
+                    continue
+                sample_rgb = pack_record['samples_rgb'][sample_index]
                 values = tuple(channel / 255.0 for channel in sample_rgb)
                 for dy in range(effective_scale):
                     top_y = y0 + sy * effective_scale + dy
@@ -2159,17 +2205,25 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
                     for dx in range(effective_scale):
                         px = x0 + sx * effective_scale + dx
                         index = (bottom_y * image_size + px) * 4
-                        rgba[index] = values[0]
-                        rgba[index + 1] = values[1]
-                        rgba[index + 2] = values[2]
-                        rgba[index + 3] = 1.0
+                        rgba[index:index + 4] = array.array('f', (*values, 1.0))
 
+    for chart_record in chart_pack_records:
+        _write_chart_record(chart_record)
+    for face_record in decoupled_records:
+        _write_chart_record({
+            'face_id': face_record['face_id'],
+            'width': face_record['width'],
+            'height': face_record['height'],
+            'samples_rgb': face_record['samples_rgb'],
+            'valid': None,
+        })
+
+    # Reserve/dilate once per shared chart, not once per member face.
     core_rectangles = []
-    effective_scale = scale * resolution
-    for rec in records:
-        ax, ay = placements[rec['face_id']]
-        core_width = rec['width'] * effective_scale
-        core_height = rec['height'] * effective_scale
+    for pack_record in pack_records:
+        ax, ay = placements[pack_record['face_id']]
+        core_width = pack_record['width'] * effective_scale
+        core_height = pack_record['height'] * effective_scale
         core_x = (ax + gutter) * resolution
         core_top_y = (ay + gutter) * resolution
         core_bottom_y = image_size - core_top_y - core_height
@@ -2198,11 +2252,28 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
     # Create the independent lightmap UV layer and face-domain export metadata.
     lm_uv = mesh.uv_layers.new(name='Quake_Lightmap_UV')
     white_uv = (0.5 / atlas_size, 1.0 - 0.5 / atlas_size)
+    # Remove previous chart attributes when rebuilding the atlas in-place.
+    chart_attribute_names = (
+        'qss_lm_world_chart', 'qss_lm_chart_s_min', 'qss_lm_chart_t_min',
+        'qss_lm_chart_axis_s', 'qss_lm_chart_axis_t',
+        'qss_lm_chart_width', 'qss_lm_chart_height',
+    )
+    for attribute_name in chart_attribute_names:
+        old_attribute = mesh.attributes.get(attribute_name)
+        if old_attribute is not None:
+            mesh.attributes.remove(old_attribute)
     has_attr = mesh.attributes.new(name='qss_lm_has_data', type='BOOLEAN', domain='FACE')
     x_attr = mesh.attributes.new(name='qss_lm_atlas_x', type='INT', domain='FACE')
     y_attr = mesh.attributes.new(name='qss_lm_atlas_y', type='INT', domain='FACE')
     w_attr = mesh.attributes.new(name='qss_lm_sample_w', type='INT', domain='FACE')
     h_attr = mesh.attributes.new(name='qss_lm_sample_h', type='INT', domain='FACE')
+    world_chart_attr = mesh.attributes.new(name='qss_lm_world_chart', type='BOOLEAN', domain='FACE')
+    chart_s_min_attr = mesh.attributes.new(name='qss_lm_chart_s_min', type='FLOAT', domain='FACE')
+    chart_t_min_attr = mesh.attributes.new(name='qss_lm_chart_t_min', type='FLOAT', domain='FACE')
+    chart_axis_s_attr = mesh.attributes.new(name='qss_lm_chart_axis_s', type='FLOAT_VECTOR', domain='FACE')
+    chart_axis_t_attr = mesh.attributes.new(name='qss_lm_chart_axis_t', type='FLOAT_VECTOR', domain='FACE')
+    chart_width_attr = mesh.attributes.new(name='qss_lm_chart_width', type='INT', domain='FACE')
+    chart_height_attr = mesh.attributes.new(name='qss_lm_chart_height', type='INT', domain='FACE')
     for poly_index, poly in enumerate(mesh.polygons):
         face_id = face_ids[poly_index]
         rec = record_by_face.get(face_id)
@@ -2211,40 +2282,76 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
         # Blender operators or if a future importer inserts non-face geometry.
         loop_indices = tuple(poly.loop_indices)
         if rec:
-            ax, ay = placements[face_id]
-            has_attr.data[poly_index].value = True
-            x_attr.data[poly_index].value = ax
-            y_attr.data[poly_index].value = ay
-            w_attr.data[poly_index].value = rec['width']
-            h_attr.data[poly_index].value = rec['height']
+            chart_id = face_to_chart.get(face_id)
+            if chart_id is not None:
+                chart = chart_by_id[chart_id]['world_chart']
+                ax, ay = placements[chart_id]
+                has_attr.data[poly_index].value = True
+                x_attr.data[poly_index].value = ax
+                y_attr.data[poly_index].value = ay
+                w_attr.data[poly_index].value = rec['width']
+                h_attr.data[poly_index].value = rec['height']
+                world_chart_attr.data[poly_index].value = True
+                chart_s_min_attr.data[poly_index].value = chart['s_min']
+                chart_t_min_attr.data[poly_index].value = chart['t_min']
+                chart_axis_s_attr.data[poly_index].vector = chart['axis_s']
+                chart_axis_t_attr.data[poly_index].vector = chart['axis_t']
+                chart_width_attr.data[poly_index].value = chart['width']
+                chart_height_attr.data[poly_index].value = chart['height']
+            else:
+                ax, ay = placements[face_id]
+                has_attr.data[poly_index].value = True
+                x_attr.data[poly_index].value = ax
+                y_attr.data[poly_index].value = ay
+                w_attr.data[poly_index].value = rec['width']
+                h_attr.data[poly_index].value = rec['height']
+                world_chart_attr.data[poly_index].value = False
+                chart_s_min_attr.data[poly_index].value = 0.0
+                chart_t_min_attr.data[poly_index].value = 0.0
+                chart_axis_s_attr.data[poly_index].vector = (1.0, 0.0, 0.0)
+                chart_axis_t_attr.data[poly_index].vector = (0.0, 1.0, 0.0)
+                chart_width_attr.data[poly_index].value = rec['width']
+                chart_height_attr.data[poly_index].value = rec['height']
             positions = positions_by_face[poly_index]
-            texinfo = texinfos[rec['texinfo_id']]
             if len(loop_indices) != len(positions):
                 raise bsp.BSPError(
                     f"Face {face_id} has {len(loop_indices)} Blender loops but {len(positions)} source vertices."
                 )
             for local_index, loop_index in enumerate(loop_indices):
                 p = positions[local_index]
-                if rec.get('decoupled_lmvecs') is not None:
+                if chart_id is not None:
+                    world_s = sum(p[i] * chart['axis_s'][i] for i in range(3))
+                    world_t = sum(p[i] * chart['axis_t'][i] for i in range(3))
+                    pixel_x, pixel_y = lightmap_export_utils.world_chart_pixel_coordinates(
+                        world_s, world_t, ax, ay, chart['s_min'], chart['t_min'],
+                        gutter, scale, resolution, image_size,
+                    )
+                    lm_uv.data[loop_index].uv = (
+                        (pixel_x + 0.5) / image_size,
+                        (pixel_y + 0.5) / image_size,
+                    )
+                else:
                     lmvecs = rec['decoupled_lmvecs']
                     lm_s = p[0] * lmvecs[0] + p[1] * lmvecs[1] + p[2] * lmvecs[2] + lmvecs[3]
                     lm_t = p[0] * lmvecs[4] + p[1] * lmvecs[5] + p[2] * lmvecs[6] + lmvecs[7]
                     lm_s = min(max(lm_s, 0.0), rec['width'] - 1.0)
                     lm_t = min(max(lm_t, 0.0), rec['height'] - 1.0)
-                else:
-                    s = p[0] * texinfo[0] + p[1] * texinfo[1] + p[2] * texinfo[2] + texinfo[3]
-                    t = p[0] * texinfo[4] + p[1] * texinfo[5] + p[2] * texinfo[6] + texinfo[7]
-                    lm_s = (s - rec['s_min']) / 16.0
-                    lm_t = (t - rec['t_min']) / 16.0
-                pixel_x = ax + gutter + (lm_s + 0.5) * scale
-                pixel_y = ay + gutter + (lm_t + 0.5) * scale
-                lm_uv.data[loop_index].uv = (pixel_x / atlas_size, 1.0 - pixel_y / atlas_size)
+                    pixel_x = (ax + gutter) * resolution + (lm_s + 0.5) * scale * resolution
+                    pixel_y = (ay + gutter) * resolution + (lm_t + 0.5) * scale * resolution
+                    lm_uv.data[loop_index].uv = (pixel_x / image_size, 1.0 - pixel_y / image_size)
         else:
             has_attr.data[poly_index].value = False
             x_attr.data[poly_index].value = 0
             y_attr.data[poly_index].value = 0
             w_attr.data[poly_index].value = 0
             h_attr.data[poly_index].value = 0
+            world_chart_attr.data[poly_index].value = False
+            chart_s_min_attr.data[poly_index].value = 0.0
+            chart_t_min_attr.data[poly_index].value = 0.0
+            chart_axis_s_attr.data[poly_index].vector = (1.0, 0.0, 0.0)
+            chart_axis_t_attr.data[poly_index].vector = (0.0, 1.0, 0.0)
+            chart_width_attr.data[poly_index].value = 0
+            chart_height_attr.data[poly_index].value = 0
             for loop_index in loop_indices:
                 lm_uv.data[loop_index].uv = white_uv
 
@@ -2268,6 +2375,8 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
     obj['qss_lightmap_scale'] = scale
     obj['qss_lightmap_resolution'] = resolution
     obj['qss_lightmap_gutter'] = gutter
+    obj['qss_lightmap_chart_version'] = 1
+    obj['qss_lightmap_world_chart_count'] = int(len(charts))
     # Keep a packed immutable source snapshot so a bake or paint session can
     # always be reset to the exact imported BSP lightmaps.
     original_backup = _make_image_snapshot(image, 'QSS_OriginalBSP')
