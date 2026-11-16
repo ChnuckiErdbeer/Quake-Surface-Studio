@@ -2,9 +2,9 @@
 
 ## Current development build
 
-SLOPGATE **0.21.16** — BSP29-only development build.
+SLOPGATE **0.21.17** — BSP29-only development build.
 
-Classic BSP29 export now reconciles matching lightmap samples only along shared coplanar BSP edges, and only when both faces belong to the same model, use identical light styles, and their classic 16-unit luxel grids intersect at the same world-space positions. Non-coplanar joins, differently styled surfaces, unaligned grids, corners and face interiors are left unchanged. Both RGB QLIT and monochrome classic fallback samples are updated.
+Connected coplanar faces with matching model ownership and resolved light styles now share a world-aligned luxel lattice in the Blender atlas. Classic BSP29 export retains each face's original texture projection and sample dimensions, sampling those classic face grids from the shared chart. Quake direct baking, Enhanced BSPX export and partial-bake chart scopes are being integrated against the same metadata. This is a development implementation; no Blender 5.3 or Ironwail runtime validation is claimed yet.
 
 The detached-face local-texture export correction from 0.21.15 is retained. The earlier 0.21.13 half-luxel rim remains limited to Enhanced BSPX DECOUPLED_LM; it does not change the classic BSP29 fallback.
 
