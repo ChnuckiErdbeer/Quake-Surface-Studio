@@ -1,13 +1,13 @@
 # SLOPGATE — AI Project Handoff
 
-**Last reviewed:** 2026-11-13  
+**Last reviewed:** 2026-11-16  
 **Purpose:** A compact, maintained project and collaboration brief for future assistant sessions. This is an editorial summary, not a verbatim record.
 
 ## Read this first
 
-At the start of a new project session, read this file first. Then consult the main conversation archive, ai chat history/Slipgate_Chat_History_Clean.md, whenever a detail needs context, dialogue-level confirmation, technical evidence, or fact-checking.
+At the start of a new project session, read this file first. Then consult the main conversation archive, ai chat history/Slipgate_Chat_History_Clean.md, whenever a detail needs context, dialogue-level confirmation, technical evidence, or fact-checking. The user reconstructed the missing continuation of that archive; it now contains the later November 14–16 work through the 0.21.18 candidate.
 
-This brief deliberately compresses the archive. It can become stale. The live repository, current branch, test output and the main archive outrank assumptions in this summary. Always inspect the current branch head and relevant source before modifying code.
+This brief deliberately compresses the archive. It can become stale. The live repository, current branch, test output and the main archive outrank assumptions in this summary. Always inspect the current branch head and relevant source before modifying code. In particular, distinguish the base development PR from the stacked lightmap work branches and the separate BSP-import diagnostic branch.
 
 The archive filename and some historic headings contain the old spelling “Slipgate”. That is historical. The current product name is **SLOPGATE**. Do not rename or rewrite historic transcript material merely to normalize the old spelling.
 
@@ -15,8 +15,8 @@ The archive filename and some historic headings contain the old spelling “Slip
 
 - Product: **SLOPGATE**, a Blender add-on and workflow for Quake BSP map import, texture editing/painting, lighting, map inspection and export.
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
-- Active branch in the last inspected source state: fix/v0.11.1-metadata-style-order-test
-- Target interactive environment: Blender 5.2 on Linux.
+- Active development PR branch: fix/v0.11.1-metadata-style-order-test (latest head checked 2026-11-16: f68fa7a7aaa60bfc280db912eaa641636a58be50).
+- Target interactive environment: Blender 5.3 on Linux.
 - Target map format: Quake 1 BSP29. Target engine includes Ironwail 0.8.2.
 - The add-on's package folder and internal identifiers still use quake_surface_studio / QSS for compatibility. Do not perform a partial global rename. New user-visible branding, log entries and new code labels should use SLOPGATE.
 - The scope may grow beyond surface painting; preserve the existing BSP, texture, lighting and export workflows.
@@ -37,7 +37,23 @@ The archive filename and some historic headings contain the old spelling “Slip
    - if CI fails or the artifact cannot be verified, state that plainly and do not offer an unverified archive.
 8. Do not promise background work or results later. Complete the task in the current session or state what could not be completed.
 
-## Current source/build baseline — checked 2026-11-11
+
+## Current source/build baseline — checked 2026-11-16
+
+- Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
+- The official 1.0 scope remains classic Quake 1 BSP29 only. BSP2/2PSB remain post-1.0.
+- Do not describe any 0.21.x build as an official release. The latest candidate implementation is 0.21.18, but it is in an open draft PR and has not had Blender 5.3 / target-engine runtime acceptance.
+- The repository default branch main is still at b6936a58c5159dbe79a60d5778ad40df42e126f5 and is not the active development baseline. Do not start new feature work from main.
+- PR #1 is the long-running development PR against main. Its branch is fix/v0.11.1-metadata-style-order-test, latest head f68fa7a7aaa60bfc280db912eaa641636a58be50. That latest commit updates the reconstructed conversation archive; the latest underlying add-on code on that branch is c63205dc4974c313103ef9b8b7def5131b8680f1.
+- The active lightmap feature sequence is a stacked draft PR chain: PR #3 (0.21.15) → PR #4 (0.21.16) → PR #5 (0.21.18). The head of PR #5 is 7f182cf97cc1a3aa35c15408d429a478f87e08c2. It includes the PR #3 and PR #4 base work and is the most advanced candidate for the next runtime test. These PRs are not merged.
+- PR #2 is a separate draft diagnostic branch, fix/0.21.15-bsp-import-array-trace, head 66767f0fe7d34db7a29204af1d13dc383ec300ce. Its branch name is not an add-on version. It is based on c63205d and is not part of the PR #3–#5 lightmap chain.
+- Version metadata on the PR #1 development base is inconsistent: the package __init__.py reports bl_info version 0.21.14, while addon.py ADDON_VERSION and README still report 0.21.13. A 0.21.14 installer was generated from the diagnostic branch, but do not treat it as a clean versioned release. The PR #3 branch repairs the version declarations at 0.21.15; PR #4 synchronizes them at 0.21.16; PR #5 synchronizes __init__.py, addon.py and README to 0.21.18.
+- The 0.21.18 candidate ZIP was produced from PR #5 head 7f182cf97cc1a3aa35c15408d429a478f87e08c2. GitHub Actions QSS Python run 43783467279 / job 133025758521 passed Python compilation, 290 standalone tests, BSP export integrity checks, package assembly and artifact upload. Artifact: Quake-Surface-Studio-v0.21.18-Blender-Install, ID 14188889199, 308,296 bytes. The Actions run and artifact page are https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43783467279 and https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43783467279/artifacts/14188889199.
+- The authoritative digest printed by the artifact-upload step and returned by GitHub artifact metadata is SHA-256 18499457a52b39b232cce6c4f7567be6c7d028ca29fdcdc70de226ee4cf772e8. The reconstructed conversation contains a different 0.21.18 digest (5bff80081380ff08ae1c7779f6ad605c058b0d514238d3cbfa37be638b607015) for the same stated size; treat that as an unresolved transcription/artifact-identity discrepancy. Use the GitHub Actions artifact digest unless an independently downloaded ZIP is re-hashed and proves otherwise.
+- Runtime validation of 0.21.18 remains outstanding: no Blender 5.3 GUI import/bake/export, no e1m1 timing run, and no Ironwail or Quake rerelease comparison by the assistant. Do not claim the chart changes solved the reported seam.
+- User-confirmed latest seam test remains the 0.21.13 Enhanced BSPX rim comparison on 2026-11-15: no visible change in either the Quake 2021 rerelease or Ironwail. That approach is not a fix for the classic path.
+
+## Historical source/build baseline — checked 2026-11-11
 
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
 - Active branch: fix/v0.11.1-metadata-style-order-test
@@ -757,3 +773,100 @@ Request the original source BSP and the exported BSPX-edited BSP, plus a
 screenshot with the offending edge identified, before implementing a
 map-specific or global boundary-blending algorithm. No classic-edge fix is
 implemented yet.
+
+
+---
+
+## 2026-11-15 to 2026-11-16 — Reconstructed continuation: lightmap edge work, import diagnostics and 0.21.18 candidate
+
+This section supersedes earlier assumptions that 0.21.14 was the latest work. Read the branch/PR topology carefully: 0.21.15, 0.21.16 and 0.21.18 are real synchronized candidate builds on stacked draft branches; the 0.21.14 label came from inconsistent metadata on the base branch.
+
+### 0.21.14 candidate — four-point sub-luxel quadrature
+
+- The previous 0.21.12 reduction collapsed a supersampled luxel block to one centre sample. That could miss a narrow spotlight when Cycles illuminated the outer quadrants of a block but not its centre.
+- The candidate changes collapse_rgba_luxel_blocks() to evaluate four quarter/three-quarter sub-luxel positions, using bilinear interpolation for blocks larger than 2×, and average those values into the single classic Quake luxel. The 2× case samples all four pixels directly.
+- A regression test lights only the four corners of a 4× block and expects the canonical RGB value to become 0.25. The change is included in the ancestry of the later 0.21.15–0.21.18 branch chain.
+- Version warning: on the PR #1 base after commit c63205d, __init__.py says 0.21.14 but addon.py ADDON_VERSION and README say 0.21.13. The build name therefore did not represent synchronized metadata. Do not call this a clean validated release or independently increment versions.
+- CI evidence on the PR #1 code commit c63205d: QSS Python run 43757220942 passed 275 standalone tests, compilation and package assembly. A separate diagnostic-branch run 43767937159 also passed 275 tests and uploaded a package named 0.21.14, artifact 14182513321 (291,988 bytes, SHA-256 9938d87922f560a050548b46d1819cf5ed0d42595c9cde5c90c17f5213dcf4c1). The metadata mismatch remains the reason not to use that as a canonical release.
+- No Blender 5.3 or engine runtime validation of the quadrature has been recorded.
+
+### BSP import failure — separate diagnostic PR #2
+
+- User-side import of maps/spottest-compile.bsp produced: can only assign array (not "tuple") to array slice. The failing source line has not yet been identified; do not guess at an array-slice fix.
+- PR #2, branch fix/0.21.15-bsp-import-array-trace, adds full traceback recording to both direct BSP import and Browse Maps/game-map import failures. The traceback is written to a Blender Text datablock named SLOPGATE_Last_Import_Traceback and to a user-data diagnostics file; the error report identifies the diagnostic location.
+- PR #2 head is 66767f0fe7d34db7a29204af1d13dc383ec300ce, based on c63205dc4974c313103ef9b8b7def5131b8680f1. Its QSS Python run 43767937159 passed 275 standalone tests, Python compilation and package assembly; artifact ID 14182513321. This is diagnostic instrumentation, not a root-cause fix.
+- No Blender 5.3 reproduction with the full traceback has been recorded. PR #2 is open/draft and is not included in the PR #3 → #4 → #5 lightmap branch chain. The branch name is not evidence that a 0.21.15 add-on build exists on that branch.
+
+### 0.21.15 — detached-face texture export and classic BSP29 lightmap-grid alignment
+
+- PR #3: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/pull/3
+- Branch: fix/0.21.15-classic-face-local-lightmap-alignment
+- Head: 5ea9781e71ea64b9adb70e5ecbda7918e5d1fde9; base is the PR #1 development code at c63205d.
+- The Blender paint workflow may use a shared atlas, but BSP export now crops each edited face tile back to its own local image dimensions and exports it as a face-local miptexture using the local texinfo projection. This avoids letting shared-atlas packing scale/offset changes alter classic BSP29 lightmap extents or luxel sample phase.
+- Added pure-Python tests for tile extraction/orientation and the shared luxel phase using the committed spottest01 fixture.
+- QSS Python run 43774091817 / job 132996263641 passed 277 standalone tests, compile and BSP export integrity checks. Artifact 14185488366, Quake-Surface-Studio-v0.21.15-Blender-Install, 293,556 bytes, SHA-256 97ab102d343a42b81c9da8b7e05d4c957a689739702e4f75276368081ec04971.
+- PR #3 is open/draft. No Blender 5.3 or Ironwail runtime acceptance is recorded. The first fixture arrangement failed; the corrected branch tip's CI rerun passed.
+
+### 0.21.16 — conservative shared-coplanar-edge luxel reconciliation
+
+- PR #4: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/pull/4
+- Branch: fix/0.21.16-coplanar-edge-luxel-stitch
+- Head: 15ff4802a32eaa64d83e2c42bcd33761bc124e94; based on PR #3 head 5ea9781e.
+- Adds an export-time edge reconciliation pass for lightmap samples occupying the same world-space position on a shared geometric BSP edge.
+- Matching is deliberately conservative: exactly two lightmapped face users of the shared edge, same BSP model, same oriented plane, identical four light-style bytes, and aligned classic 16-unit luxel grids. Matched RGB samples are averaged and both QLIT RGB data and classic monochrome fallback values are updated.
+- It does not blend corners, face interiors, non-coplanar joins, style boundaries or misaligned grids. Do not broaden the matcher without regression maps because boundary blending can leak light across real shadow/material/orientation changes.
+- QSS Python run 43775538317 / job 133000869251 passed 281 standalone tests, compile and BSP export integrity checks. Artifact 14185683175, Quake-Surface-Studio-v0.21.16-Blender-Install, 297,273 bytes, SHA-256 32b6bad1f384f25f228111383dd50d0bb01cf0900fb1cef5fb905500ccb1402e.
+- PR #4 is open/draft. The in-game visual effect has not yet been confirmed by the user.
+
+### 0.21.17 — world-aligned coplanar lightmap charts
+
+- The PR #5 branch incorporates the PR #3 and PR #4 ancestry and adds a shared world-space chart representation for connected coplanar BSP faces.
+- It builds a deterministic plane frame, groups adjacent lightmapped faces only when they share a BSP edge and agree on model ownership, oriented plane and all four light-style bytes, then snaps chart origins to a common 16-unit world luxel lattice.
+- Each face is resampled into its shared chart. This makes matching coplanar edge samples share one chart coordinate/grid rather than relying solely on independent face-local sampling. Model and style boundaries remain chart boundaries.
+- A world-chart pixel-coordinate transform and chart-space source sampling are used by the bake diagnostics/coverage path. Do not assume this modifies non-coplanar boundaries or proves all engine filtering artifacts solved.
+- Version 0.21.17 is an intermediate development step; the latest candidate is 0.21.18.
+
+### 0.21.18 — outward-rounded luxel coverage and large-map sampling performance
+
+- PR #5: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/pull/5
+- Branch: fix/0.21.17-world-aligned-lightmap-charts
+- Head: 7f182cf97cc1a3aa35c15408d429a478f87e08c2; base is PR #4 head 15ff4802.
+- Edge-sampling correction: classic BSP29 face extents round outward to complete 16-unit luxel boundaries. Therefore a final luxel row/column can have its centre just outside the actual polygon while still belonging to the face's valid classic lightmap rectangle. The earlier chart resampler skipped those samples. The new pass fills them by clamping to that face's own source-grid edge values.
+- The resampler now checks each candidate coordinate against the face's own classic sample rectangle before accumulating it. This prevents the polygon search margin from extrapolating one face into a neighbour's area. A regression fixture covers a 20-unit-wide face whose last outward-rounded luxel centre lies beyond its geometric edge.
+- Performance correction: per-face processing was repeatedly reconstructing BSP face, plane, texinfo and style metadata during post-Cycles diagnostics and the Quake Direct path. This created near-quadratic work and could make large maps such as e1m1 appear frozen after Cycles had finished.
+- The 0.21.18 pass parses/prepares that metadata once per operation and reuses it for diagnostics, face coverage and source-lightmap comparisons. It also applies the cache to Quake Direct baking.
+- Classic luxel sampling from world charts uses an affine fast path that solves the face projection once and advances pixel coordinates, avoiding per-luxel XYZ tuple construction.
+- QSS Python run 43783467279 / job 133025758521 passed Python compilation, 290 standalone tests, BSP export integrity checks, Blender ZIP assembly and artifact upload.
+- Artifact: Quake-Surface-Studio-v0.21.18-Blender-Install, ID 14188889199, 308,296 bytes. GitHub Actions upload log/API digest: 18499457a52b39b232cce6c4f7567be6c7d028ca29fdcdc70de226ee4cf772e8. Artifact/run page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43783467279/artifacts/14188889199.
+- An earlier narrative in the reconstructed chat archive lists SHA-256 5bff80081380ff08ae1c7779f6ad605c058b0d514238d3cbfa37be638b607015 for the same stated 308,296-byte installer. That conflicts with the workflow upload log and GitHub artifact metadata. Prefer the digest from the actual artifact record above unless an independent downloaded-file hash proves otherwise.
+- The PR #5 description records the same 290-test pass and confirms that Blender 5.3 and Ironwail runtime validation remain outstanding. This build has not been proven to fix the visible edge artifact or the e1m1 freeze; it is the next candidate to test, not a release.
+
+### Open PR topology as of 2026-11-16
+
+| PR | Branch | Base | Purpose | State |
+|---|---|---|---|---|
+| #1 | fix/v0.11.1-metadata-style-order-test | main | Long-running development line; latest branch head f68fa7a7 (chat archive update) | Open, draft |
+| #2 | fix/0.21.15-bsp-import-array-trace | fix/v0.11.1-metadata-style-order-test at c63205d | Capture the unresolved BSP import traceback | Open, draft |
+| #3 | fix/0.21.15-classic-face-local-lightmap-alignment | fix/v0.11.1-metadata-style-order-test at c63205d | 0.21.15 detached-face export correction | Open, draft |
+| #4 | fix/0.21.16-coplanar-edge-luxel-stitch | PR #3 head 5ea9781e | 0.21.16 conservative shared-edge sample reconciliation | Open, draft |
+| #5 | fix/0.21.17-world-aligned-lightmap-charts | PR #4 head 15ff4802 | 0.21.17 charts + 0.21.18 edge/performance corrections | Open, draft |
+
+Do not merge these stacked PRs out of order. PR #3 → PR #4 → PR #5 is the lightmap integration sequence. PR #2 is an independent diagnostic branch. PR #3–#5 are based on the c63205d source base rather than the latest PR #1 documentation-only head f68fa7a7; account for that when integrating the archive/handoff update.
+
+### Immediate runtime validation and next engineering steps
+
+1. Test the 0.21.18 candidate in Blender 5.3 on e1m1. Record total bake duration, Cycles operator duration and whether any long pause occurs before Cycles starts, during Cycles, or after Cycles returns. This separates the new metadata-cache improvement from render-time work.
+2. Re-test the spottest01 boundary using the same camera/view and the same target engine as the previous test. Export Classic BSP29 and compare in Ironwail and the Quake 2021 rerelease. Check both the troublesome edge and possible light leaking across a shared coplanar edge. Do not declare fixed until the user sees it in the target engines.
+3. Check that ordinary face interiors, style boundaries, different models and non-coplanar edges remain unchanged by the chart and reconciliation paths.
+4. If the BSP import error on maps/spottest-compile.bsp recurs, use the PR #2 traceback instrumentation (or integrate that small diagnostic patch into the current test branch) and capture SLOPGATE_Last_Import_Traceback. Fix only the exact failing source line indicated by the traceback.
+5. Do not resume broad undo/redo testing unless the user reports a reproducible failure; the user explicitly paused that investigation while testing other features.
+6. Keep the preview-brightness calibration and ericw-lighting fidelity audit separate from the lightmap-edge and performance work. Do not lower Cycles samples or other bake quality settings to make e1m1 faster without a measured quality comparison and explicit approval.
+7. Continue to provide a version-consistent installable ZIP for every candidate build, with the exact branch/commit, CI status, artifact page and checksum. Before naming a build, verify bl_info version, addon.py ADDON_VERSION and README all agree.
+
+## Archive and handoff maintenance rule
+
+The user identified that the full chat log and then this handoff had stopped being updated. This is an important process failure to avoid repeating:
+- Append the user's original dialogue and the assistant's relevant technical response to Slipgate_Chat_History_Clean.md after each substantive session. Preserve historical text; do not rewrite old dialogue.
+- Update SLOPGATE_AI_Handoff.md when a decision, implementation state, branch topology, test result or runtime-validation status changes materially.
+- After editing either file, verify the branch, latest commit, blob contents and that the new section is present. Never state that the documentation was updated unless the GitHub write succeeded.
+- Use SLOPGATE_AI_Handoff.md as the maintained starting point and the main chat archive for detailed historical confirmation.
