@@ -29,7 +29,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils, image_undo
 
 
-ADDON_VERSION = (0, 21, 16)
+ADDON_VERSION = (0, 21, 17)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
