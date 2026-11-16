@@ -7966,7 +7966,37 @@ def _qss_source_bvh(obj, parsed, unit_scale, flip_z, context):
     return BVHTree.FromPolygons(world_vertices, polygons, all_triangles=False, epsilon=0.0)
 
 
-def _qss_read_source_face_sample(mesh, poly_index, face_id, parsed, sample_count=None):
+def _qss_source_face_sample_cache(parsed, sample_count=None):
+    """Precompute BSP face/style/geometry arrays once for per-face sampling."""
+    faces = parsed.faces()
+    texinfos = parsed.texinfos()
+    planes = parsed.planes()
+    edges = parsed.edges()
+    surfedges = parsed.surfedges()
+    vertices = parsed.vertices()
+    if sample_count is None:
+        source_rgb = parsed.bspx_lumps.get('RGBLIGHTING')
+        sample_count = max(
+            len(parsed.lumps[bsp.LUMP_LIGHTING]),
+            len(source_rgb) // 3 if source_rgb else 0,
+        )
+    decoupled_records, styles_by_face = _qss_decoupled_lightmap_state(
+        parsed, int(sample_count)
+    )
+    return {
+        'faces': faces,
+        'texinfos': texinfos,
+        'planes': planes,
+        'edges': edges,
+        'surfedges': surfedges,
+        'vertices': vertices,
+        'decoupled_records': decoupled_records,
+        'styles_by_face': styles_by_face,
+        'sample_count': int(sample_count),
+    }
+
+
+def _qss_read_source_face_sample(mesh, poly_index, face_id, parsed, sample_count=None, source_cache=None):
     """Return original BSP face, plane, texinfo and lightmap atlas metadata safely."""
     required = ('qss_bsp_face_id', 'qss_lm_has_data', 'qss_lm_atlas_x', 'qss_lm_atlas_y',
                 'qss_lm_sample_w', 'qss_lm_sample_h', 'qss_lm_world_chart',
@@ -7989,15 +8019,16 @@ def _qss_read_source_face_sample(mesh, poly_index, face_id, parsed, sample_count
     actual_face_id = int(_qss_safe_collection_item(attrs['qss_bsp_face_id'].data, poly_index, 'qss_bsp_face_id').value)
     if actual_face_id != int(face_id):
         face_id = actual_face_id
-    faces = parsed.faces()
+    cache = source_cache if source_cache is not None else _qss_source_face_sample_cache(parsed, sample_count)
+    faces = cache['faces']
     if face_id < 0 or face_id >= len(faces):
         raise bsp.BSPError(f'Face ID {face_id} is outside the source BSP face lump.')
     face = faces[face_id]
-    texinfos = parsed.texinfos()
+    texinfos = cache['texinfos']
     texinfo_id = int(face[4])
     if texinfo_id < 0 or texinfo_id >= len(texinfos):
         raise bsp.BSPError(f'BSP face {face_id} references invalid texinfo {texinfo_id}.')
-    planes = parsed.planes()
+    planes = cache['planes']
     plane_id = int(face[0])
     if plane_id < 0 or plane_id >= len(planes):
         raise bsp.BSPError(f'BSP face {face_id} references invalid plane {plane_id}.')
@@ -8005,18 +8036,14 @@ def _qss_read_source_face_sample(mesh, poly_index, face_id, parsed, sample_count
     sign = -1.0 if int(face[1]) else 1.0
     normal = tuple(float(plane[i]) * sign for i in range(3))
     distance = float(plane[3]) * sign
-    edges = parsed.edges()
-    surfedges = parsed.surfedges()
-    vertices = parsed.vertices()
-    vertex_ids = parsed.face_vertex_indices(face, edges, surfedges)
+    vertex_ids = parsed.face_vertex_indices(face, cache['edges'], cache['surfedges'])
+    vertices = cache['vertices']
     positions = [vertices[i] for i in vertex_ids]
     texinfo = texinfos[texinfo_id]
     sample_w = int(_qss_safe_collection_item(attrs['qss_lm_sample_w'].data, poly_index, 'qss_lm_sample_w').value)
     sample_h = int(_qss_safe_collection_item(attrs['qss_lm_sample_h'].data, poly_index, 'qss_lm_sample_h').value)
-    if sample_count is None:
-        source_rgb = parsed.bspx_lumps.get('RGBLIGHTING')
-        sample_count = max(len(parsed.lumps[bsp.LUMP_LIGHTING]), len(source_rgb) // 3 if source_rgb else 0)
-    decoupled_records, styles_by_face = _qss_decoupled_lightmap_state(parsed, sample_count)
+    decoupled_records = cache['decoupled_records']
+    styles_by_face = cache['styles_by_face']
     decoupled = decoupled_records[face_id] if decoupled_records is not None else None
     if decoupled_records is not None and decoupled is None:
         return None
