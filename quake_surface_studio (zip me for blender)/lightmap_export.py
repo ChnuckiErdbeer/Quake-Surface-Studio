@@ -991,8 +991,9 @@ def resample_coplanar_chart_sources(chart, face_records, *, sample_spacing: int 
     """Resample per-face source lightmaps onto a shared world-space chart.
 
     Matching samples on a shared geometric edge contribute to one chart luxel;
-    their RGB values are averaged. Empty cells are marked invalid and left to
-    the caller's atlas background/gutter.
+    their RGB values are averaged. The outward-rounded classic face lightmap
+    rectangle is also populated beyond the geometric polygon by clamping to that
+    face's own source-grid edge, preserving partial right/bottom BSP29 luxels.
     """
     spacing = int(sample_spacing)
     width, height = int(chart["width"]), int(chart["height"])
@@ -1020,8 +1021,12 @@ def resample_coplanar_chart_sources(chart, face_records, *, sample_spacing: int 
             world_t = t_min + gy * spacing
             for gx in range(min_x, max_x + 1):
                 world_s = s_min + gx * spacing
-                if not point_in_polygon_2d((world_s, world_t), polygon):
-                    continue
+                # The classic BSP face lightmap rectangle is rounded outward
+                # to 16-unit luxel boundaries. Its last row/column can therefore
+                # lie just outside the geometric polygon. Those samples are still
+                # part of the face's real BSP29 lightmap grid and must be filled
+                # from this face's own clamped source edge, not left transparent/
+                # black for the later chart-space exporter to interpolate against.
                 point = tuple(
                     axis_s[i] * world_s + axis_t[i] * world_t + normal[i] * distance
                     for i in range(3)
