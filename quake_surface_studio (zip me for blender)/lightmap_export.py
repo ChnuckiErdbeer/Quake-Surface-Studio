@@ -1222,6 +1222,68 @@ def sample_classic_face_grid_from_world_chart(
     return tuple(output) if preserve_float else bytes(output)
 
 
+
+def classic_face_grid_world_chart_pixel_coordinates(
+    image_size: int, working_resolution: int,
+    atlas_x: int, atlas_y: int, gutter: int, pixels_per_luxel: int,
+    texinfo, plane_normal, plane_distance: float,
+    s_min: float, t_min: float, sample_width: int, sample_height: int,
+    axis_s, axis_t, chart_s_min: float, chart_t_min: float,
+) -> tuple[tuple[float, float], ...]:
+    """Return the exact atlas pixel centres sampled for a classic world-chart face."""
+    if sample_width <= 0 or sample_height <= 0:
+        raise ValueError("Classic face sample dimensions must be positive.")
+    base = _solve_projection_plane(
+        texinfo[0:3], texinfo[4:7], plane_normal,
+        float(s_min) - float(texinfo[3]),
+        float(t_min) - float(texinfo[7]), float(plane_distance),
+    )
+    step_s = _solve_projection_plane(
+        texinfo[0:3], texinfo[4:7], plane_normal,
+        float(s_min + 16.0) - float(texinfo[3]),
+        float(t_min) - float(texinfo[7]), float(plane_distance),
+    )
+    step_t = _solve_projection_plane(
+        texinfo[0:3], texinfo[4:7], plane_normal,
+        float(s_min) - float(texinfo[3]),
+        float(t_min + 16.0) - float(texinfo[7]), float(plane_distance),
+    )
+    if base is None or step_s is None or step_t is None:
+        raise ValueError("Face texinfo projection is singular on its BSP plane.")
+
+    def project(point):
+        return (
+            sum(point[i] * float(axis_s[i]) for i in range(3)),
+            sum(point[i] * float(axis_t[i]) for i in range(3)),
+        )
+
+    origin_s, origin_t = project(base)
+    ds_s, ds_t = project(tuple(step_s[i] - base[i] for i in range(3)))
+    dt_s, dt_t = project(tuple(step_t[i] - base[i] for i in range(3)))
+    block = max(1, int(pixels_per_luxel)) * max(1, int(working_resolution))
+    origin_x = (int(atlas_x) + int(gutter)) * max(1, int(working_resolution))
+    origin_y = (int(atlas_y) + int(gutter)) * max(1, int(working_resolution))
+    chart_origin_s = (origin_s - float(chart_s_min)) / 16.0
+    chart_origin_t = (origin_t - float(chart_t_min)) / 16.0
+    px_origin = origin_x + (chart_origin_s + 0.5) * block - 0.5
+    py_origin = int(image_size) - 1.0 - (
+        origin_y + (chart_origin_t + 0.5) * block - 0.5
+    )
+    px_step_s = ds_s * block / 16.0
+    py_step_s = -ds_t * block / 16.0
+    px_step_t = dt_s * block / 16.0
+    py_step_t = -dt_t * block / 16.0
+
+    return tuple(
+        (
+            px_origin + sx * px_step_s + sy * px_step_t,
+            py_origin + sx * py_step_s + sy * py_step_t,
+        )
+        for sy in range(int(sample_height))
+        for sx in range(int(sample_width))
+    )
+
+
 def world_chart_grid_positions(
     texinfo, plane_normal, plane_distance, s_coordinates, t_coordinates,
 ):
