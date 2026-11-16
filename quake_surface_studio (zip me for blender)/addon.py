@@ -7942,6 +7942,142 @@ def _image_rgb_statistics(image):
 
 
 
+
+
+def _qss_describe_nonfinite_luxels(
+    context, obj, image, face_indices, parsed_source, source_cache,
+    atlas_coordinates,
+):
+    """Map non-finite atlas pixels to BSP face/luxel/world position and nearest lights."""
+    mesh = obj.data
+    attrs = _qss_validate_face_domain_attributes(
+        mesh,
+        ('qss_bsp_face_id', 'qss_lm_has_data', 'qss_lm_atlas_x',
+         'qss_lm_atlas_y', 'qss_lm_sample_w', 'qss_lm_sample_h',
+         'qss_lm_world_chart'),
+        'locate non-finite lightmap samples',
+    )
+    image_size = int(image.size[0])
+    resolution = _qss_lightmap_pixel_scale(obj, image)
+    pixels_per_luxel = max(1, int(obj.get('qss_lightmap_scale', 1)))
+    block = pixels_per_luxel * resolution
+    gutter = max(0, int(obj.get('qss_lightmap_gutter', 0)))
+    bad_pixels = [(float(x), float(y)) for x, y in atlas_coordinates]
+    matches = []
+    for poly_index in face_indices:
+        if not (0 <= int(poly_index) < len(mesh.polygons)):
+            continue
+        if not bool(attrs['qss_lm_has_data'].data[poly_index].value):
+            continue
+        face_id = int(attrs['qss_bsp_face_id'].data[poly_index].value)
+        info = _qss_read_source_face_sample(
+            mesh, poly_index, face_id, parsed_source, source_cache=source_cache
+        )
+        if info is None:
+            continue
+        width, height = int(info['width']), int(info['height'])
+        atlas_x, atlas_y = int(info['atlas_x']), int(info['atlas_y'])
+        if bool(info['world_chart']) and info['decoupled_lmvecs'] is None:
+            pixel_centres = lightmap_export_utils.classic_face_grid_world_chart_pixel_coordinates(
+                image_size, resolution, atlas_x, atlas_y, gutter,
+                pixels_per_luxel, info['texinfo'], info['plane_normal'],
+                info['plane_distance'], info['s_min'], info['t_min'],
+                width, height, info['chart_axis_s'], info['chart_axis_t'],
+                info['chart_s_min'], info['chart_t_min'],
+            )
+        else:
+            x0 = atlas_x * resolution + gutter * resolution
+            y0 = atlas_y * resolution + gutter * resolution
+            sample_step = pixels_per_luxel * resolution
+            offset = (sample_step - 1) // 2
+            pixel_centres = tuple(
+                (x0 + sx * sample_step + offset,
+                 image_size - 1 - (y0 + sy * sample_step + offset))
+                for sy in range(height) for sx in range(width)
+            )
+        world_positions = None
+        if info['decoupled_lmvecs'] is None:
+            s_coords = tuple(info['s_min'] + 16.0 * sx for sx in range(width))
+            t_coords = tuple(info['t_min'] + 16.0 * sy for sy in range(height))
+            try:
+                world_positions = lightmap_export_utils.world_chart_grid_positions(
+                    info['texinfo'], info['plane_normal'], info['plane_distance'],
+                    s_coords, t_coords,
+                )
+            except Exception:
+                world_positions = None
+        tolerance = max(1.25, block * 0.5 + 0.25)
+        for luxel_index, centre in enumerate(pixel_centres):
+            sx = luxel_index % width
+            sy = luxel_index // width
+            distances = [
+                ((centre[0] - bad[0]) ** 2 + (centre[1] - bad[1]) ** 2, bad)
+                for bad in bad_pixels
+            ]
+            nearest_distance, nearest_bad = min(distances, default=(float('inf'), None))
+            if nearest_distance > tolerance * tolerance:
+                continue
+            world_position = (
+                tuple(float(v) for v in world_positions[luxel_index])
+                if world_positions is not None else None
+            )
+            record = {
+                'face_id': face_id,
+                'poly_index': int(poly_index),
+                'luxel': (sx, sy),
+                'atlas_sample_centre': (round(centre[0], 3), round(centre[1], 3)),
+                'nearest_bad_pixel': nearest_bad,
+                'world_quake': world_position,
+            }
+            matches.append(record)
+    lights = []
+    for light_obj in _qss_active_map_objects(context.scene, obj):
+        if light_obj.type != 'LIGHT' or light_obj.get('qss_light_role') not in {
+            'quake_entity_light', 'quake_world_sunlight'
+        }:
+            continue
+        origin = light_obj.get('qss_quake_origin')
+        try:
+            origin = tuple(float(v) for v in origin[:3])
+            if len(origin) != 3 or not all(math.isfinite(v) for v in origin):
+                continue
+        except (TypeError, ValueError, IndexError):
+            continue
+        lights.append({
+            'name': light_obj.name,
+            'origin': origin,
+            'delay': int(light_obj.get('qss_quake_light_delay', 0)),
+            'value': float(light_obj.get('qss_quake_raw_light_value',
+                                         light_obj.get('qss_quake_light_value', 0.0))),
+            'wait': float(light_obj.get('qss_quake_wait', 1.0)),
+            'falloff': float(light_obj.get('qss_quake_falloff', 0.0)),
+        })
+    lines = []
+    for match in matches[:8]:
+        lines.append(
+            f"face={match['face_id']} poly={match['poly_index']} luxel={match['luxel']} "
+            f"atlas_sample={match['atlas_sample_centre']} "
+            f"world_quake={match['world_quake']}"
+        )
+        if match['world_quake'] is not None:
+            point = match['world_quake']
+            closest = sorted(
+                (
+                    math.sqrt(sum((point[i] - light['origin'][i]) ** 2 for i in range(3))),
+                    light,
+                )
+                for light in lights
+            )[:3]
+            for distance, light in closest:
+                lines.append(
+                    f"  nearest_light={light['name']} distance_qu={distance:.6g} "
+                    f"origin={light['origin']} delay={light['delay']} "
+                    f"value={light['value']:.6g} wait={light['wait']:.6g} "
+                    f"falloff={light['falloff']:.6g}"
+                )
+    return '\\n'.join(lines) if lines else 'No BSP face/luxel centre matched the reported non-finite atlas pixels.'
+
+
 def _qss_vector3(values):
     from mathutils import Vector
     return Vector((float(values[0]), float(values[1]), float(values[2])))
@@ -9333,9 +9469,15 @@ class QSS_OT_bake_scene_lights(Operator):
             obj['qss_last_bake_attempt_nonfinite_luxels'] = int(nonfinite_bake_samples)
             obj['qss_last_bake_attempt_nonfinite_source_luxels'] = int(nonfinite_source_samples)
             if nonfinite_bake_samples or nonfinite_source_samples:
+                nonfinite_details = _qss_describe_nonfinite_luxels(
+                    context, obj, bake_target, receiver_face_indices,
+                    source_bsp_for_samples, source_sample_cache,
+                    raw_image_stats.get('first_nonfinite_pixels', []),
+                )
+                obj['qss_last_bake_attempt_nonfinite_details'] = nonfinite_details
                 obj['qss_last_bake_attempt_lights'] = (
                     f'Non-finite luxel samples: bake={nonfinite_bake_samples}; '
-                    f'source={nonfinite_source_samples}'
+                    f'source={nonfinite_source_samples}; locations={nonfinite_details}'
                 )
                 raise bsp.BSPError(
                     'Cycles bake produced non-finite luxel luminance samples; '
@@ -10718,6 +10860,7 @@ def _qss_diagnostics_text(context, obj):
         f'Last Cycles bake operator result: {obj.get("qss_last_bake_attempt_operator_result", "n/a")}',
         f'Last Cycles attempt config: engine={obj.get("qss_last_bake_attempt_engine", "n/a")} target={obj.get("qss_last_bake_attempt_target", "n/a")} type={obj.get("qss_last_bake_attempt_type", "n/a")} uv={obj.get("qss_last_bake_attempt_uv", "n/a")}',
         f'Last attempted lamp states: {obj.get("qss_last_bake_attempt_lights", "n/a")}',
+        f'Non-finite luxel face/world/light matches: {obj.get("qss_last_bake_attempt_nonfinite_details", "n/a")}',
         f'Last attempted scene visibility: {obj.get("qss_last_bake_attempt_scene_visibility", "n/a")}',
         f'Current (restored) bake settings: engine={context.scene.render.engine} target={getattr(context.scene.render.bake, "target", "n/a")} samples={getattr(getattr(context.scene, "cycles", None), "samples", "n/a")} diffuse_bounces={getattr(getattr(context.scene, "cycles", None), "diffuse_bounces", "n/a")} color={getattr(context.scene.render.bake, "use_pass_color", "n/a")} diffuse={getattr(context.scene.render.bake, "use_pass_diffuse", "n/a")} direct={getattr(context.scene.render.bake, "use_pass_direct", "n/a")} indirect={getattr(context.scene.render.bake, "use_pass_indirect", "n/a")}',
         f'Color management: view_transform={context.scene.view_settings.view_transform} look={context.scene.view_settings.look} exposure={context.scene.view_settings.exposure} gamma={context.scene.view_settings.gamma}',
