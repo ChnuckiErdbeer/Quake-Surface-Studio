@@ -7675,7 +7675,7 @@ def _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed=Non
         info['chart_s_min'], info['chart_t_min'],
     )
 
-def _lightmap_sample_luminances(obj, image, face_indices=None):
+def _lightmap_sample_luminances(obj, image, face_indices=None, parsed_source=None):
     """Read only real luxel centers, excluding atlas gutters and empty space."""
     mesh = obj.data
     attrs = _qss_validate_face_domain_attributes(
@@ -7692,6 +7692,17 @@ def _lightmap_sample_luminances(obj, image, face_indices=None):
     image.pixels.foreach_get(pixels)
     values = []
     target_set = None if face_indices is None else {int(index) for index in face_indices}
+    has_world_chart = any(
+        bool(attrs['qss_lm_world_chart'].data[index].value)
+        and bool(attrs['qss_lm_has_data'].data[index].value)
+        for index in (target_set if target_set is not None else range(len(mesh.polygons)))
+        if 0 <= index < len(mesh.polygons)
+    )
+    if has_world_chart and parsed_source is None:
+        source_path = bpy.path.abspath(str(obj.get('qss_source_path', '') or ''))
+        if not source_path or not os.path.isfile(source_path):
+            raise bsp.BSPError('The source BSP is required to sample world-aligned lightmap charts.')
+        parsed_source = bsp.BSP29.from_file(source_path)
     for poly_index, _poly in enumerate(mesh.polygons):
         if target_set is not None and poly_index not in target_set:
             continue
@@ -7702,7 +7713,7 @@ def _lightmap_sample_luminances(obj, image, face_indices=None):
         width = int(_qss_safe_collection_item(attrs['qss_lm_sample_w'].data, poly_index, 'qss_lm_sample_w').value)
         height = int(_qss_safe_collection_item(attrs['qss_lm_sample_h'].data, poly_index, 'qss_lm_sample_h').value)
         if bool(attrs['qss_lm_world_chart'].data[poly_index].value):
-            chart_rgb = _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index)
+            chart_rgb = _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed_source)
             if chart_rgb is not None:
                 for offset in range(0, len(chart_rgb), 3):
                     r, g, b = chart_rgb[offset:offset + 3]
@@ -7721,7 +7732,7 @@ def _lightmap_sample_luminances(obj, image, face_indices=None):
     return values
 
 
-def _lightmap_face_coverage(obj, image, threshold=1e-8, face_indices=None):
+def _lightmap_face_coverage(obj, image, threshold=1e-8, face_indices=None, parsed_source=None):
     """Summarize how many imported faces receive nonzero sampled bake luxels."""
     mesh = obj.data
     attrs = _qss_validate_face_domain_attributes(
@@ -7739,6 +7750,17 @@ def _lightmap_face_coverage(obj, image, threshold=1e-8, face_indices=None):
     total_faces = lit_faces = total_luxels = lit_luxels = 0
     face_max_luminance = 0.0
     target_set = None if face_indices is None else {int(index) for index in face_indices}
+    has_world_chart = any(
+        bool(attrs['qss_lm_world_chart'].data[index].value)
+        and bool(attrs['qss_lm_has_data'].data[index].value)
+        for index in (target_set if target_set is not None else range(len(mesh.polygons)))
+        if 0 <= index < len(mesh.polygons)
+    )
+    if has_world_chart and parsed_source is None:
+        source_path = bpy.path.abspath(str(obj.get('qss_source_path', '') or ''))
+        if not source_path or not os.path.isfile(source_path):
+            raise bsp.BSPError('The source BSP is required to sample world-aligned lightmap charts.')
+        parsed_source = bsp.BSP29.from_file(source_path)
     for poly_index, _poly in enumerate(mesh.polygons):
         if target_set is not None and poly_index not in target_set:
             continue
@@ -7762,7 +7784,7 @@ def _lightmap_face_coverage(obj, image, threshold=1e-8, face_indices=None):
         face_lit = 0
         face_max = 0.0
         if bool(attrs['qss_lm_world_chart'].data[poly_index].value):
-            chart_rgb = _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index)
+            chart_rgb = _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed_source)
             if chart_rgb is not None:
                 total_luxels += len(chart_rgb) // 3
                 for offset in range(0, len(chart_rgb), 3):
@@ -9126,13 +9148,35 @@ class QSS_OT_bake_scene_lights(Operator):
             # Measure the raw Cycles irradiance at actual BSP luxel centres.
             # The atlas is float/Non-Color: unlike an 8-bit byte image it can
             # preserve low irradiance values and calibrated values above 1.0.
-            bake_values = _lightmap_sample_luminances(obj, bake_target, receiver_face_indices)
+            # Parse the source BSP once for all chart-aware diagnostics. Previously
+            # each world-chart face reparsed the complete BSP independently here,
+            # making post-bake validation scale as O(faces * BSP parse time) on E1M1.
+            source_bsp_for_samples = None
+            if any(
+                bool(mesh.attributes['qss_lm_world_chart'].data[index].value)
+                for index in receiver_face_indices
+            ):
+                source_path = bpy.path.abspath(str(obj.get('qss_source_path', '') or ''))
+                if not source_path or not os.path.isfile(source_path):
+                    raise bsp.BSPError('The source BSP is required for world-chart bake validation.')
+                source_bsp_for_samples = bsp.BSP29.from_file(source_path)
+            bake_values = _lightmap_sample_luminances(
+                obj, bake_target, receiver_face_indices, parsed_source=source_bsp_for_samples
+            )
             raw_bake_mean = (sum(bake_values) / len(bake_values)) if bake_values else 0.0
             raw_image_stats = _image_rgb_statistics(bake_target)
-            raw_face_coverage = _lightmap_face_coverage(obj, bake_target, face_indices=receiver_face_indices)
+            raw_face_coverage = _lightmap_face_coverage(
+                obj, bake_target, face_indices=receiver_face_indices,
+                parsed_source=source_bsp_for_samples,
+            )
             obj['qss_last_bake_attempt_face_coverage'] = str(raw_face_coverage)
             source_image = bpy.data.images.get(obj.get('qss_original_lightmap_backup', ''))
-            source_values = _lightmap_sample_luminances(obj, source_image, receiver_face_indices) if source_image else []
+            source_values = (
+                _lightmap_sample_luminances(
+                    obj, source_image, receiver_face_indices,
+                    parsed_source=source_bsp_for_samples,
+                ) if source_image else []
+            )
             source_mean = (sum(source_values) / len(source_values)) if source_values else 0.0
             energy_scale = max(0.0, float(scene.qss_light_energy_scale))
             max_energy_after_bake = max((float(o.data.energy) for o in imported_lights), default=0.0)
