@@ -467,6 +467,18 @@ class WorldChartSamplingTests(unittest.TestCase):
         self.assertEqual(first, bytes((64, 128, 191)))
         self.assertEqual(first, second)
 
+    def test_classic_face_grid_pixel_coordinates_match_sampler_centres(self):
+        coords = lightmap_export.classic_face_grid_world_chart_pixel_coordinates(
+            16, 1, 2, 2, 1, 1,
+            (0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0),
+            (1.0, 0.0, 0.0), 0.0,
+            0.0, 0.0, 1, 1,
+            (0.0, 1.0, 0.0), (0.0, 0.0, 1.0), 0.0, 0.0,
+        )
+        self.assertEqual(len(coords), 1)
+        self.assertAlmostEqual(coords[0][0], 3.0)
+        self.assertAlmostEqual(coords[0][1], 12.0)
+
     def test_world_chart_grid_positions_solve_classic_texinfo_coordinates(self):
         texinfo = (0.0, 1.0, 0.0, -32.0, 0.0, 0.0, -1.0, 0.0)
         positions = lightmap_export.world_chart_grid_positions(
