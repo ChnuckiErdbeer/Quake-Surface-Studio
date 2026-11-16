@@ -21618,3 +21618,24 @@ This is diagnostic instrumentation on the open draft PR #5 0.21.18 candidate, no
 
 Install this artifact and re-import e1m1, then bake. If a NaN remains, send the new report: it should identify the face ID, polygon, luxel coordinate, atlas centre, Quake-space position and nearest three active-map lights. Use that to decide whether the exact point coincides with a light origin or whether the bad sample is associated with a different light/node path. Continue retaining the pre-bake atlas on any failed transaction.
 
+
+
+## 2026-11-17 — Handoff review and communication style preference
+
+**User message (verbatim)**
+
+> Hi! Welcome to SLOPGATE. Go to [https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/tree/refs/heads/fix/v0.11.1-metadata-style-order-test/ai%20chat%20history](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/tree/refs/heads/fix/v0.11.1-metadata-style-order-test/ai%20chat%20history) and study the handoff. Also try to talk not too technical. You are communicating to tech enthusiastic level designers and not level desing enthusiastic computer scientist.
+
+**Assistant response / working agreement**
+
+The SLOPGATE handoff and the latest conversation archive were reviewed from branch `fix/v0.11.1-metadata-style-order-test`. The user prefers explanations written for technically enthusiastic Quake level designers rather than software developers.
+
+For future user-facing updates:
+- Lead with what the user will see in Blender or in the game, and what it means for the level-design workflow.
+- Explain what changed, what is still broken or uncertain, and the practical next test in plain language.
+- Avoid dense implementation details, code identifiers and unexplained specialist terms. Include deeper technical explanation only when it is genuinely useful, and explain unavoidable terms briefly.
+- Keep exact technical evidence in the project handoff and archive so development continuity is not lost; simpler user-facing language must not reduce factual precision.
+
+At this session start, PR #5 remains open/draft at `bdae11b81140c9b70a332c3a78a179fe5ebeb22e`; its 0.21.18 candidate has passed 296 automated tests but still needs Blender 5.3 runtime testing. The single bad luxel has not been fixed; the latest candidate adds diagnostics intended to identify its face, map position and nearby lights. PRs #3–#5 remain a stacked sequence, with PR #2 independent. PR #1 is the long-running development/documentation branch.
+
+This session made no add-on source changes, did not run tests or create a build, and did not merge any pull request.
