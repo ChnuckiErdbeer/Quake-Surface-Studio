@@ -8130,6 +8130,7 @@ def _qss_run_ericw_direct_bake(context, obj):
         len(parsed.lumps[bsp.LUMP_LIGHTING]),
         len(source_lit_rgb) // 3 if source_lit_rgb is not None else 0,
     )
+    source_sample_cache = _qss_source_face_sample_cache(parsed, light_sample_count)
     mesh = obj.data
     if len(mesh.polygons) == 0:
         raise bsp.BSPError('The selected QSS mesh has no polygons.')
@@ -8180,7 +8181,10 @@ def _qss_run_ericw_direct_bake(context, obj):
         if not _qss_face_receives_light(obj, poly_index):
             continue
         face_id = int(_qss_safe_collection_item(face_id_attr.data, poly_index, 'qss_bsp_face_id').value)
-        face_info = _qss_read_source_face_sample(mesh, poly_index, face_id, parsed, light_sample_count)
+        face_info = _qss_read_source_face_sample(
+            mesh, poly_index, face_id, parsed, light_sample_count,
+            source_cache=source_sample_cache,
+        )
         if face_info is None:
             continue
         x0 = face_info['atlas_x'] * resolution + gutter
