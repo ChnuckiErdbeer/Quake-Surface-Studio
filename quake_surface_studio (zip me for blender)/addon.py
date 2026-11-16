@@ -3286,12 +3286,13 @@ def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
     """Build a Cycles-only multiplier that converts the base point falloff.
 
     The standard QSS lamp energy is already calibrated at one reference point.
-    With Smooth=0, the Light Falloff node's Quadratic output is Strength and
-    Linear is Strength multiplied by ray length, so Linear/Quadratic recovers
-    the shading-point distance.
-    The math nodes then apply the exact ratio between that inverse-square base
-    and ericw delay 0 or delay 5. Eevee ignores this light node tree and retains
-    the ordinary lamp-energy approximation.
+    With Smooth=0, the Light Falloff node's Quadratic output is Strength / d².
+    Recover d as sqrt(Strength / Quadratic), avoiding Linear/Quadratic: at the
+    light origin both Linear and Quadratic can be infinite, so their ratio is
+    Inf/Inf (NaN). The safe quadratic denominator and square-root form remain
+    finite at zero distance. The math nodes then apply the exact ericw delay 0
+    or delay 5 profile. Eevee ignores this light node tree and retains the
+    ordinary lamp-energy approximation.
     """
     # Never clear a node graph that did not originate from this helper.
     # Fresh imported QSS lights have nodes disabled; an existing enabled tree
@@ -3324,16 +3325,20 @@ def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
     )
     safe_quadratic.inputs[1].default_value = 1e-20
 
+    distance_squared = _qss_make_cycles_math_node(
+        nodes, "QSS_DistanceSquaredMeters", "DIVIDE", (-460, 120)
+    )
+    distance_squared.inputs[0].default_value = 1.0
     distance_m = _qss_make_cycles_math_node(
-        nodes, "QSS_DistanceMeters", "DIVIDE", (-460, 120)
+        nodes, "QSS_DistanceMeters", "SQRT", (-240, 120)
     )
     distance_quake = _qss_make_cycles_math_node(
-        nodes, "QSS_DistanceQuakeUnits", "DIVIDE", (-240, 120)
+        nodes, "QSS_DistanceQuakeUnits", "DIVIDE", (-20, 120)
     )
 
     links.new(falloff.outputs["Quadratic"], safe_quadratic.inputs[0])
-    links.new(falloff.outputs["Linear"], distance_m.inputs[0])
-    links.new(safe_quadratic.outputs[0], distance_m.inputs[1])
+    links.new(safe_quadratic.outputs[0], distance_squared.inputs[1])
+    links.new(distance_squared.outputs[0], distance_m.inputs[0])
     links.new(distance_m.outputs[0], distance_quake.inputs[0])
 
     if int(delay) == 0:
@@ -4503,6 +4508,9 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
         raise bsp.BSPError(f"Unknown lightmap export mode: {lightmap_export_mode}")
     if obj.get('qss_object_role') != 'quake_bsp29':
         raise bsp.BSPError("Active object is not a Quake Surface Studio BSP29 import.")
+    export_started_at = time.perf_counter()
+    export_stage_timings = {}
+    stage_started_at = export_started_at
     source_path = obj.get('qss_source_path', '')
     if not source_path or not os.path.isfile(source_path):
         raise bsp.BSPError("The original BSP path is unavailable. Keep the original BSP at its import location.")
@@ -4515,6 +4523,8 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
             "Could not find gfx/palette.lmp. Re-import with the Quake game directory, "
             "or place palette.lmp in the game's gfx folder."
         )
+    export_stage_timings['source_parse_and_palette'] = time.perf_counter() - stage_started_at
+    stage_started_at = time.perf_counter()
 
     mesh = obj.data
     face_attr = mesh.attributes.get('qss_bsp_face_id')
@@ -4612,6 +4622,8 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
                 except Exception:
                     pass
 
+    export_stage_timings['texture_and_image_processing'] = time.perf_counter() - stage_started_at
+    stage_started_at = time.perf_counter()
     for texture_id, (_, replacement) in replacements.items():
         entries[texture_id] = replacement
     if len(entries) > bsp.MAX_CLASSIC_TEXTURES:
@@ -4681,6 +4693,8 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
         new_faces_lump = bsp.replace_face_texinfo(new_faces_lump, face_id, variant_cache[key])
         changed_face_assignments += 1
 
+    export_stage_timings['face_texinfo_remap'] = time.perf_counter() - stage_started_at
+    stage_started_at = time.perf_counter()
     new_lumps = list(parsed.lumps)
     new_lumps[bsp.LUMP_TEXTURES] = bsp.build_texture_lump(entries)
     new_lumps[bsp.LUMP_TEXINFO] = new_texinfo_lump
@@ -4692,6 +4706,8 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
     )
     new_lumps[bsp.LUMP_LIGHTING] = lighting_lump
     new_lumps[bsp.LUMP_FACES] = new_faces_lump
+    export_stage_timings['lightmap_patch'] = time.perf_counter() - stage_started_at
+    stage_started_at = time.perf_counter()
     new_bspx_lumps = dict(parsed.bspx_lumps)
     if lightmap_export_mode == 'ENHANCED':
         for obsolete_name in ('LMSHIFT', 'LMOFFSET', 'LMSTYLE16'):
@@ -4712,6 +4728,10 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
         lit_output_path = os.path.splitext(output_path)[0] + '.lit'
         with open(lit_output_path, 'wb') as f:
             f.write(lit_file_data)
+    export_stage_timings['serialize_and_write'] = time.perf_counter() - stage_started_at
+    export_stage_timings['total'] = time.perf_counter() - export_started_at
+    obj['qss_last_export_stage_timings'] = str(export_stage_timings)
+    obj['qss_last_export_duration_seconds'] = float(export_stage_timings['total'])
     return output_path, len(entries), changed_face_assignments, len(replacements), palette_origin, lit_output_path
 
 
@@ -7860,32 +7880,64 @@ def _image_pixels_mean(image):
 
 
 def _image_rgb_statistics(image):
-    """Return whole-image diagnostics, including whether Cycles wrote any pixels."""
+    """Return whole-image diagnostics, including non-finite pixels from Cycles."""
     pixel_count = int(image.size[0]) * int(image.size[1])
     pixels = array.array('f', [0.0]) * (pixel_count * 4)
     image.update()
     image.pixels.foreach_get(pixels)
     if pixel_count <= 0:
-        return {'pixels': 0, 'mean_luma': 0.0, 'max_channel': 0.0,
-                'nonzero_pixels': 0, 'nonzero_rgb_values': 0}
+        return {
+            'pixels': 0, 'mean_luma': 0.0, 'mean_luma_finite_pixels': 0.0,
+            'max_channel': 0.0, 'nonzero_pixels': 0, 'nonzero_rgb_values': 0,
+            'nonfinite_pixels': 0, 'nonfinite_rgb_values': 0,
+            'first_nonfinite_pixels': [],
+        }
     luma_sum = 0.0
+    finite_luma_sum = 0.0
+    finite_pixel_count = 0
     max_channel = 0.0
     nonzero_pixels = 0
     nonzero_rgb_values = 0
-    for i in range(0, len(pixels), 4):
-        r, g, b = float(pixels[i]), float(pixels[i + 1]), float(pixels[i + 2])
-        luma_sum += 0.2126 * r + 0.7152 * g + 0.0722 * b
-        pixel_max = max(r, g, b)
-        max_channel = max(max_channel, pixel_max)
-        if pixel_max > 1e-8:
-            nonzero_pixels += 1
-        nonzero_rgb_values += int(r > 1e-8) + int(g > 1e-8) + int(b > 1e-8)
+    nonfinite_pixels = 0
+    nonfinite_rgb_values = 0
+    first_nonfinite_pixels = []
+    for pixel_index in range(pixel_count):
+        i = pixel_index * 4
+        channels = (float(pixels[i]), float(pixels[i + 1]), float(pixels[i + 2]))
+        finite_channels = tuple(value for value in channels if math.isfinite(value))
+        bad_channels = 3 - len(finite_channels)
+        if bad_channels:
+            nonfinite_pixels += 1
+            nonfinite_rgb_values += bad_channels
+            if len(first_nonfinite_pixels) < 16:
+                first_nonfinite_pixels.append((
+                    pixel_index % int(image.size[0]),
+                    pixel_index // int(image.size[0]),
+                ))
+        if finite_channels:
+            pixel_max = max(finite_channels)
+            max_channel = max(max_channel, pixel_max)
+            if pixel_max > 1e-8:
+                nonzero_pixels += 1
+            nonzero_rgb_values += sum(value > 1e-8 for value in finite_channels)
+        if bad_channels == 0:
+            luma = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+            luma_sum += luma
+            finite_luma_sum += luma
+            finite_pixel_count += 1
     return {
         'pixels': pixel_count,
-        'mean_luma': luma_sum / pixel_count,
+        'mean_luma': (
+            luma_sum / pixel_count if nonfinite_rgb_values == 0 else float('nan')
+        ),
+        'mean_luma_finite_pixels': finite_luma_sum / max(1, finite_pixel_count),
+        'finite_pixels': finite_pixel_count,
         'max_channel': max_channel,
         'nonzero_pixels': nonzero_pixels,
         'nonzero_rgb_values': nonzero_rgb_values,
+        'nonfinite_pixels': nonfinite_pixels,
+        'nonfinite_rgb_values': nonfinite_rgb_values,
+        'first_nonfinite_pixels': first_nonfinite_pixels,
     }
 
 
@@ -9225,10 +9277,38 @@ class QSS_OT_bake_scene_lights(Operator):
                 ) if source_image else []
             )
             source_mean = (sum(source_values) / len(source_values)) if source_values else 0.0
+            nonfinite_bake_samples = sum(
+                not math.isfinite(float(value)) for value in bake_values
+            )
+            nonfinite_source_samples = sum(
+                not math.isfinite(float(value)) for value in source_values
+            )
             energy_scale = max(0.0, float(scene.qss_light_energy_scale))
             max_energy_after_bake = max((float(o.data.energy) for o in imported_lights), default=0.0)
             obj['qss_last_bake_attempt_scale'] = energy_scale
             obj['qss_last_bake_attempt_max_lamp_energy'] = max_energy_after_bake
+            obj['qss_last_bake_attempt_source_mean'] = float(source_mean)
+            obj['qss_last_bake_attempt_nonfinite_luxels'] = int(nonfinite_bake_samples)
+            obj['qss_last_bake_attempt_nonfinite_source_luxels'] = int(nonfinite_source_samples)
+            if nonfinite_bake_samples or nonfinite_source_samples:
+                obj['qss_last_bake_attempt_lights'] = (
+                    f'Non-finite luxel samples: bake={nonfinite_bake_samples}; '
+                    f'source={nonfinite_source_samples}'
+                )
+                raise bsp.BSPError(
+                    'Cycles bake produced non-finite luxel luminance samples; '
+                    f'baked={nonfinite_bake_samples}/{len(bake_values)}, '
+                    f'source={nonfinite_source_samples}/{len(source_values)}, '
+                    f'non-finite atlas RGB values={raw_image_stats.get("nonfinite_rgb_values", 0)}, '
+                    f'non-finite atlas pixels={raw_image_stats.get("nonfinite_pixels", 0)}, '
+                    f'first atlas pixel coordinates={raw_image_stats.get("first_nonfinite_pixels", [])}. '
+                    'The atlas was restored. This is not a zero-light bake; inspect the offending Cycles light/shader samples.'
+                )
+            if not math.isfinite(float(source_mean)) or not math.isfinite(float(raw_bake_mean)):
+                raise bsp.BSPError(
+                    f'Cycles luminance statistics are non-finite (source={source_mean!r}, '
+                    f'baked={raw_bake_mean!r}); atlas restored.'
+                )
             if energy_scale <= 0.0:
                 raise bsp.BSPError(
                     'Live light scale is exactly 0. Set it to 1.0 (or higher), click Apply Light Energy Scale, '
@@ -10630,9 +10710,10 @@ def _qss_diagnostics_text(context, obj):
         f'Inline mover shadow policy: faces={obj.get("qss_inline_model_no_shadow_face_count", 0)} classes={obj.get("qss_inline_model_no_shadow_classnames", "")}',
         f'Last bake mover shadow-transparent materials: {obj.get("qss_last_bake_shadow_exempt_material_count", "n/a")} (attempt: {obj.get("qss_last_bake_attempt_shadow_exempt_material_count", "n/a")})',
         f'Last bake attempt timing: total={bake_stats_utils.format_duration(obj.get("qss_last_bake_attempt_duration_seconds"))}; Cycles operator={bake_stats_utils.format_duration(obj.get("qss_last_bake_attempt_cycles_seconds"))}',
+        f'Last BSP export: total={bake_stats_utils.format_duration(obj.get("qss_last_export_duration_seconds"))}; stages={obj.get("qss_last_export_stage_timings", "n/a")}',
         f'Last successful bake workload: samples={obj.get("qss_last_bake_samples", "n/a")} device={obj.get("qss_last_bake_device", "n/a")} diffuse_bounces={obj.get("qss_last_bake_diffuse_bounces", "n/a")} atlas={obj.get("qss_last_bake_atlas_size", "n/a")}px receiver_faces={obj.get("qss_last_bake_receiver_faces", "n/a")}',
         f'Last attempted bake workload: samples={obj.get("qss_last_bake_attempt_samples", "n/a")} device={obj.get("qss_last_bake_attempt_device", "n/a")} diffuse_bounces={obj.get("qss_last_bake_attempt_diffuse_bounces", "n/a")} atlas={obj.get("qss_last_bake_attempt_atlas_size", "n/a")}px receiver_faces={obj.get("qss_last_bake_attempt_receiver_faces", "n/a")}',
-        f'Last attempted bake: scale={obj.get("qss_last_bake_attempt_scale", "n/a")} max_lamp_energy={obj.get("qss_last_bake_attempt_max_lamp_energy", "n/a")} sampled_luxels={obj.get("qss_last_bake_attempt_sample_count", "n/a")} sampled_mean={obj.get("qss_last_bake_attempt_raw_mean", "n/a")} image_stats={obj.get("qss_last_bake_attempt_image_stats", "n/a")}',
+        f'Last attempted bake: scale={obj.get("qss_last_bake_attempt_scale", "n/a")} max_lamp_energy={obj.get("qss_last_bake_attempt_max_lamp_energy", "n/a")} sampled_luxels={obj.get("qss_last_bake_attempt_sample_count", "n/a")} sampled_mean={obj.get("qss_last_bake_attempt_raw_mean", "n/a")} source_mean={obj.get("qss_last_bake_attempt_source_mean", "n/a")} nonfinite_luxels={obj.get("qss_last_bake_attempt_nonfinite_luxels", "n/a")} source_nonfinite_luxels={obj.get("qss_last_bake_attempt_nonfinite_source_luxels", "n/a")} image_stats={obj.get("qss_last_bake_attempt_image_stats", "n/a")}',
         f'Last attempted face coverage (raw bake): {obj.get("qss_last_bake_attempt_face_coverage", "n/a")}',
         f'Last Cycles bake operator result: {obj.get("qss_last_bake_attempt_operator_result", "n/a")}',
         f'Last Cycles attempt config: engine={obj.get("qss_last_bake_attempt_engine", "n/a")} target={obj.get("qss_last_bake_attempt_target", "n/a")} type={obj.get("qss_last_bake_attempt_type", "n/a")} uv={obj.get("qss_last_bake_attempt_uv", "n/a")}',
@@ -11624,6 +11705,7 @@ class QSS_OT_test_in_ironwail(Operator):
             stem = f"qss_test_{time.time_ns()}"
             output_path = os.path.join(test_dir, stem + ".bsp")
             export_result = _export_object(obj, output_path, mode)
+            export_duration = float(obj.get('qss_last_export_duration_seconds', 0.0))
             output_path = export_result[0]
             lit_path = export_result[5]
 
@@ -11662,8 +11744,8 @@ class QSS_OT_test_in_ironwail(Operator):
             bpy.app.timers.register(cleanup_test_export, first_interval=3.0)
             self.report(
                 {"INFO"},
-                f"Temporary {mode} test map launched in Ironwail (PID {process.pid}); "
-                "the BSP and optional .lit are removed when Ironwail exits.",
+                f"Temporary {mode} test map exported in {export_duration:.2f}s and launched in Ironwail "
+                f"(PID {process.pid}); the BSP and optional .lit are removed when Ironwail exits.",
             )
             return {"FINISHED"}
         except Exception as exc:
