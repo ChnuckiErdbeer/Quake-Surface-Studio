@@ -283,6 +283,30 @@ def ericw_surface_angle(normal_dot_to_light: float, anglescale: float = 0.5,
     return max(0.0, (1.0 - scale) + scale * dot)
 
 
+def blender_spot_blend_from_ericw_angles(outer_angle: float, inner_angle: float) -> float:
+    """Map ericw's inner-cone angle to Blender's spot edge blend.
+
+    ericw uses _softangle=0 as a disabled transition (a hard cone). Blender's
+    spot_blend=0 is also a hard edge. Positive inner angles retain the existing
+    proportional mapping, with larger inner cones producing a narrower blend.
+    """
+    import math
+    try:
+        outer = float(outer_angle)
+        inner = float(inner_angle)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(outer):
+        outer = 40.0
+    if not math.isfinite(inner):
+        inner = 0.0
+    outer = max(0.1, min(179.9, outer))
+    inner = max(0.0, min(outer, inner))
+    if inner <= 0.0:
+        return 0.0
+    return max(0.0, min(1.0, 1.0 - inner / outer))
+
+
 def ericw_spot_factor(dot_light_to_sample: float, outer_angle: float = 40.0,
                       inner_angle: float = 0.0) -> float:
     """Return ericw-style hard/soft spotlight cone factor from source direction."""
