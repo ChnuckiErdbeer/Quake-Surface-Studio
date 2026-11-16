@@ -9277,43 +9277,11 @@ class QSS_OT_bake_scene_lights(Operator):
                 ) if source_image else []
             )
             source_mean = (sum(source_values) / len(source_values)) if source_values else 0.0
-            nonfinite_bake_samples = sum(
-                not math.isfinite(float(value)) for value in bake_values
-            )
-            nonfinite_source_samples = sum(
-                not math.isfinite(float(value)) for value in source_values
-            )
             energy_scale = max(0.0, float(scene.qss_light_energy_scale))
             max_energy_after_bake = max((float(o.data.energy) for o in imported_lights), default=0.0)
             obj['qss_last_bake_attempt_scale'] = energy_scale
             obj['qss_last_bake_attempt_max_lamp_energy'] = max_energy_after_bake
             obj['qss_last_bake_attempt_source_mean'] = float(source_mean)
-            obj['qss_last_bake_attempt_nonfinite_luxels'] = int(nonfinite_bake_samples)
-            obj['qss_last_bake_attempt_nonfinite_source_luxels'] = int(nonfinite_source_samples)
-            if nonfinite_bake_samples or nonfinite_source_samples:
-                obj['qss_last_bake_attempt_lights'] = (
-                    f'Non-finite luxel samples: bake={nonfinite_bake_samples}; '
-                    f'source={nonfinite_source_samples}'
-                )
-                raise bsp.BSPError(
-                    'Cycles bake produced non-finite luxel luminance samples; '
-                    f'baked={nonfinite_bake_samples}/{len(bake_values)}, '
-                    f'source={nonfinite_source_samples}/{len(source_values)}, '
-                    f'non-finite atlas RGB values={raw_image_stats.get("nonfinite_rgb_values", 0)}, '
-                    f'non-finite atlas pixels={raw_image_stats.get("nonfinite_pixels", 0)}, '
-                    f'first atlas pixel coordinates={raw_image_stats.get("first_nonfinite_pixels", [])}. '
-                    'The atlas was restored. This is not a zero-light bake; inspect the offending Cycles light/shader samples.'
-                )
-            if not math.isfinite(float(source_mean)) or not math.isfinite(float(raw_bake_mean)):
-                raise bsp.BSPError(
-                    f'Cycles luminance statistics are non-finite (source={source_mean!r}, '
-                    f'baked={raw_bake_mean!r}); atlas restored.'
-                )
-            if energy_scale <= 0.0:
-                raise bsp.BSPError(
-                    'Live light scale is exactly 0. Set it to 1.0 (or higher), click Apply Light Energy Scale, '
-                    'confirm the Live Lights preview is illuminated, then bake again.'
-                )
 
             # Copy the completed float bake into the project's current atlas.
             # Source-match normalization is a global linear calibration, not a
@@ -9356,6 +9324,38 @@ class QSS_OT_bake_scene_lights(Operator):
             obj['qss_last_bake_attempt_sample_count'] = len(bake_values)
             obj['qss_last_bake_attempt_raw_mean'] = float(raw_bake_mean)
             obj['qss_last_bake_attempt_image_stats'] = str(raw_image_stats)
+            nonfinite_bake_samples = sum(
+                not math.isfinite(float(value)) for value in bake_values
+            )
+            nonfinite_source_samples = sum(
+                not math.isfinite(float(value)) for value in source_values
+            )
+            obj['qss_last_bake_attempt_nonfinite_luxels'] = int(nonfinite_bake_samples)
+            obj['qss_last_bake_attempt_nonfinite_source_luxels'] = int(nonfinite_source_samples)
+            if nonfinite_bake_samples or nonfinite_source_samples:
+                obj['qss_last_bake_attempt_lights'] = (
+                    f'Non-finite luxel samples: bake={nonfinite_bake_samples}; '
+                    f'source={nonfinite_source_samples}'
+                )
+                raise bsp.BSPError(
+                    'Cycles bake produced non-finite luxel luminance samples; '
+                    f'baked={nonfinite_bake_samples}/{len(bake_values)}, '
+                    f'source={nonfinite_source_samples}/{len(source_values)}, '
+                    f'non-finite atlas RGB values={raw_image_stats.get("nonfinite_rgb_values", 0)}, '
+                    f'non-finite atlas pixels={raw_image_stats.get("nonfinite_pixels", 0)}, '
+                    f'first atlas pixel coordinates={raw_image_stats.get("first_nonfinite_pixels", [])}. '
+                    'The atlas was restored. This is not a zero-light bake; inspect the offending Cycles light/shader samples.'
+                )
+            if not math.isfinite(float(source_mean)) or not math.isfinite(float(raw_bake_mean)):
+                raise bsp.BSPError(
+                    f'Cycles luminance statistics are non-finite (source={source_mean!r}, '
+                    f'baked={raw_bake_mean!r}); atlas restored.'
+                )
+            if energy_scale <= 0.0:
+                raise bsp.BSPError(
+                    'Live light scale is exactly 0. Set it to 1.0 (or higher), click Apply Light Energy Scale, '
+                    'confirm the Live Lights preview is illuminated, then bake again.'
+                )
             if not bake_values or raw_bake_mean <= 1e-8:
                 obj['qss_last_bake_attempt_lights'] = '; '.join(
                     f'{lamp.name}: {float(lamp.data.energy):.6g}W type={lamp.data.type} '
