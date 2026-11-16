@@ -1135,8 +1135,13 @@ def sample_classic_face_grid_from_world_chart(
     texinfo, plane_normal, plane_distance: float,
     s_min: float, t_min: float, sample_width: int, sample_height: int,
     axis_s, axis_t, chart_s_min: float, chart_t_min: float,
-) -> bytes:
+    preserve_float: bool = False,
+) -> bytes | tuple[float, ...]:
     """Sample a classic face grid without allocating an XYZ tuple per luxel.
+
+    By default this returns clamped 8-bit RGB samples for BSP export. Internal
+    bake calibration may request preserve_float=True to retain HDR values and
+    avoid quantizing the working Cycles atlas before source matching.
 
     The texinfo/plane intersection is affine. Solve its origin and two basis
     steps once per face, then advance the world-chart pixel coordinates with
@@ -1193,7 +1198,7 @@ def sample_classic_face_grid_from_world_chart(
 
     if len(pixels) != int(image_size) * int(image_size) * 4:
         raise ValueError("World-chart RGBA buffer dimensions do not match pixel data.")
-    output = bytearray()
+    output = [] if preserve_float else bytearray()
     row_px, row_py = px_origin, py_origin
     for _sy in range(int(sample_height)):
         px, py = row_px, row_py
@@ -1201,15 +1206,20 @@ def sample_classic_face_grid_from_world_chart(
             red, green, blue, _alpha = bilinear_sample_rgba(
                 pixels, int(image_size), int(image_size), px, py
             )
-            output.extend(
-                max(0, min(255, int(round(channel * 255.0))))
-                for channel in (red, green, blue)
-            )
+            if preserve_float:
+                # Keep the original linear/HDR values for calibration. The
+                # byte conversion belongs only at the BSP export boundary.
+                output.extend((float(red), float(green), float(blue)))
+            else:
+                output.extend(
+                    max(0, min(255, int(round(channel * 255.0))))
+                    for channel in (red, green, blue)
+                )
             px += px_step_s
             py += py_step_s
         row_px += px_step_t
         row_py += py_step_t
-    return bytes(output)
+    return tuple(output) if preserve_float else bytes(output)
 
 
 def world_chart_grid_positions(
