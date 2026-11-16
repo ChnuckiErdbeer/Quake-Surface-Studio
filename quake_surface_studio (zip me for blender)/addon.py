@@ -2591,15 +2591,32 @@ def _build_enhanced_lightmap_payload(
                     shift, s_min, t_min, width, height = lightmap_export_utils.choose_luxel_grid(
                         s_values, t_values, resolution
                     )
-                    rgb_samples = lightmap_export_utils.sample_face_rgb_from_atlas(
-                        image_pixels, image_size, resolution,
-                        int(x_attr.data[poly_index].value),
-                        int(y_attr.data[poly_index].value),
-                        int(base_gutter), int(base_pixel_scale),
-                        int(base_s_min), int(base_t_min),
-                        int(s_min), int(t_min), int(width), int(height),
-                        1 << shift,
-                    )
+                    if bool(face_info.get('world_chart', False)):
+                        sample_s = [float(s_min) + sx * float(1 << shift) for sx in range(width)]
+                        sample_t = [float(t_min) + sy * float(1 << shift) for sy in range(height)]
+                        sample_positions = lightmap_export_utils.world_chart_grid_positions(
+                            face_info['texinfo'], face_info['plane_normal'],
+                            face_info['plane_distance'], sample_s, sample_t,
+                        )
+                        rgb_samples = lightmap_export_utils.sample_rgb_from_world_chart_positions(
+                            image_pixels, image_size, resolution,
+                            int(x_attr.data[poly_index].value),
+                            int(y_attr.data[poly_index].value),
+                            int(base_gutter), int(base_pixel_scale),
+                            sample_positions, face_info['chart_axis_s'],
+                            face_info['chart_axis_t'], face_info['chart_s_min'],
+                            face_info['chart_t_min'],
+                        )
+                    else:
+                        rgb_samples = lightmap_export_utils.sample_face_rgb_from_atlas(
+                            image_pixels, image_size, resolution,
+                            int(x_attr.data[poly_index].value),
+                            int(y_attr.data[poly_index].value),
+                            int(base_gutter), int(base_pixel_scale),
+                            int(base_s_min), int(base_t_min),
+                            int(s_min), int(t_min), int(width), int(height),
+                            1 << shift,
+                        )
                     record = {
                         'shift': shift,
                         'width': width,
@@ -7816,7 +7833,9 @@ def _qss_source_bvh(obj, parsed, unit_scale, flip_z, context):
 def _qss_read_source_face_sample(mesh, poly_index, face_id, parsed, sample_count=None):
     """Return original BSP face, plane, texinfo and lightmap atlas metadata safely."""
     required = ('qss_bsp_face_id', 'qss_lm_has_data', 'qss_lm_atlas_x', 'qss_lm_atlas_y',
-                'qss_lm_sample_w', 'qss_lm_sample_h')
+                'qss_lm_sample_w', 'qss_lm_sample_h', 'qss_lm_world_chart',
+                'qss_lm_chart_s_min', 'qss_lm_chart_t_min',
+                'qss_lm_chart_axis_s', 'qss_lm_chart_axis_t')
     attrs = {name: mesh.attributes.get(name) for name in required}
     for name, attr in attrs.items():
         if attr is None:
@@ -7910,6 +7929,11 @@ def _qss_read_source_face_sample(mesh, poly_index, face_id, parsed, sample_count
         'styles': styles_by_face[face_id],
         'atlas_x': int(_qss_safe_collection_item(attrs['qss_lm_atlas_x'].data, poly_index, 'qss_lm_atlas_x').value),
         'atlas_y': int(_qss_safe_collection_item(attrs['qss_lm_atlas_y'].data, poly_index, 'qss_lm_atlas_y').value),
+        'world_chart': bool(_qss_safe_collection_item(attrs['qss_lm_world_chart'].data, poly_index, 'qss_lm_world_chart').value),
+        'chart_s_min': float(_qss_safe_collection_item(attrs['qss_lm_chart_s_min'].data, poly_index, 'qss_lm_chart_s_min').value),
+        'chart_t_min': float(_qss_safe_collection_item(attrs['qss_lm_chart_t_min'].data, poly_index, 'qss_lm_chart_t_min').value),
+        'chart_axis_s': tuple(float(value) for value in _qss_safe_collection_item(attrs['qss_lm_chart_axis_s'].data, poly_index, 'qss_lm_chart_axis_s').vector),
+        'chart_axis_t': tuple(float(value) for value in _qss_safe_collection_item(attrs['qss_lm_chart_axis_t'].data, poly_index, 'qss_lm_chart_axis_t').vector),
     }
 
 
@@ -10344,7 +10368,9 @@ def _qss_diagnostics_text(context, obj):
     lines.append(f'Mesh faces: {len(mesh.polygons)}; materials: {len(mesh.materials)}; loops={len(mesh.loops)}; vertices={len(mesh.vertices)}')
     for attr_name in ('qss_bsp_face_id', 'qss_bsp_texinfo_id', 'qss_bsp_miptex_id',
                       'qss_lm_has_data', 'qss_lm_atlas_x', 'qss_lm_atlas_y',
-                      'qss_lm_sample_w', 'qss_lm_sample_h'):
+                      'qss_lm_sample_w', 'qss_lm_sample_h', 'qss_lm_world_chart',
+                      'qss_lm_chart_s_min', 'qss_lm_chart_t_min',
+                      'qss_lm_chart_axis_s', 'qss_lm_chart_axis_t'):
         try:
             attr = mesh.attributes.get(attr_name)
             count = len(attr.data) if attr is not None else 'MISSING'
