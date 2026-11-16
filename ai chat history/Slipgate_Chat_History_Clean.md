@@ -21639,3 +21639,31 @@ For future user-facing updates:
 At this session start, PR #5 remains open/draft at `bdae11b81140c9b70a332c3a78a179fe5ebeb22e`; its 0.21.18 candidate has passed 296 automated tests but still needs Blender 5.3 runtime testing. The single bad luxel has not been fixed; the latest candidate adds diagnostics intended to identify its face, map position and nearby lights. PRs #3–#5 remain a stacked sequence, with PR #2 independent. PR #1 is the long-running development/documentation branch.
 
 This session made no add-on source changes, did not run tests or create a build, and did not merge any pull request.
+
+
+## 2026-11-17 — e1m1 bake still fails with one non-finite luxel
+
+**User report (verbatim)**
+
+> Slopgate is still not able to finish baking e1m1:
+> Cycles bake failed; atlas and light calibration restored: Cycles bake produced non-finite luxel luminance samples; baked=1/165763, source=0/165763, non-finite atlas RGB values=12, non-finite atlas pixels=4, first atlas pixel coordinates=[(1594, 2000), (1595, 2000), (1594, 2001), (1595, 2001)]. The atlas was restored. This is not a zero-light bake; inspect the offending Cycles light/shader samples.
+
+**Source review of latest PR #5 candidate**
+
+Live PR #5 remains open/draft on `fix/0.21.17-world-aligned-lightmap-charts`, head `bdae11b81140c9b70a332c3a78a179fe5ebeb22e`, based on PR #4. It is still the 0.21.18 candidate and its latest CI result was 296 automated tests passed. No PR was merged.
+
+The report-only face/light tracing is present in this exact source:
+- On the non-finite bake path, SLOPGATE calls `_qss_describe_nonfinite_luxels()` and stores the returned text in the active BSP object's `qss_last_bake_attempt_nonfinite_details` and `qss_last_bake_attempt_lights` properties.
+- The Save Lighting Diagnostics report writes those properties as:
+  - `Last attempted lamp states`
+  - `Non-finite luxel face/world/light matches`
+- The short error dialog does **not** include the face/light attribution text. Therefore the user's repeated short error message is expected even when the extra attribution has been collected; it does not by itself tell us whether the helper found a face or nearby light.
+- The same four atlas pixels / one sampled luxel remain non-finite. All source samples are finite. The atlas is rolled back after failure.
+
+**Next action**
+
+Ask the user to save **Save Lighting Diagnostics immediately after the failed bake**, with the e1m1 BSP object active, and provide the full text report. Inspect especially `Non-finite luxel face/world/light matches` and `Last attempted lamp states`. The matching section should identify BSP face, mesh face, luxel position, Quake map coordinates and the three nearest imported lights. If it instead says that no face/luxel matched or that the source BSP was unavailable, record that as a diagnostic failure and fix the attribution path before changing lighting.
+
+Do not apply a blanket clamp, zero out the bad luxel, or make another speculative change to all Cycles lights. The original lightmap and calibration rollback must remain.
+
+No source code change, automated test run, installer build or merge was made in response to this report. This is a report-collection step to identify the bad sample before choosing a targeted fix.
