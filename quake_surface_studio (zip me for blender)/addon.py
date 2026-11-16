@@ -2937,6 +2937,7 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None, ou
         atlas_x = int(x_attr.data[poly_index].value) * resolution + gutter
         atlas_y = int(y_attr.data[poly_index].value) * resolution + gutter
         block_size = sample_w * sample_h
+        style_count = sum(1 for style in styles if style != 255)
         if bool(world_chart_attr.data[poly_index].value):
             texinfo_id = int(face[4])
             if texinfo_id < 0 or texinfo_id >= len(texinfos):
