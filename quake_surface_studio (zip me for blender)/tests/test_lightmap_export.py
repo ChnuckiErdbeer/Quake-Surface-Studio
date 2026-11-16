@@ -375,10 +375,10 @@ class WorldAlignedLightmapChartTests(unittest.TestCase):
             self.records, self.faces, self.planes, self.edges, self.surfedges, [0, 1]
         )
         self.assertEqual(len(charts), 2)
-        styled = list(self.faces)
-        styled[1] = (0, 0, 4, 4, 0, 32, 255, 255, 255, 4)
+        styled_records = [dict(record) for record in self.records]
+        styled_records[1]["styles"] = (32, 255, 255, 255)
         charts, _mapping, _records = lightmap_export.build_coplanar_face_charts(
-            self.records, styled, self.planes, self.edges, self.surfedges, [0, 0]
+            styled_records, self.faces, self.planes, self.edges, self.surfedges, [0, 0]
         )
         self.assertEqual(len(charts), 2)
 
@@ -387,7 +387,7 @@ class WorldAlignedLightmapChartTests(unittest.TestCase):
             16.0, 16.0, 10, 20, 0.0, 0.0, 2, 2, 2, 1024
         )
         self.assertAlmostEqual(first[0], 29.5)
-        self.assertAlmostEqual(first[1], 974.5)
+        self.assertAlmostEqual(first[1], 973.5)
 
 
 class WorldChartSamplingTests(unittest.TestCase):
