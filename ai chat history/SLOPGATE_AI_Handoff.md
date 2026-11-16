@@ -845,7 +845,7 @@ This section supersedes earlier assumptions that 0.21.14 was the latest work. Re
 
 | PR | Branch | Base | Purpose | State |
 |---|---|---|---|---|
-| #1 | fix/v0.11.1-metadata-style-order-test | main | Long-running development line; latest branch head f68fa7a7 (chat archive update) | Open, draft |
+| #1 | fix/v0.11.1-metadata-style-order-test | main | Long-running development line; documentation updates are maintained on this branch | Open, draft |
 | #2 | fix/0.21.15-bsp-import-array-trace | fix/v0.11.1-metadata-style-order-test at c63205d | Capture the unresolved BSP import traceback | Open, draft |
 | #3 | fix/0.21.15-classic-face-local-lightmap-alignment | fix/v0.11.1-metadata-style-order-test at c63205d | 0.21.15 detached-face export correction | Open, draft |
 | #4 | fix/0.21.16-coplanar-edge-luxel-stitch | PR #3 head 5ea9781e | 0.21.16 conservative shared-edge sample reconciliation | Open, draft |
@@ -870,3 +870,16 @@ The user identified that the full chat log and then this handoff had stopped bei
 - Update SLOPGATE_AI_Handoff.md when a decision, implementation state, branch topology, test result or runtime-validation status changes materially.
 - After editing either file, verify the branch, latest commit, blob contents and that the new section is present. Never state that the documentation was updated unless the GitHub write succeeded.
 - Use SLOPGATE_AI_Handoff.md as the maintained starting point and the main chat archive for detailed historical confirmation.
+
+
+## Standing documentation requirement — confirmed 2026-11-16
+
+The user explicitly instructed: **“From now on ALWAYS keep both files up to date.”** Treat this as a required part of every SLOPGATE work session, not optional housekeeping.
+
+1. **Conversation archive:** append the relevant user dialogue and assistant technical response/decisions/results to `Slipgate_Chat_History_Clean.md`. Keep it chronological and append-only; preserve prior entries.
+2. **Maintained handoff:** review and update this `SLOPGATE_AI_Handoff.md` in the same work session so the next session starts from the actual current state: implementation baseline, branch/PR topology, design decisions, open defects, tests and their evidence, runtime validation, artefacts/checksums, and next actions.
+3. **No-change sessions:** when a SLOPGATE session makes no engineering change, still record the relevant discussion and explicitly state that no source change/test/build/merge occurred where applicable. Do not manufacture progress.
+4. **Consistency and verification:** keep the archive and handoff mutually consistent; verify both GitHub writes, the target branch, resulting branch HEAD, and the newly written content before claiming they are current.
+5. **Release evidence:** continue distinguishing automated tests from Blender/engine runtime validation and candidate builds from official releases. Keep exact install artefact links and verified checksums with each build update.
+
+The archive entry for this instruction was appended immediately before this handoff update. This session changes documentation/process records only; it does not modify add-on source, change the version, create a build, run tests, or merge a PR.
