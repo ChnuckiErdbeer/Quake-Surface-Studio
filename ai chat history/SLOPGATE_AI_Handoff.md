@@ -5,7 +5,7 @@
 
 ## Read this first
 
-At the start of a new project session, read this file first. Then consult the main conversation archive, ai chat history/Slipgate_Chat_History_Clean.md, whenever a detail needs context, dialogue-level confirmation, technical evidence, or fact-checking. The user reconstructed the missing continuation of that archive; it now contains the later November 14–16 work through the 0.21.18 candidate.
+At the start of a new project session, read this file first. Then consult the main conversation archive, ai chat history/Slipgate_Chat_History_Clean.md, whenever a detail needs context, dialogue-level confirmation, technical evidence, or fact-checking. The user reconstructed the missing continuation of that archive; it now contains the later November 14–16 work through the 0.21.18 brightness investigation and candidate fixes.
 
 This brief deliberately compresses the archive. It can become stale. The live repository, current branch, test output and the main archive outrank assumptions in this summary. Always inspect the current branch head and relevant source before modifying code. In particular, distinguish the base development PR from the stacked lightmap work branches and the separate BSP-import diagnostic branch.
 
@@ -42,10 +42,10 @@ The archive filename and some historic headings contain the old spelling “Slip
 
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
 - The official 1.0 scope remains classic Quake 1 BSP29 only. BSP2/2PSB remain post-1.0.
-- Do not describe any 0.21.x build as an official release. The latest candidate implementation is 0.21.18, but it is in an open draft PR and has not had Blender 5.3 / target-engine runtime acceptance.
+- Do not describe any 0.21.x build as an official release. The latest candidate is still version 0.21.18 on open draft PR #5. Its 2026-11-16 brightness-correction commits now have a 294-test CI/package pass, but Blender 5.3 and target-engine runtime acceptance remain outstanding.
 - The repository default branch main is still at b6936a58c5159dbe79a60d5778ad40df42e126f5 and is not the active development baseline. Do not start new feature work from main.
-- PR #1 is the long-running development PR against main. Its branch is fix/v0.11.1-metadata-style-order-test, latest head f68fa7a7aaa60bfc280db912eaa641636a58be50. That latest commit updates the reconstructed conversation archive; the latest underlying add-on code on that branch is c63205dc4974c313103ef9b8b7def5131b8680f1.
-- The active lightmap feature sequence is a stacked draft PR chain: PR #3 (0.21.15) → PR #4 (0.21.16) → PR #5 (0.21.18). The head of PR #5 is 7f182cf97cc1a3aa35c15408d429a478f87e08c2. It includes the PR #3 and PR #4 base work and is the most advanced candidate for the next runtime test. These PRs are not merged.
+- PR #1 is the long-running development PR against main. Its branch is fix/v0.11.1-metadata-style-order-test; the archive and handoff are maintained on this branch. The latest underlying add-on code on that branch remains c63205dc4974c313103ef9b8b7def5131b8680f1. Treat the live GitHub branch ref as authoritative for the latest documentation commit.
+- The active lightmap feature sequence is a stacked draft PR chain: PR #3 (0.21.15) → PR #4 (0.21.16) → PR #5 (0.21.18). The latest PR #5 head is 8ddee09dd7027045360a163aef6c2f08d3de6ec1, including the 2026-11-16 brightness-calibration, hard-spotlight and active-map scoping fixes. It includes the PR #3 and PR #4 base work and is the most advanced candidate for the next runtime test. These PRs are not merged.
 - PR #2 is a separate draft diagnostic branch, fix/0.21.15-bsp-import-array-trace, head 66767f0fe7d34db7a29204af1d13dc383ec300ce. Its branch name is not an add-on version. It is based on c63205d and is not part of the PR #3–#5 lightmap chain.
 - Version metadata on the PR #1 development base is inconsistent: the package __init__.py reports bl_info version 0.21.14, while addon.py ADDON_VERSION and README still report 0.21.13. A 0.21.14 installer was generated from the diagnostic branch, but do not treat it as a clean versioned release. The PR #3 branch repairs the version declarations at 0.21.15; PR #4 synchronizes them at 0.21.16; PR #5 synchronizes __init__.py, addon.py and README to 0.21.18.
 - The 0.21.18 candidate ZIP was produced from PR #5 head 7f182cf97cc1a3aa35c15408d429a478f87e08c2. GitHub Actions QSS Python run 43783467279 / job 133025758521 passed Python compilation, 290 standalone tests, BSP export integrity checks, package assembly and artifact upload. Artifact: Quake-Surface-Studio-v0.21.18-Blender-Install, ID 14188889199, 308,296 bytes. The Actions run and artifact page are https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43783467279 and https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43783467279/artifacts/14188889199.
@@ -849,19 +849,20 @@ This section supersedes earlier assumptions that 0.21.14 was the latest work. Re
 | #2 | fix/0.21.15-bsp-import-array-trace | fix/v0.11.1-metadata-style-order-test at c63205d | Capture the unresolved BSP import traceback | Open, draft |
 | #3 | fix/0.21.15-classic-face-local-lightmap-alignment | fix/v0.11.1-metadata-style-order-test at c63205d | 0.21.15 detached-face export correction | Open, draft |
 | #4 | fix/0.21.16-coplanar-edge-luxel-stitch | PR #3 head 5ea9781e | 0.21.16 conservative shared-edge sample reconciliation | Open, draft |
-| #5 | fix/0.21.17-world-aligned-lightmap-charts | PR #4 head 15ff4802 | 0.21.17 charts + 0.21.18 edge/performance corrections | Open, draft |
+| #5 | fix/0.21.17-world-aligned-lightmap-charts | PR #4 head 15ff4802 | 0.21.17 charts + 0.21.18 edge/performance and brightness corrections | Open, draft; head 8ddee09d |
 
-Do not merge these stacked PRs out of order. PR #3 → PR #4 → PR #5 is the lightmap integration sequence. PR #2 is an independent diagnostic branch. PR #3–#5 are based on the c63205d source base rather than the latest PR #1 documentation-only head f68fa7a7; account for that when integrating the archive/handoff update.
+Do not merge these stacked PRs out of order. PR #3 → PR #4 → PR #5 is the lightmap integration sequence. PR #2 is an independent diagnostic branch. PR #3–#5 are based on the c63205d source base rather than the latest PR #1 documentation-only head; account for that when integrating the archive/handoff update.
 
 ### Immediate runtime validation and next engineering steps
 
-1. Test the 0.21.18 candidate in Blender 5.3 on e1m1. Record total bake duration, Cycles operator duration and whether any long pause occurs before Cycles starts, during Cycles, or after Cycles returns. This separates the new metadata-cache improvement from render-time work.
-2. Re-test the spottest01 boundary using the same camera/view and the same target engine as the previous test. Export Classic BSP29 and compare in Ironwail and the Quake 2021 rerelease. Check both the troublesome edge and possible light leaking across a shared coplanar edge. Do not declare fixed until the user sees it in the target engines.
-3. Check that ordinary face interiors, style boundaries, different models and non-coplanar edges remain unchanged by the chart and reconciliation paths.
-4. If the BSP import error on maps/spottest-compile.bsp recurs, use the PR #2 traceback instrumentation (or integrate that small diagnostic patch into the current test branch) and capture SLOPGATE_Last_Import_Traceback. Fix only the exact failing source line indicated by the traceback.
-5. Do not resume broad undo/redo testing unless the user reports a reproducible failure; the user explicitly paused that investigation while testing other features.
-6. Keep the preview-brightness calibration and ericw-lighting fidelity audit separate from the lightmap-edge and performance work. Do not lower Cycles samples or other bake quality settings to make e1m1 faster without a measured quality comparison and explicit approval.
-7. Continue to provide a version-consistent installable ZIP for every candidate build, with the exact branch/commit, CI status, artifact page and checksum. Before naming a build, verify bl_info version, addon.py ADDON_VERSION and README all agree.
+1. Install the updated 0.21.18 candidate from artifact ID 14233422720 and re-bake the supplied spottest02 test BSP in Blender 5.3. Check the new raw mean, source mean, final atlas mean and maximum luxel values. The final mean should now be close to the source mean when source matching is enabled; visually inspect the former overbright area in Ironwail.
+2. Confirm the default `_softangle=0` spotlight now has a hard edge and compare its coverage with the ericw reference.
+3. Run a controlled 0-bounce Cycles bake and compare with 1/2 diffuse bounces. The supplied compiler log indicates ericw was invoked with one bounce; the QSS test bake used two. Blender documents that Linear/Constant falloff can add energy at each GI bounce and become very bright. Do not change the user's bounce policy without measured results.
+4. Repeat e1m1 in Blender 5.3. Record total duration, Cycles operator duration and post-Cycles duration separately. The user-reported result was 3m01s total / 2m49s Cycles.
+5. Clarify the reported 25-second export/test interval: determine whether it is the SLOPGATE BSP export operation or Ironwail's load/testing time. The supplied diagnostics do not contain that timing.
+6. Re-check map isolation: the one-light spottest02 diagnostics should now show one active-map QSS light, irrespective of other map imports in the Blender scene. Quake Direct should also use only the active BSP collection.
+7. If the BSP import error on maps/spottest-compile.bsp recurs, use the PR #2 traceback instrumentation and capture SLOPGATE_Last_Import_Traceback. Do not resume broad undo/redo testing unless the user reports a reproducible failure.
+8. Continue to provide an installable ZIP for every candidate build with exact branch/commit, CI status, artifact page and checksum. Keep version declarations synchronized and do not call any 0.21.x candidate an official release.
 
 ## Archive and handoff maintenance rule
 
@@ -883,3 +884,50 @@ The user explicitly instructed: **“From now on ALWAYS keep both files up to da
 5. **Release evidence:** continue distinguishing automated tests from Blender/engine runtime validation and candidate builds from official releases. Keep exact install artefact links and verified checksums with each build update.
 
 The archive entry for this instruction was appended immediately before this handoff update. This session changes documentation/process records only; it does not modify add-on source, change the version, create a build, run tests, or merge a PR.
+
+## Latest investigation — 2026-11-16: severe Cycles lightmap overbrightness
+
+### User test evidence
+
+- Folder: [testressource26.11.16_01](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/tree/fix/v0.11.1-metadata-style-order-test/testressource26.11.16_01), branch fix/v0.11.1-metadata-style-order-test.
+- User did not provide the copyrighted Quake Remaster e1m1 MAP/BSP; only screenshots and diagnostics were supplied for that test. The one-light test resources are named spottest02-compile (MAP, BSP, ericw logs, images, original/baked lightmaps and Blender diagnostics), while the message also refers to spottest01.
+- MAP has one value-600 spotlight at (392, -128, 264), target info_notnull at (456, -160, 200), default outer angle 40, default _softangle 0. The wall spans the user-described coordinates at x=496.
+- Stats: 36 receiver faces, 3,858 luxels, 512px atlas, 4,096 GPU Cycles samples, 2 diffuse bounces. Raw luxel mean 0.1606826660; source mean 0.0237591356; final atlas mean 0.0319509245; old normalization 0.1478637129; whole-atlas max channel 12.57252789. Final mean was ~1.345x the source mean. Old chart sampler clipped HDR above 1.0 before mean measurement; old calibration also measured before luxel reduction.
+- ericw compile log says bounce was set to 1 from command line. The SLOPGATE report's worldspawn/compiler bounce field is 0; that field does not include the CLI override.
+- User reports e1m1 3m01 total / 2m49 Cycles and a 25-second export/test interval. The latter is not identified in the supplied report.
+
+### Confirmed source defects now patched on PR #5
+
+**Feature branch:** fix/0.21.17-world-aligned-lightmap-charts  
+**Current head:** 8ddee09dd7027045360a163aef6c2f08d3de6ec1  
+**PR:** #5, open and draft; no merge.  
+**Add-on version declarations:** remain synchronized at 0.21.18; this is a candidate build, not an official release.
+
+- World-chart calibration sampling now supports unbounded linear float RGB via `preserve_float=True`. The existing byte-clamped output remains the default for BSP export.
+- Cycles bake calibration now takes place after `collapse_rgba_luxel_blocks`, by sampling the same reduced float atlas that is about to be exported. HDR values remain intact until the final BSP byte conversion.
+- ericw `_softangle=0` now maps to Blender Spot Blend 0 (hard edge), instead of Blend 1 (maximum softness). Positive inner angles retain proportional conversion.
+- Quake Direct's imported-light collector now enumerates only `_qss_active_map_objects(context.scene, obj)`, preventing unrelated maps in the scene from contributing.
+- Lighting diagnostics now list only the active BSP collection's imported lights. The old 253 count was a report-scope bug: Cycles baking already restricted/hid other map lights, so the diagnostic count is not evidence that those 253 lights affected the Cycles test bake.
+
+Commits on PR #5:
+`87640e1a9197239b17144179315a1ef3394a0016`, `98753c71756fcd7e039578764da56beb2dfbb92d`, `ecda44b5aa6f274428c6b43d399fca2d6ed3c9f5`, `4d5caaeb61c6158d7eff500ee6412d2414331d05`, `fbd760c774464b3567786cf2e42fd9c52ee11430`, `8ddee09dd7027045360a163aef6c2f08d3de6ec1`.
+
+### CI and install artifact
+
+- Run: [43885001364](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43885001364); job 133360636369.
+- Passed: Python compilation, 294 standalone tests, BSP export integrity checks, package assembly and artifact upload. Duplicate run 43885021350 also succeeded.
+- Installer artifact: [Quake-Surface-Studio-v0.21.18-Blender-Install (14233422720)](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43885001364/artifacts/14233422720).
+- Size 309,344 bytes; verified Actions upload SHA-256: `e38fd4cef1288fcaaef7a20e912a2ea1f7be4339910071518fc21204453eb3a2`.
+- No Blender 5.3 interactive test, Cycles bake, Ironwail launch or Remaster engine comparison has been run by the assistant. The user must validate the artifact before any claim that brightness is fixed.
+
+### Remaining potential contributor / diagnostic plan
+
+The test Cycles bake used two diffuse bounces; the ericw command-line compile used one. The Quake delay-0 Cycles light uses a custom linear falloff. Blender documents that its Linear/Constant Light Falloff can introduce additional energy with each global-illumination bounce and become extremely bright. This is a credible additional contributor, not yet established as the cause in the supplied bake. No bounce default or policy was changed. Compare 0, 1 and 2 bounces before changing that behaviour.
+
+The user's 25-second interval is not represented in the diagnostic timing fields. Establish whether it refers to SLOPGATE BSP export or Ironwail loading/testing before optimizing that path.
+
+References:
+- ericw spot-angle and bounce keys: https://ericw-tools.readthedocs.io/en/latest/light.html
+- Blender 5.3 Spot Blend semantics: https://docs.blender.org/manual/en/5.3/render/lights/light_object.html
+- Blender Light Falloff bounce warning: https://docs.blender.org/manual/en/4.3/render/shader_nodes/color/light_falloff.html
+
