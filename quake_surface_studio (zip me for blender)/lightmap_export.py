@@ -870,7 +870,9 @@ def build_coplanar_face_charts(
             *frame["normal"], frame["distance"]
         ))
         keys[face_id] = (
-            int(face_model_ids[face_id]), tuple(int(value) for value in face[5:9]), plane_key
+            int(face_model_ids[face_id]),
+            tuple(int(value) for value in record.get("styles", face[5:9])),
+            plane_key,
         )
         positions = tuple(tuple(float(value) for value in point) for point in record.get("positions", ()))
         if len(positions) < 3:
