@@ -1035,6 +1035,14 @@ def resample_coplanar_chart_sources(chart, face_records, *, sample_spacing: int 
                 source_t = sum(point[i] * texinfo[i + 4] for i in range(3)) + float(texinfo[7])
                 source_x = (source_s - float(record["s_min"])) / spacing
                 source_y = (source_t - float(record["t_min"])) / spacing
+                # Populate the complete outward-rounded classic luxel grid,
+                # but never let this face extrapolate beyond its own rectangle.
+                # In particular, the +/- one-cell polygon search margin must
+                # not allow a neighbouring face to bleed into this chart area.
+                if (source_x < -1e-6 or source_y < -1e-6
+                        or source_x > int(record["width"]) - 1 + 1e-6
+                        or source_y > int(record["height"]) - 1 + 1e-6):
+                    continue
                 rgb = bilinear_sample_rgb_grid(
                     record["samples_rgb"], record["width"], record["height"],
                     source_x, source_y,
