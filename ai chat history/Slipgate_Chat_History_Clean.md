@@ -21461,3 +21461,28 @@ No copyrighted e1m1 source map/BSP was requested, received or copied. No PR was 
 ## 2026-11-16 — User clarification: multi-BSP scene explains aggregate light/bake counts
 
 The user points out that both BSPs were probably imported into the same SLOPGATE/Blender scene. Therefore the reported additional lights (253) and two registered bakes may simply be scene-wide totals spanning both imported maps. The diagnostic fields may not currently discriminate every statistic by active BSP. This is a plausible explanation and supersedes the earlier inference that the count itself demonstrated a diagnostics-scope defect. Do not treat the aggregate light count or bake count as evidence of cross-map Cycles contamination. Verify the actual ownership/scope of each report field before changing or interpreting it. Keep active-map isolation in Quake Direct as a separate code-path question; test with both BSPs present and compare against a clean one-map scene if needed.
+
+## 2026-11-16 — Runtime retest: calibration abort and Ironwail startup delay
+
+**User report**
+
+> [Test in ironwail] even with a freshly imported unbaked e1m1 takes about 25 to 
+> start ironwail.
+>
+> Baking  takes the usuasl time and i hear the gpu fans but in the end it gives 
+> an error:
+> Cycles bake failed; atlas and light calibration restored: Source and baked 
+> luminance must both be non-zero
+
+**Interpretation / status**
+
+- The ~25-second delay is present even when e1m1 has just been imported and not baked. It is therefore not attributable solely to the new Cycles bake/calibration stage. The measured interval still needs to be separated into SLOPGATE export/pre-launch work versus Ironwail process startup/load time; the user phrasing says time to start Ironwail, so do not call it a BSP export regression without timing boundaries.
+- Cycles appears to execute (user hears GPU activity) but the bake transaction aborts and restores the atlas/light calibration. The reported exception comes from source/baked luminance calibration requiring both values nonzero. This does not establish that Cycles rendered a black atlas: the zero could be in source luxel sampling, post-reduction baked luxel sampling, or a calibration helper precondition. Capture the diagnostic report before changing the fallback behavior.
+- On current PR #5 source at 8ddee09dd7027045360a163aef6c2f08d3de6ec1, the bake path samples source and post-reduction bake values, records source mean/raw bake mean, and invokes `lighting_utils.bake_atlas_match_scale(source_mean, raw_bake_mean)` when source mean is positive. The helper implementation/error source was not located in the single-file addon tree during this inspection; do not patch by guessing.
+- User's earlier clarification remains authoritative: both BSPs were likely imported into the same scene, so aggregate light/bake counts may span maps. Do not interpret those totals as proof of cross-map contamination.
+
+**Next diagnostic request**
+
+Ask the user to save and provide the SLOPGATE lighting diagnostics immediately after the failed bake, plus Blender's console traceback if available. Key values: source mean, raw/post-reduction baked mean, sampled luxel count, image max/nonzero pixel stats, active BSP name/face count, and any calibration exception stack. Then determine whether zero originates in source sampler, reduced bake sampler, or calibration helper. Preserve the pre-bake atlas restoration behavior. For the 25-second delay, time separately from clicking export to Ironwail process launch and from process launch to map visible.
+
+No source code change or new installer was made in response to this report. Both project records updated; no runtime fix claimed.
