@@ -21574,3 +21574,47 @@ This is still a 0.21.18 candidate on open draft PR #5, not an official release. 
 
 Install this latest artifact. Re-import e1m1 so the patched light nodes are rebuilt, then run a bake. If it still fails, the error should now be the intended non-finite or zero-luxel diagnostic rather than `UnboundLocalError`. Send the resulting report, including the non-finite sample counts and atlas coordinates where present. Then run Test in Ironwail to obtain the new export-stage timings.
 
+## 2026-11-16 — One remaining non-finite luxel isolated; add face/light attribution diagnostics
+
+**User report (verbatim)**
+
+> Cycles bake failed; atlas and light calibration restored: Cycles bake produced non-finite luxel luminance samples; baked=1/165763, source=0/165763, non-finite atlas RGB values=12, non-finite atlas pixels=4, first atlas pixel coordinates=[(1594, 2000), (1595, 2000), (1594, 2001), (1595, 2001)]. The atlas was restored. This is not a zero-light bake; inspect the offending Cycles light/shader samples.
+
+**Interpretation**
+
+- The previous bake_values use-before-assignment crash is gone. The new non-finite validation now runs and reports the intended failure.
+- Only 1 of 165,763 sampled baked luxels is non-finite; all 165,763 source samples are finite. There are four adjacent bad atlas pixels (2x2 block) and 12 non-finite RGB values. This is spatially localized, not a map-wide black or invalid bake.
+- The atlas transaction correctly restored the previous lightmap and calibration. Do not clamp or silently discard the bad texel; identify its BSP face and the responsible light/shader interaction first.
+- The prior `sqrt(Strength / max(Quadratic, 1e-20))` rewrite did not eliminate this remaining NaN. The precise underlying shader source is not yet confirmed. A zero-distance Light Falloff singularity remains a hypothesis, not a proven root cause.
+
+**New diagnostic instrumentation committed to PR #5**
+
+Current feature branch: `fix/0.21.17-world-aligned-lightmap-charts`. Head: `bdae11b81140c9b70a332c3a78a179fe5ebeb22e`.
+
+- Added `classic_face_grid_world_chart_pixel_coordinates()` in `lightmap_export.py` to expose the exact per-luxel atlas pixel centres used by the fast world-chart sampler.
+- Added regression coverage proving the reported coordinate transform matches the sampler pixel-centre convention.
+- Added `_qss_describe_nonfinite_luxels()` in `addon.py`. On a non-finite bake, it maps the reported bad atlas pixels back to candidate BSP face IDs, Blender polygon indices, luxel (s,t) indices, atlas sample centres and Quake-space XYZ positions. It then lists the three nearest imported lights from the active BSP collection, including origin, delay, raw value, wait and falloff.
+- The helper also handles maps without world-chart faces by loading the source BSP/cache for attribution and using their face-local sample centres.
+- The detail is stored in the object diagnostics and included in the bake error/lamp diagnostic fields. Existing atlas rollback and non-finite rejection remain unchanged.
+- No speculative brightness clamp, per-light attenuation change, or blanket Cycles shader fallback was introduced.
+
+Commits:
+- `143b25b6a54f4a96080dc3557e5aeac94e06333d` — expose exact world-chart luxel pixel coordinates.
+- `8b8c210a983cc241d8b4d3f32aedc91b887eaecd` — add coordinate-mapping regression test.
+- `77c4e6f38161def61ced62052f0672e72b805f43` — add face/luxel/world-position/nearest-light diagnostic reporting.
+- `bdae11b81140c9b70a332c3a78a179fe5ebeb22e` — harden diagnostic attribution for non-world-chart maps and equal-distance light ordering.
+
+**CI and installer**
+
+- GitHub Actions run [43977434456](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43977434456), job `133684924995`, succeeded on the exact head `bdae11b81140c9b70a332c3a78a179fe5ebeb22e`.
+- 296 standalone tests passed, including `test_classic_face_grid_pixel_coordinates_match_sampler_centres`; Python compilation, BSP export-integrity, package assembly and artifact upload passed.
+- Candidate installer `Quake-Surface-Studio-v0.21.18-Blender-Install`, artifact `14282850052`, 312,385 bytes.
+- SHA-256: `785cc28a2a6cb29e7fe01c5764fcdf8aa8d48b02671b3db2fdcd32598ba729d3`.
+- Installer: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43977434456/artifacts/14282850052
+
+This is diagnostic instrumentation on the open draft PR #5 0.21.18 candidate, not a confirmed fix for the remaining NaN. No Blender 5.3 runtime test was performed by the assistant.
+
+**Next test**
+
+Install this artifact and re-import e1m1, then bake. If a NaN remains, send the new report: it should identify the face ID, polygon, luxel coordinate, atlas centre, Quake-space position and nearest three active-map lights. Use that to decide whether the exact point coincides with a light origin or whether the bad sample is associated with a different light/node path. Continue retaining the pre-bake atlas on any failed transaction.
+
