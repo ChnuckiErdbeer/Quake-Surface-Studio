@@ -1,0 +1,98 @@
+---- qbsp / ericw-tools 2.0.0-alpha11 ----
+
+--- Options Summary ---
+    "litwater" was set to "1" (from command line)
+
+Input file: /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/spottest02-compile.map
+Output file: /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/spottest02-compile.bsp
+
+INFO: using built-in palette.
+     4 entities
+    11 unique textures
+    43 texinfos
+    44 unique planes
+
+INFO: world extents calculated to 1224 units
+    15 brushes
+    90 sides
+     1 side bevels
+
+            0 texture frames added
+Processing hull 0...
+    15 SOLID brushes
+    15 brushes total
+    90 visible sides
+INFO: calculating BSP for 15 brushes with 90 sides
+    15 brushes
+    90 visible faces
+    42 nodes
+    42 expensive split nodes
+    43 leaves
+    15 SOLID leafs
+    28 EMPTY leafs
+    43 leafs total
+    12 max tree height
+     7 avg tree height
+    204 tree portals
+    23 outside leaves
+    0 detail filled leafs
+    15 brushes
+    19 visible faces
+    71 non-visible faces
+    44 nodes
+    33 non-visible nodes
+    44 expensive split nodes
+    45 leaves
+    17 SOLID leafs
+    28 EMPTY leafs
+    45 leafs total
+    12 max tree height
+     7 avg tree height
+    216 tree portals
+    23 outside leaves
+    0 detail filled leafs
+    216 tree portals
+    64 sides visible
+    32 makefaces
+    10 merged
+    22 subdivided
+    33 nodes pruned
+    5 player-occupiable leaves
+    5 clusters of leaves
+    8 vis portals
+     5 EMPTY leafs
+     7 SOLID leafs
+    12 leafs total
+    12 max tree height
+     7 avg tree height
+     34 edges added by tjunctions
+     44 faces optimized through MWT
+    122 triangles computed from MWT
+      7 faces created via optimization of MWT triangles
+    112 edges
+     51 faces
+Processing hull 1...
+Processing hull 2...
+Writing /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/spottest02-compile.bsp as Quake BSP bsp29
+Wrote /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/spottest02-compile.bsp
+
+count   lump name    byte size 
+      1 models               64
+     31 planes              620
+     63 vertexes            756
+     11 nodes               264
+     15 texinfos            600
+     51 faces              1020
+     26 clipnodes           208
+      6 leafs               168
+     65 marksurfaces        130
+    113 edges               452
+    224 surfedges           896
+     11 textures           9328
+        lightdata             0
+        visdata               0
+        entdata             348
+
+0.020s seconds elapsed
+
+
