@@ -7641,7 +7641,7 @@ class QSS_OT_preview_bsp_lightmaps(Operator):
 
 
 
-def _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed=None):
+def _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed=None, source_cache=None):
     """Read one face's original BSP luxel grid from its shared world chart."""
     mesh = obj.data
     world_attr = mesh.attributes.get('qss_lm_world_chart')
@@ -7656,7 +7656,11 @@ def _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed=Non
     if face_attr is None or poly_index >= len(face_attr.data):
         raise bsp.BSPError('BSP face IDs are missing while sampling a world-aligned chart.')
     face_id = int(face_attr.data[poly_index].value)
-    info = _qss_read_source_face_sample(mesh, poly_index, face_id, parsed)
+    if source_cache is None:
+        source_cache = _qss_source_face_sample_cache(parsed)
+    info = _qss_read_source_face_sample(
+        mesh, poly_index, face_id, parsed, source_cache=source_cache
+    )
     if info is None or info.get('decoupled_lmvecs') is not None:
         return None
     size = int(image.size[0])
@@ -7671,7 +7675,7 @@ def _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed=Non
         info['chart_s_min'], info['chart_t_min'],
     )
 
-def _lightmap_sample_luminances(obj, image, face_indices=None, parsed_source=None):
+def _lightmap_sample_luminances(obj, image, face_indices=None, parsed_source=None, source_cache=None):
     """Read only real luxel centers, excluding atlas gutters and empty space."""
     mesh = obj.data
     attrs = _qss_validate_face_domain_attributes(
@@ -7699,6 +7703,8 @@ def _lightmap_sample_luminances(obj, image, face_indices=None, parsed_source=Non
         if not source_path or not os.path.isfile(source_path):
             raise bsp.BSPError('The source BSP is required to sample world-aligned lightmap charts.')
         parsed_source = bsp.BSP29.from_file(source_path)
+    if has_world_chart and source_cache is None:
+        source_cache = _qss_source_face_sample_cache(parsed_source)
     for poly_index, _poly in enumerate(mesh.polygons):
         if target_set is not None and poly_index not in target_set:
             continue
@@ -7709,7 +7715,7 @@ def _lightmap_sample_luminances(obj, image, face_indices=None, parsed_source=Non
         width = int(_qss_safe_collection_item(attrs['qss_lm_sample_w'].data, poly_index, 'qss_lm_sample_w').value)
         height = int(_qss_safe_collection_item(attrs['qss_lm_sample_h'].data, poly_index, 'qss_lm_sample_h').value)
         if bool(attrs['qss_lm_world_chart'].data[poly_index].value):
-            chart_rgb = _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed_source)
+            chart_rgb = _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed_source, source_cache)
             if chart_rgb is not None:
                 for offset in range(0, len(chart_rgb), 3):
                     r, g, b = chart_rgb[offset:offset + 3]
@@ -7728,7 +7734,7 @@ def _lightmap_sample_luminances(obj, image, face_indices=None, parsed_source=Non
     return values
 
 
-def _lightmap_face_coverage(obj, image, threshold=1e-8, face_indices=None, parsed_source=None):
+def _lightmap_face_coverage(obj, image, threshold=1e-8, face_indices=None, parsed_source=None, source_cache=None):
     """Summarize how many imported faces receive nonzero sampled bake luxels."""
     mesh = obj.data
     attrs = _qss_validate_face_domain_attributes(
@@ -7757,6 +7763,8 @@ def _lightmap_face_coverage(obj, image, threshold=1e-8, face_indices=None, parse
         if not source_path or not os.path.isfile(source_path):
             raise bsp.BSPError('The source BSP is required to sample world-aligned lightmap charts.')
         parsed_source = bsp.BSP29.from_file(source_path)
+    if has_world_chart and source_cache is None:
+        source_cache = _qss_source_face_sample_cache(parsed_source)
     for poly_index, _poly in enumerate(mesh.polygons):
         if target_set is not None and poly_index not in target_set:
             continue
@@ -7780,7 +7788,7 @@ def _lightmap_face_coverage(obj, image, threshold=1e-8, face_indices=None, parse
         face_lit = 0
         face_max = 0.0
         if bool(attrs['qss_lm_world_chart'].data[poly_index].value):
-            chart_rgb = _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed_source)
+            chart_rgb = _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed_source, source_cache)
             if chart_rgb is not None:
                 total_luxels += len(chart_rgb) // 3
                 for offset in range(0, len(chart_rgb), 3):
@@ -9183,21 +9191,26 @@ class QSS_OT_bake_scene_lights(Operator):
                 if not source_path or not os.path.isfile(source_path):
                     raise bsp.BSPError('The source BSP is required for world-chart bake validation.')
                 source_bsp_for_samples = bsp.BSP29.from_file(source_path)
+            source_sample_cache = (
+                _qss_source_face_sample_cache(source_bsp_for_samples)
+                if source_bsp_for_samples is not None else None
+            )
             bake_values = _lightmap_sample_luminances(
-                obj, bake_target, receiver_face_indices, parsed_source=source_bsp_for_samples
+                obj, bake_target, receiver_face_indices,
+                parsed_source=source_bsp_for_samples, source_cache=source_sample_cache,
             )
             raw_bake_mean = (sum(bake_values) / len(bake_values)) if bake_values else 0.0
             raw_image_stats = _image_rgb_statistics(bake_target)
             raw_face_coverage = _lightmap_face_coverage(
                 obj, bake_target, face_indices=receiver_face_indices,
-                parsed_source=source_bsp_for_samples,
+                parsed_source=source_bsp_for_samples, source_cache=source_sample_cache,
             )
             obj['qss_last_bake_attempt_face_coverage'] = str(raw_face_coverage)
             source_image = bpy.data.images.get(obj.get('qss_original_lightmap_backup', ''))
             source_values = (
                 _lightmap_sample_luminances(
                     obj, source_image, receiver_face_indices,
-                    parsed_source=source_bsp_for_samples,
+                    parsed_source=source_bsp_for_samples, source_cache=source_sample_cache,
                 ) if source_image else []
             )
             source_mean = (sum(source_values) / len(source_values)) if source_values else 0.0
