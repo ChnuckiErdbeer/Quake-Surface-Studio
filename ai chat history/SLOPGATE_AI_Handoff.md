@@ -42,10 +42,10 @@ The archive filename and some historic headings contain the old spelling “Slip
 
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
 - The official 1.0 scope remains classic Quake 1 BSP29 only. BSP2/2PSB remain post-1.0.
-- Do not describe any 0.21.x build as an official release. The latest candidate is still version 0.21.18 on open draft PR #5. Its latest 2026-11-16 bake validation-order correction has a 295-test CI/package pass, but Blender 5.3 and Ironwail runtime acceptance remain outstanding.
+- Do not describe any 0.21.x build as an official release. The latest candidate is still version 0.21.18 on open draft PR #5. Its latest 2026-11-16 localized non-finite luxel attribution diagnostics have a 296-test CI/package pass, but the one-luxel NaN root cause and Blender 5.3/Ironwail runtime acceptance remain outstanding.
 - The repository default branch main is still at b6936a58c5159dbe79a60d5778ad40df42e126f5 and is not the active development baseline. Do not start new feature work from main.
 - PR #1 is the long-running development PR against main. Its branch is fix/v0.11.1-metadata-style-order-test; the archive and handoff are maintained on this branch. The latest underlying add-on code on that branch remains c63205dc4974c313103ef9b8b7def5131b8680f1. Treat the live GitHub branch ref as authoritative for the latest documentation commit.
-- The active lightmap feature sequence is a stacked draft PR chain: PR #3 (0.21.15) → PR #4 (0.21.16) → PR #5 (0.21.18). The latest PR #5 head is 5c4cd5382534566698f4ae974abce679f00a7020. It includes HDR sampling/calibration-order, hard-spotlight and active-map scoping, the Cycles Light Falloff NaN guard, non-finite diagnostics, Test in Ironwail export-stage timings, and the bake_values assignment-order correction plus regression test. It includes the PR #3 and PR #4 base work and is the most advanced candidate for the next runtime test. These PRs are not merged.
+- The active lightmap feature sequence is a stacked draft PR chain: PR #3 (0.21.15) → PR #4 (0.21.16) → PR #5 (0.21.18). The latest PR #5 head is bdae11b81140c9b70a332c3a78a179fe5ebeb22e. It includes HDR sampling/calibration-order, hard-spotlight and active-map scoping, the Cycles Light Falloff NaN guard, non-finite diagnostics, Test in Ironwail export-stage timings, the bake_values assignment-order correction/regression test, and diagnostics that map NaN atlas pixels to BSP face/luxel/world positions and nearest active-map lights. It includes the PR #3 and PR #4 base work and is the most advanced candidate for the next runtime test. These PRs are not merged.
 - PR #2 is a separate draft diagnostic branch, fix/0.21.15-bsp-import-array-trace, head 66767f0fe7d34db7a29204af1d13dc383ec300ce. Its branch name is not an add-on version. It is based on c63205d and is not part of the PR #3–#5 lightmap chain.
 - Version metadata on the PR #1 development base is inconsistent: the package __init__.py reports bl_info version 0.21.14, while addon.py ADDON_VERSION and README still report 0.21.13. A 0.21.14 installer was generated from the diagnostic branch, but do not treat it as a clean versioned release. The PR #3 branch repairs the version declarations at 0.21.15; PR #4 synchronizes them at 0.21.16; PR #5 synchronizes __init__.py, addon.py and README to 0.21.18.
 - The 0.21.18 candidate ZIP was produced from PR #5 head 7f182cf97cc1a3aa35c15408d429a478f87e08c2. GitHub Actions QSS Python run 43783467279 / job 133025758521 passed Python compilation, 290 standalone tests, BSP export integrity checks, package assembly and artifact upload. Artifact: Quake-Surface-Studio-v0.21.18-Blender-Install, ID 14188889199, 308,296 bytes. The Actions run and artifact page are https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43783467279 and https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43783467279/artifacts/14188889199.
@@ -849,13 +849,13 @@ This section supersedes earlier assumptions that 0.21.14 was the latest work. Re
 | #2 | fix/0.21.15-bsp-import-array-trace | fix/v0.11.1-metadata-style-order-test at c63205d | Capture the unresolved BSP import traceback | Open, draft |
 | #3 | fix/0.21.15-classic-face-local-lightmap-alignment | fix/v0.11.1-metadata-style-order-test at c63205d | 0.21.15 detached-face export correction | Open, draft |
 | #4 | fix/0.21.16-coplanar-edge-luxel-stitch | PR #3 head 5ea9781e | 0.21.16 conservative shared-edge sample reconciliation | Open, draft |
-| #5 | fix/0.21.17-world-aligned-lightmap-charts | PR #4 head 15ff4802 | 0.21.17 charts + 0.21.18 edge/performance, brightness, NaN guard, export instrumentation and bake validation-order fix | Open, draft; head 5c4cd538 |
+| #5 | fix/0.21.17-world-aligned-lightmap-charts | PR #4 head 15ff4802 | 0.21.17 charts + 0.21.18 edge/performance, brightness, NaN guard, export timing and NaN face/light attribution diagnostics | Open, draft; head bdae11b8 |
 
 Do not merge these stacked PRs out of order. PR #3 → PR #4 → PR #5 is the lightmap integration sequence. PR #2 is an independent diagnostic branch. PR #3–#5 are based on the c63205d source base rather than the latest PR #1 documentation-only head; account for that when integrating the archive/handoff update.
 
 ### Immediate runtime validation and next engineering steps
 
-1. Install the newest 0.21.18 candidate, artifact ID 14274424187, and re-import e1m1 so all Cycles light node trees are rebuilt with the patched falloff shader. Repeat the bake. Inspect non-finite sample counts, source mean, raw mean, and first offending atlas pixel coordinates if it still fails. The bake_values ordering regression has been fixed and guarded by a 295-test CI pass. The report should distinguish NaN data from a genuinely zero bake.
+1. Install the newest 0.21.18 candidate, artifact ID 14282850052, and re-import e1m1 so all Cycles light node trees are rebuilt with the patched falloff shader. Repeat the bake. If a NaN remains, inspect the new attribution block: BSP face ID, Blender polygon, luxel (s,t), atlas centre, Quake-space XYZ, and nearest three active-map lights with delay/value/wait/falloff. The latest candidate has a 296-test CI pass. The one-luxel NaN root cause remains unconfirmed; do not apply a silent clamp.
 2. Compare the default `_softangle=0` spotlight edge and brightness with ericw. The earlier HDR source-match and post-luxel-reduction calibration corrections remain in this candidate.
 3. Repeat e1m1 in Blender 5.3. Record total bake duration and Cycles operator duration. Previous user report: total 2m57.1s / Cycles 2m48.7s.
 4. Use Test in Ironwail and inspect the new `Last BSP export` timings. The user clarified Blender freezes immediately after the button click for ~25 seconds, then unfreezes at the same moment Ironwail opens. Source inspection confirms `_export_object` runs synchronously in the UI operator before launching Ironwail. The new timing splits export into source parse/palette, texture/image processing, face/texinfo remap, lightmap patch, and serialize/write. This is instrumentation only; it does not make export asynchronous or faster.
@@ -1037,3 +1037,40 @@ A static AST regression test was added to `tests/test_bake_scope.py`: it finds t
 
 No Blender 5.3 interactive test has been run by the assistant. The prior `sqrt(Strength / Quadratic)` NaN correction is still awaiting the user's runtime validation. Re-import the BSP before baking so all light node trees are rebuilt. If another bake fails, expect the intended non-finite or zero-luxel report rather than the `bake_values` local-variable exception. Then use Test in Ironwail and inspect the per-stage export timings from the previous instrumentation patch.
 
+## Latest non-finite bake report — localized to one luxel; attribution diagnostics added (2026-11-16)
+
+### User's latest report
+
+`baked=1/165763, source=0/165763, non-finite atlas RGB values=12, non-finite atlas pixels=4, first atlas pixel coordinates=[(1594, 2000), (1595, 2000), (1594, 2001), (1595, 2001)]`.
+
+This is one failed luxel, with all source luxels finite. The bad atlas pixels form a 2x2 region. This confirms the previous bake_values ordering fix works and that NaN validation now reports the real data issue rather than an UnboundLocalError. Atlas/calibration rollback succeeded. The previous `sqrt(Strength / max(Quadratic, 1e-20))` update did not eliminate all NaN values. A zero-distance Light Falloff singularity remains a hypothesis, not proven.
+
+### New diagnostics on PR #5
+
+Feature branch: `fix/0.21.17-world-aligned-lightmap-charts`  
+Current head: `bdae11b81140c9b70a332c3a78a179fe5ebeb22e`  
+Version: 0.21.18 candidate; PR #5 open/draft, not merged.
+
+- Added `classic_face_grid_world_chart_pixel_coordinates()` so the precise fast sampler pixel centres can be calculated independently and tested.
+- Added a coordinate mapping regression test.
+- Added `_qss_describe_nonfinite_luxels()` to map bad atlas pixels back to candidate receiver face, BSP face ID, polygon, (s,t) luxel index, atlas sample centre and Quake-space XYZ; also identifies nearest three active-map lights and reports their origin/delay/value/wait/falloff.
+- For non-world-chart maps, the diagnostic helper now loads the source BSP/cache and falls back to face-local atlas sample centres.
+- Error and Save Lighting Diagnostics now include this attribution block. No lighting output clamp, forced per-light fallback, or other speculative shader change was made; the cause remains unconfirmed.
+
+Commits:
+- `143b25b6a54f4a96080dc3557e5aeac94e06333d`
+- `8b8c210a983cc241d8b4d3f32aedc91b887eaecd`
+- `77c4e6f38161def61ced62052f0672e72b805f43`
+- `bdae11b81140c9b70a332c3a78a179fe5ebeb22e`
+
+### CI and installer
+
+- GitHub Actions run [43977434456](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43977434456), job 133684924995, passed on exact head bdae11b81140c9b70a332c3a78a179fe5ebeb22e.
+- **296 tests passed**, including `test_classic_face_grid_pixel_coordinates_match_sampler_centres`; Python compilation, BSP export integrity, package assembly and artifact upload passed.
+- Installer: [Quake-Surface-Studio-v0.21.18-Blender-Install, artifact 14282850052](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43977434456/artifacts/14282850052).
+- Size 312,385 bytes; SHA-256 `785cc28a2a6cb29e7fe01c5764fcdf8aa8d48b02671b3db2fdcd32598ba729d3`.
+- Not an official release. No Blender 5.3 runtime bake was run by the assistant.
+
+### Next test
+
+Install artifact 14282850052 and re-import e1m1. If the NaN persists, the new report should identify the face/luxel/map-space point and nearest lights. Use the returned distances and profiles to determine whether the bad luxel coincides with a source light or whether the issue is elsewhere in the Cycles light shader. Do not clamp or accept the texel until identified; preserve rollback.
