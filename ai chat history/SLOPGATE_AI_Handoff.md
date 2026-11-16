@@ -1,6 +1,6 @@
 # SLOPGATE — AI Project Handoff
 
-**Last reviewed:** 2026-11-16  
+**Last reviewed:** 2026-11-17  
 **Purpose:** A compact, maintained project and collaboration brief for future assistant sessions. This is an editorial summary, not a verbatim record.
 
 ## Read this first
@@ -15,7 +15,7 @@ The archive filename and some historic headings contain the old spelling “Slip
 
 - Product: **SLOPGATE**, a Blender add-on and workflow for Quake BSP map import, texture editing/painting, lighting, map inspection and export.
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
-- Active development PR branch: fix/v0.11.1-metadata-style-order-test (latest head checked 2026-11-16: f68fa7a7aaa60bfc280db912eaa641636a58be50).
+- Active development PR branch: fix/v0.11.1-metadata-style-order-test (latest head checked 2026-11-17: d1f1fd29257cf9932121c1ede6555b61242c725c; latest add-on source baseline on this branch remains c63205dc4974c313103ef9b8b7def5131b8680f1).
 - Target interactive environment: Blender 5.3 on Linux.
 - Target map format: Quake 1 BSP29. Target engine includes Ironwail 0.8.2.
 - The add-on's package folder and internal identifiers still use quake_surface_studio / QSS for compatibility. Do not perform a partial global rename. New user-visible branding, log entries and new code labels should use SLOPGATE.
@@ -38,7 +38,7 @@ The archive filename and some historic headings contain the old spelling “Slip
 8. Do not promise background work or results later. Complete the task in the current session or state what could not be completed.
 
 
-## Current source/build baseline — checked 2026-11-16
+## Current source/build baseline — checked 2026-11-17
 
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
 - The official 1.0 scope remains classic Quake 1 BSP29 only. BSP2/2PSB remain post-1.0.
@@ -1074,3 +1074,30 @@ Commits:
 ### Next test
 
 Install artifact 14282850052 and re-import e1m1. If the NaN persists, the new report should identify the face/luxel/map-space point and nearest lights. Use the returned distances and profiles to determine whether the bad luxel coincides with a source light or whether the issue is elsewhere in the Cycles light shader. Do not clamp or accept the texel until identified; preserve rollback.
+
+
+## 2026-11-17 — Handoff review and user-facing communication preference
+
+The user asked that explanations be less technical and aimed at **technically enthusiastic level designers**, not computer scientists who happen to enjoy level design. This is a standing communication preference for all future SLOPGATE responses.
+
+User-facing explanations should:
+- Start with the practical effect: what changes in the map, lighting, texture, export or Blender workflow.
+- Say plainly what works, what does not, what is still uncertain, and what the user should try next.
+- Avoid code-level names, long lists of internal functions and programmer jargon unless they are necessary to explain a problem.
+- Briefly explain any technical term that cannot be avoided.
+- Keep reports compact and useful to a level designer, while retaining exact commits, test counts, source findings and other detailed evidence in this handoff and the full archive.
+
+### Live PR status checked 2026-11-17
+
+- PR #1: open/draft, `fix/v0.11.1-metadata-style-order-test` → `main`; head `d1f1fd29257cf9932121c1ede6555b61242c725c`. This includes the maintained project documents; the underlying add-on source baseline on this line is still `c63205dc4974c313103ef9b8b7def5131b8680f1`.
+- PR #2: open/draft, independent BSP import traceback diagnostics; head `66767f0fe7d34db7a29204af1d13dc383ec300ce`.
+- PR #3: open/draft, detached-face/classic lightmap alignment; head `5ea9781e71ea64b9adb70e5ecbda7918e5d1fde9`.
+- PR #4: open/draft, shared coplanar-edge lightmap seam reconciliation; head `15ff4802a32eaa64d83e2c42bcd33761bc124e94`, based on PR #3.
+- PR #5: open/draft, world-aligned lightmap charts and the latest 0.21.18 candidate; head `bdae11b81140c9b70a332c3a78a179fe5ebeb22e`, based on PR #4.
+- Keep PR #3 → PR #4 → PR #5 in that order. PR #2 is separate. No PR was merged during this session.
+
+### Current test status carried forward
+
+The latest 0.21.18 candidate has a 296-test CI pass and diagnostics that should identify the face, luxel location, map-space position and nearby lights for the remaining single bad lighting sample. This is diagnostic progress, not a lighting fix. Blender 5.3 runtime validation is still outstanding. The 25-second Test in Ironwail pause was traced to SLOPGATE preparing the temporary BSP before launching Ironwail; the new timings are intended to reveal which export step is taking the time.
+
+This session changed documentation only. No add-on source, installer, automated test result or merge status changed.
