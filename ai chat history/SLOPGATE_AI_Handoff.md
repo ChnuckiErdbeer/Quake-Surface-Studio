@@ -5,7 +5,7 @@
 
 ## Read this first
 
-At the start of a new project session, read this file first. Then consult the main conversation archive, ai chat history/Slipgate_Chat_History_Clean.md, whenever a detail needs context, dialogue-level confirmation, technical evidence, or fact-checking. The user reconstructed the missing continuation of that archive; it now contains the later November 14–16 work through the 0.21.18 brightness investigation and candidate fixes.
+At the start of a new project session, read this file first. Then consult the main conversation archive, ai chat history/Slipgate_Chat_History_Clean.md, whenever a detail needs context, dialogue-level confirmation, technical evidence, or fact-checking. The user reconstructed the missing continuation of that archive; it now contains the November 14–16 work through the e1m1 NaN-bake and synchronous Test in Ironwail diagnosis.
 
 This brief deliberately compresses the archive. It can become stale. The live repository, current branch, test output and the main archive outrank assumptions in this summary. Always inspect the current branch head and relevant source before modifying code. In particular, distinguish the base development PR from the stacked lightmap work branches and the separate BSP-import diagnostic branch.
 
@@ -42,10 +42,10 @@ The archive filename and some historic headings contain the old spelling “Slip
 
 - Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
 - The official 1.0 scope remains classic Quake 1 BSP29 only. BSP2/2PSB remain post-1.0.
-- Do not describe any 0.21.x build as an official release. The latest candidate is still version 0.21.18 on open draft PR #5. Its 2026-11-16 brightness-correction commits now have a 294-test CI/package pass, but Blender 5.3 and target-engine runtime acceptance remain outstanding.
+- Do not describe any 0.21.x build as an official release. The latest candidate is still version 0.21.18 on open draft PR #5. Its latest 2026-11-16 lightmap/NaN and export-timing changes have a 294-test CI/package pass, but Blender 5.3 and Ironwail runtime acceptance remain outstanding.
 - The repository default branch main is still at b6936a58c5159dbe79a60d5778ad40df42e126f5 and is not the active development baseline. Do not start new feature work from main.
 - PR #1 is the long-running development PR against main. Its branch is fix/v0.11.1-metadata-style-order-test; the archive and handoff are maintained on this branch. The latest underlying add-on code on that branch remains c63205dc4974c313103ef9b8b7def5131b8680f1. Treat the live GitHub branch ref as authoritative for the latest documentation commit.
-- The active lightmap feature sequence is a stacked draft PR chain: PR #3 (0.21.15) → PR #4 (0.21.16) → PR #5 (0.21.18). The latest PR #5 head is 8ddee09dd7027045360a163aef6c2f08d3de6ec1, including the 2026-11-16 brightness-calibration, hard-spotlight and active-map scoping fixes. It includes the PR #3 and PR #4 base work and is the most advanced candidate for the next runtime test. These PRs are not merged.
+- The active lightmap feature sequence is a stacked draft PR chain: PR #3 (0.21.15) → PR #4 (0.21.16) → PR #5 (0.21.18). The latest PR #5 head is a3daef84b1bd12c32f90218d5eabf643439b73e6, including the HDR sampling/calibration-order, hard-spotlight, active-map scoping, Cycles Light Falloff NaN guard, non-finite diagnostics and Test in Ironwail export-stage timing changes. It includes the PR #3 and PR #4 base work and is the most advanced candidate for the next runtime test. These PRs are not merged.
 - PR #2 is a separate draft diagnostic branch, fix/0.21.15-bsp-import-array-trace, head 66767f0fe7d34db7a29204af1d13dc383ec300ce. Its branch name is not an add-on version. It is based on c63205d and is not part of the PR #3–#5 lightmap chain.
 - Version metadata on the PR #1 development base is inconsistent: the package __init__.py reports bl_info version 0.21.14, while addon.py ADDON_VERSION and README still report 0.21.13. A 0.21.14 installer was generated from the diagnostic branch, but do not treat it as a clean versioned release. The PR #3 branch repairs the version declarations at 0.21.15; PR #4 synchronizes them at 0.21.16; PR #5 synchronizes __init__.py, addon.py and README to 0.21.18.
 - The 0.21.18 candidate ZIP was produced from PR #5 head 7f182cf97cc1a3aa35c15408d429a478f87e08c2. GitHub Actions QSS Python run 43783467279 / job 133025758521 passed Python compilation, 290 standalone tests, BSP export integrity checks, package assembly and artifact upload. Artifact: Quake-Surface-Studio-v0.21.18-Blender-Install, ID 14188889199, 308,296 bytes. The Actions run and artifact page are https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43783467279 and https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43783467279/artifacts/14188889199.
@@ -849,19 +849,19 @@ This section supersedes earlier assumptions that 0.21.14 was the latest work. Re
 | #2 | fix/0.21.15-bsp-import-array-trace | fix/v0.11.1-metadata-style-order-test at c63205d | Capture the unresolved BSP import traceback | Open, draft |
 | #3 | fix/0.21.15-classic-face-local-lightmap-alignment | fix/v0.11.1-metadata-style-order-test at c63205d | 0.21.15 detached-face export correction | Open, draft |
 | #4 | fix/0.21.16-coplanar-edge-luxel-stitch | PR #3 head 5ea9781e | 0.21.16 conservative shared-edge sample reconciliation | Open, draft |
-| #5 | fix/0.21.17-world-aligned-lightmap-charts | PR #4 head 15ff4802 | 0.21.17 charts + 0.21.18 edge/performance and brightness corrections | Open, draft; head 8ddee09d |
+| #5 | fix/0.21.17-world-aligned-lightmap-charts | PR #4 head 15ff4802 | 0.21.17 charts + 0.21.18 edge/performance, brightness and NaN/export instrumentation fixes | Open, draft; head a3daef84 |
 
 Do not merge these stacked PRs out of order. PR #3 → PR #4 → PR #5 is the lightmap integration sequence. PR #2 is an independent diagnostic branch. PR #3–#5 are based on the c63205d source base rather than the latest PR #1 documentation-only head; account for that when integrating the archive/handoff update.
 
 ### Immediate runtime validation and next engineering steps
 
-1. Install the updated 0.21.18 candidate from artifact ID 14233422720 and re-bake the supplied spottest02 test BSP in Blender 5.3. Check the new raw mean, source mean, final atlas mean and maximum luxel values. The final mean should now be close to the source mean when source matching is enabled; visually inspect the former overbright area in Ironwail.
-2. Confirm the default `_softangle=0` spotlight now has a hard edge and compare its coverage with the ericw reference.
-3. Run a controlled 0-bounce Cycles bake and compare with 1/2 diffuse bounces. The supplied compiler log indicates ericw was invoked with one bounce; the QSS test bake used two. Blender documents that Linear/Constant falloff can add energy at each GI bounce and become very bright. Do not change the user's bounce policy without measured results.
-4. Repeat e1m1 in Blender 5.3. Record total duration, Cycles operator duration and post-Cycles duration separately. The user-reported result was 3m01s total / 2m49s Cycles.
-5. Clarify the reported 25-second export/test interval: determine whether it is the SLOPGATE BSP export operation or Ironwail's load/testing time. The supplied diagnostics do not contain that timing.
-6. Re-check map isolation: the one-light spottest02 diagnostics should now show one active-map QSS light, irrespective of other map imports in the Blender scene. Quake Direct should also use only the active BSP collection.
-7. If the BSP import error on maps/spottest-compile.bsp recurs, use the PR #2 traceback instrumentation and capture SLOPGATE_Last_Import_Traceback. Do not resume broad undo/redo testing unless the user reports a reproducible failure.
+1. Install the newest 0.21.18 candidate, artifact ID 14244660593, and re-import e1m1 so all Cycles light node trees are rebuilt with the patched falloff shader. Repeat the bake. Inspect non-finite sample counts, source mean, raw mean, and first offending atlas pixel coordinates if it still fails. The report should distinguish NaN data from a genuinely zero bake.
+2. Compare the default `_softangle=0` spotlight edge and brightness with ericw. The earlier HDR source-match and post-luxel-reduction calibration corrections remain in this candidate.
+3. Repeat e1m1 in Blender 5.3. Record total bake duration and Cycles operator duration. Previous user report: total 2m57.1s / Cycles 2m48.7s.
+4. Use Test in Ironwail and inspect the new `Last BSP export` timings. The user clarified Blender freezes immediately after the button click for ~25 seconds, then unfreezes at the same moment Ironwail opens. Source inspection confirms `_export_object` runs synchronously in the UI operator before launching Ironwail. The new timing splits export into source parse/palette, texture/image processing, face/texinfo remap, lightmap patch, and serialize/write. This is instrumentation only; it does not make export asynchronous or faster.
+5. After export timings are captured, optimize only the stage actually shown to dominate. Do not lower bake samples/bounces as a workaround for temporary export latency.
+6. Keep the multi-BSP scene clarification: aggregated scene-wide diagnostic counts may legitimately include multiple imported BSPs. Do not treat those totals alone as proof of cross-map contamination. Quake Direct is separately scoped to the active map.
+7. If BSP import error recurs, use PR #2 traceback instrumentation. Do not resume broad undo/redo testing without a reproducible user report.
 8. Continue to provide an installable ZIP for every candidate build with exact branch/commit, CI status, artifact page and checksum. Keep version declarations synchronized and do not call any 0.21.x candidate an official release.
 
 ## Archive and handoff maintenance rule
@@ -959,3 +959,48 @@ The user points out that both BSPs were probably imported into the same SLOPGATE
 Ask the user to save and provide the SLOPGATE lighting diagnostics immediately after the failed bake, plus Blender's console traceback if available. Key values: source mean, raw/post-reduction baked mean, sampled luxel count, image max/nonzero pixel stats, active BSP name/face count, and any calibration exception stack. Then determine whether zero originates in source sampler, reduced bake sampler, or calibration helper. Preserve the pre-bake atlas restoration behavior. For the 25-second delay, time separately from clicking export to Ironwail process launch and from process launch to map visible.
 
 No source code change or new installer was made in response to this report. Both project records updated; no runtime fix claimed.
+
+## Latest runtime diagnosis and candidate patch — 2026-11-16
+
+### User's clarification of the 25-second Test in Ironwail delay
+
+The user explicitly clarified: clicking **Test in Ironwail** freezes Blender; ~25 seconds later Blender unfreezes at the same time Ironwail opens. This means the delay occurs before the Ironwail process launch. Source inspection confirmed the operator calls `_export_object(obj, output_path, mode)` synchronously and only then starts Ironwail through `external_tools.launch_process_handle`.
+
+### Uploaded e1m1 lighting report
+
+- User upload: `Pasted text(20261116-155250).txt`.
+- Blender 5.3.0, active object e1m1.bsp_QSS, QLIT v1 .lit sidecar, EEVEE restored after bake.
+- Failed bake attempt total 2m57.1s; Cycles operator 2m48.7s; GPU; 4,096 samples; 2 diffuse bounces; 2,048px float Non-Color atlas; 6,437 receiver faces.
+- Cycles operator result FINISHED. 165,763 sampled luxels, 5,631 faces in the face-coverage sample, 157,564 lit luxels, max face luminance 360.69619245.
+- Atlas: 4,194,304 px; 747,740 nonzero pixels; 2,243,220 nonzero RGB values; max channel 404.7032776. But whole-atlas mean_luma and sampled luxel mean are NaN.
+- Last successful bake metrics are n/a, indicating the failed transaction restored prior atlas/calibration. This is not evidence of a black bake: many texels are nonzero and maximum values are finite.
+- Source-match calibration setting 1.0, light energy scale 1.0, worldspawn/compiler bounce 16; the actual Cycles bake had 2 diffuse bounces. There is no traceback or old-build non-finite channel count/coordinate in the report.
+
+### Code diagnosis
+
+- The generic exception `Source and baked luminance must both be non-zero` was secondary: `bake_atlas_match_scale` clamps input via `max(0.0, float(value))`; NaN is reduced to zero in this call path.
+- The Cycles delay-0/delay-5 QSS light graph reconstructed distance with Light Falloff `Linear / Quadratic`. At exactly zero distance, both outputs may be infinite, giving Inf/Inf = NaN. This is a credible specific singularity to fix, but the new branch has not yet been runtime-verified against the user's e1m1 bake.
+- The temporary test operator performed export synchronously, explaining the ~25-second Blender UI block. The export stage responsible was unknown before instrumentation.
+
+### Latest PR #5 patch
+
+Feature branch: `fix/0.21.17-world-aligned-lightmap-charts`  
+Current head: `a3daef84b1bd12c32f90218d5eabf643439b73e6`  
+PR #5 remains open and draft; no merge. Version remains synchronized at 0.21.18.
+
+Changes in this head:
+1. Cycles Light Falloff distance now uses `sqrt(Strength / max(Quadratic, 1e-20))` instead of `Linear / Quadratic`. This preserves the same distance calculation away from the origin and avoids the identified Inf/Inf singularity.
+2. Whole-atlas diagnostics now count non-finite pixels/channels, calculate finite-only luminance, and record the first 16 bad pixel coordinates.
+3. Bake validation counts non-finite source and baked luxel samples and emits an explicit non-finite error before source-match calibration. Atlas rollback remains intact; there is no silent NaN clamp.
+4. Lighting diagnostic text now reports non-finite baked/source luxel counts and source mean.
+5. `_export_object` now records total time and per-stage durations: source BSP parse/palette, texture/image processing, face/texinfo remap, lightmap patch, serialize/write. Test in Ironwail reports the temporary export duration. This is instrumentation only; the UI remains synchronous, and no optimization or asynchronous export has yet been implemented.
+
+Source commit: `a3daef84b1bd12c32f90218d5eabf643439b73e6`.
+
+### CI and installer
+
+- QSS Python run [43904361797](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43904361797), job 133429096100: passed Python compilation, 294 tests, BSP export-integrity checks, package assembly and artifact upload. Duplicate run 43904348965 also succeeded.
+- Installer: [Quake-Surface-Studio-v0.21.18-Blender-Install, artifact 14244660593](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43904361797/artifacts/14244660593).
+- Size 310,319 bytes; SHA-256 `632c3d004b13af1b7082d81120122bf6f73bc0d02a335fa8f0f8cec93fac2c26`.
+- No Blender 5.3 GUI bake/rebake or Ironwail run by the assistant. Runtime fix is unconfirmed. The next user validation must re-import e1m1 before baking so the updated Cycles light node graphs are reconstructed, then re-run Test in Ironwail to capture per-stage export timings.
+
