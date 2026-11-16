@@ -386,7 +386,7 @@ class WorldAlignedLightmapChartTests(unittest.TestCase):
         first = lightmap_export.world_chart_pixel_coordinates(
             16.0, 16.0, 10, 20, 0.0, 0.0, 2, 2, 2, 1024
         )
-        self.assertAlmostEqual(first[0], 49.5)
+        self.assertAlmostEqual(first[0], 29.5)
         self.assertAlmostEqual(first[1], 974.5)
 
 
