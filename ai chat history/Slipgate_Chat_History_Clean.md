@@ -21486,3 +21486,55 @@ The user points out that both BSPs were probably imported into the same SLOPGATE
 Ask the user to save and provide the SLOPGATE lighting diagnostics immediately after the failed bake, plus Blender's console traceback if available. Key values: source mean, raw/post-reduction baked mean, sampled luxel count, image max/nonzero pixel stats, active BSP name/face count, and any calibration exception stack. Then determine whether zero originates in source sampler, reduced bake sampler, or calibration helper. Preserve the pre-bake atlas restoration behavior. For the 25-second delay, time separately from clicking export to Ironwail process launch and from process launch to map visible.
 
 No source code change or new installer was made in response to this report. Both project records updated; no runtime fix claimed.
+
+## 2026-11-16 — e1m1 bake NaNs and synchronous Test in Ironwail export diagnosis
+
+**User report and timing clarification**
+
+> 25 sec: i click the button: Blender freezes, 25 seconds later blender unfreezes and at the same time ironwail opens.
+> heres the lighting report:
+
+The 25-second pause is observed with Test in Ironwail: Blender freezes immediately after the button click; after about 25 seconds it unfreezes at the same moment Ironwail opens. This is no longer ambiguous as to whether the timer includes Ironwail's own startup: the delay occurs before process launch, while Blender is blocked.
+
+**Uploaded report evidence**
+
+The report is the user's uploaded `Pasted text(20261116-155250).txt`:
+- Blender 5.3.0, active object `e1m1.bsp_QSS`, source path `.../id1/maps/e1m1.bsp`, RGB source QLIT v1 `.lit`.
+- Last bake attempt total 2m57.1s; Cycles operator 2m48.7s. GPU, 4,096 samples, 2 diffuse bounces, 2,048px float Non-Color atlas; 6,437 receiver faces; 5,631 faces in sampled face-coverage stats and 165,763 sampled luxels.
+- Cycles operator returned `FINISHED`. Whole atlas has 4,194,304 pixels, 747,740 non-zero pixels and 2,243,220 non-zero RGB values. Maximum channel 404.7032775878906 and face coverage maximum 360.6961924499511 are finite.
+- But sampled mean is `nan` and whole-atlas `mean_luma` is `nan`. Last successful bake values are `n/a`, so the transaction restored the previous atlas/lighting rather than accepting this bake.
+- Source-match calibration is 1.0; energy scale 1.0; worldspawn compiler bounce field 16. The Cycles bake setting actually used 2 diffuse bounces.
+- Report says active map collection `QSS_Map_e1m1`; 22 mover shadow-transparent materials were configured.
+- The report has no traceback and no non-finite pixel count/location in the old build. It proves a non-empty bake with non-finite RGB/luminance, not a black/zero bake.
+
+**Diagnosis**
+
+1. The calibration exception `Source and baked luminance must both be non-zero` is a misleading secondary error. The old `bake_atlas_match_scale` helper applies `max(0.0, float(value))`; a NaN mean is reduced to zero by that precondition path. The primary failure is non-finite values in the baked/source luxel statistics, not an empty bake. Keep the transactional rollback; do not silently accept or clamp the whole bake.
+2. The QSS Cycles delay-0/delay-5 light shader estimated distance with `Linear / Quadratic` from the Light Falloff node. At zero light-to-surface distance, both falloff outputs can be infinite, making `Inf / Inf` undefined and yielding NaN. This is a concrete singularity in the code and a credible source of the observed NaN pixels. It is a targeted diagnosis; it still needs a Blender 5.3 runtime rerun to confirm the fix removes the observed NaNs.
+3. The test operator calls `_export_object(obj, output_path, mode)` synchronously inside its Blender operator before it calls `external_tools.launch_process_handle(...)`. That explains why Blender freezes until the export finishes and only then Ironwail opens. The user-observed 25 seconds is therefore SLOPGATE temporary BSP export time, not Ironwail's own process startup. The exact slow export substage was unknown before instrumentation.
+
+**Fixes committed to PR #5**
+
+Feature branch `fix/0.21.17-world-aligned-lightmap-charts`, latest source commit `a3daef84b1bd12c32f90218d5eabf643439b73e6`, add-on version still 0.21.18:
+- Replaced the Cycles Light Falloff distance reconstruction `Linear / Quadratic` with `sqrt(Strength / max(Quadratic, 1e-20))`. This is algebraically equivalent away from the light origin and yields zero rather than Inf/Inf at the exact source point.
+- Updated whole-image statistics to count non-finite pixels and RGB channels, calculate a finite-only mean for diagnostics, and record the first 16 bad atlas pixel coordinates. The reported full mean remains NaN if any channel is non-finite.
+- Before source-match calibration, explicitly count non-finite sampled bake and source luxels. A non-finite sample now produces a specific error with counts and first atlas pixel coordinates, rather than falling through into the generic zero-luminance calibration error. Atlas rollback remains in place.
+- Added diagnostics fields for source mean and non-finite bake/source luxel counts.
+- Added total and stage timing for Test in Ironwail's synchronous export: source BSP parse/palette, texture/image processing, face/texinfo remap, lightmap patch, serialize/write, and total. The operator reports the measured export time. This is instrumentation for the next run, not an asynchronous export fix or speed optimization.
+
+**CI and install artifact**
+
+- GitHub Actions QSS Python run `43904361797`; job `133429096100`, successful.
+- Python compilation, 294 standalone tests, BSP export-integrity checks, Blender package assembly and artifact upload all passed. A duplicate run `43904348965` also succeeded.
+- Artifact `Quake-Surface-Studio-v0.21.18-Blender-Install`, ID `14244660593`, 310,319 bytes.
+- SHA-256 from workflow upload log and GitHub artifact metadata: `632c3d004b13af1b7082d81120122bf6f73bc0d02a335fa8f0f8cec93fac2c26`.
+- Installer: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43904361797/artifacts/14244660593
+- PR #5 remains open/draft. No merges. No Blender 5.3 interactive bake or Ironwail test was run by the assistant; the NaN fix and new timings still need runtime validation.
+
+**Next user test**
+
+1. Install this exact 0.21.18 candidate and re-import e1m1 so all existing light node trees are rebuilt from the patched shader.
+2. Bake again. If it still fails, send the new diagnostics; it now should show non-finite bake/source counts and offending pixel coordinates rather than just a NaN mean.
+3. Use Test in Ironwail once; the success report and diagnostic report should now include per-stage temporary BSP export timings. This identifies whether texture encoding, lightmap patching, BSP serialization/write or another stage dominates the 25 seconds.
+4. Do not lower samples or bounce quality as a speed workaround before measuring the export stages.
+
