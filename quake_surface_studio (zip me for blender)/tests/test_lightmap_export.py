@@ -370,6 +370,40 @@ class WorldAlignedLightmapChartTests(unittest.TestCase):
         self.assertEqual(samples[2], (60, 60, 60))
         self.assertEqual(valid, bytes((1, 1, 1, 1, 1, 1)))
 
+    def test_outward_rounded_classic_luxel_column_is_filled_past_face_edge(self):
+        vertices = [
+            (0.0, 0.0, 0.0), (20.0, 0.0, 0.0),
+            (20.0, 16.0, 0.0), (0.0, 16.0, 0.0),
+        ]
+        edges = [(0, 1), (1, 2), (2, 3), (3, 0)]
+        faces = [(0, 0, 0, 4, 0, 0, 255, 255, 255, 0)]
+        records = [{
+            "face_id": 0,
+            "positions": vertices,
+            "styles": (0, 255, 255, 255),
+            "texinfo": self.texinfo,
+            "s_min": 0,
+            "t_min": 0,
+            "width": 3,
+            "height": 2,
+            "samples_rgb": [
+                (10, 10, 10), (20, 20, 20), (30, 30, 30),
+                (40, 40, 40), (50, 50, 50), (60, 60, 60),
+            ],
+        }]
+        charts, _mapping, chart_records = lightmap_export.build_coplanar_face_charts(
+            records, faces, self.planes, edges, [0, 1, 2, 3], [0]
+        )
+        self.assertEqual((charts[0]["width"], charts[0]["height"]), (3, 2))
+        samples, valid = lightmap_export.resample_coplanar_chart_sources(
+            charts[0], chart_records
+        )
+        # The third sample centre is x=32, beyond the 20-unit polygon edge,
+        # but it is present in the classic BSP29 face lightmap rectangle.
+        self.assertEqual(valid[2], 1)
+        self.assertEqual(samples[2], (30, 30, 30))
+
+
     def test_different_models_or_styles_do_not_share_a_chart(self):
         charts, _mapping, _records = lightmap_export.build_coplanar_face_charts(
             self.records, self.faces, self.planes, self.edges, self.surfedges, [0, 1]
