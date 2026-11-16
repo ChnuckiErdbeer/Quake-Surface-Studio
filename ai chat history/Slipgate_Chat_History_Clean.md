@@ -21538,3 +21538,39 @@ Feature branch `fix/0.21.17-world-aligned-lightmap-charts`, latest source commit
 3. Use Test in Ironwail once; the success report and diagnostic report should now include per-stage temporary BSP export timings. This identifies whether texture encoding, lightmap patching, BSP serialization/write or another stage dominates the 25 seconds.
 4. Do not lower samples or bounce quality as a speed workaround before measuring the export stages.
 
+## 2026-11-16 — Fixed bake validation use-before-assignment regression
+
+**User report (verbatim)**
+
+> Cycles bake failed; atlas and light calibration restored: cannot access local variable 'bake_values' where it is not associated with a value
+
+**Root cause**
+
+The previous PR #5 NaN-diagnostics patch inserted the non-finite bake-sample validation immediately after source-lightmap sampling. At that point the local variable `bake_values` had not yet been assigned. It is only populated later, after the Cycles result is copied into the float buffer, luxel blocks are collapsed, and the reduced atlas is sampled. Python therefore raised `UnboundLocalError` before the intended diagnostic check.
+
+**Correction**
+
+- Moved all checks that read `bake_values` to immediately after the post-reduction call to `_lightmap_sample_luminances(...)`.
+- The earlier source-only setup now computes and records only `source_values`, `source_mean`, and energy metadata. It does not read the not-yet-created baked sample list.
+- After sampling the reduced atlas, the code now computes baked/source non-finite counts, stores diagnostics, rejects non-finite samples explicitly, and then proceeds to finite/zero-luminance validation. The existing transactional rollback is retained.
+- Added an AST-based regression test in `tests/test_bake_scope.py` that locates the function containing the Cycles bake operator and asserts that `bake_values` is assigned before any load/read in that function.
+
+**Commits on PR #5 feature branch**
+
+- `b09d3775a92603cf65ede80d102400aae36282ae` — reorder baked sample validation so `bake_values` is only read after it is assigned.
+- `5c4cd5382534566698f4ae974abce679f00a7020` — add regression test for the use-before-assignment control-flow error.
+
+**CI and installer**
+
+- GitHub Actions run [43964423362](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43964423362), job `133639973941`, completed successfully on head `5c4cd5382534566698f4ae974abce679f00a7020`.
+- Python compilation, BSP export-integrity checks, package assembly/upload and **295 standalone tests** passed.
+- Candidate installer `Quake-Surface-Studio-v0.21.18-Blender-Install`, artifact ID `14274424187`, size 310,790 bytes.
+- SHA-256 from upload log and GitHub artifact metadata: `67add3a143f2a4ce6b44168b839139f1dedf7882d78a514fdb0025a3ee43ae8e`.
+- Installer: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43964423362/artifacts/14274424187
+
+This is still a 0.21.18 candidate on open draft PR #5, not an official release. CI has passed, but the bake has not yet been re-tested interactively in Blender 5.3. The preceding `sqrt(Strength / Quadratic)` Light Falloff NaN correction and the new non-finite diagnostics remain unverified at runtime.
+
+**Next test**
+
+Install this latest artifact. Re-import e1m1 so the patched light nodes are rebuilt, then run a bake. If it still fails, the error should now be the intended non-finite or zero-luxel diagnostic rather than `UnboundLocalError`. Send the resulting report, including the non-finite sample counts and atlas coordinates where present. Then run Test in Ironwail to obtain the new export-stage timings.
+
