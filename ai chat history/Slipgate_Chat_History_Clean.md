@@ -21667,3 +21667,75 @@ Ask the user to save **Save Lighting Diagnostics immediately after the failed ba
 Do not apply a blanket clamp, zero out the bad luxel, or make another speculative change to all Cycles lights. The original lightmap and calibration rollback must remain.
 
 No source code change, automated test run, installer build or merge was made in response to this report. This is a report-collection step to identify the bad sample before choosing a targeted fix.
+
+
+## 2026-11-17 — e1m1 failure located on BSP face 5828; delay-0 Cycles fallback candidate
+
+**User-provided diagnostics (verbatim)**
+
+> Last attempted lamp states: Non-finite luxel samples: bake=1; source=0; 
+> locations=face=5828 poly=5828 luxel=(9, 3) atlas_sample=(1594.5, 2000.5) 
+> world_quake=(-80.0, 640.0, 96.0)\n  nearest_light=QSS_light_405 
+> distance_qu=64.4981 origin=(-120.0, 624.0, 144.0) delay=0 value=1000 wait=1 
+> falloff=0\n  nearest_light=QSS_light_330 distance_qu=77.5629 origin=(-128.0, 
+> 584.0, 72.0) delay=0 value=200 wait=1 falloff=0\n  nearest_light=QSS_light_404 
+> distance_qu=80.399 origin=(-48.0, 696.0, 144.0) delay=0 value=1000 wait=1 
+> falloff=0
+> Non-finite luxel face/world/light matches: face=5828 poly=5828 luxel=(9, 3) 
+> atlas_sample=(1594.5, 2000.5) world_quake=(-80.0, 640.0, 96.0)\n  
+> nearest_light=QSS_light_405 distance_qu=64.4981 origin=(-120.0, 624.0, 144.0) 
+> delay=0 value=1000 wait=1 falloff=0\n  nearest_light=QSS_light_330 
+> distance_qu=77.5629 origin=(-128.0, 584.0, 72.0) delay=0 value=200 wait=1 
+> falloff=0\n  nearest_light=QSS_light_404 distance_qu=80.399 origin=(-48.0, 
+> 696.0, 144.0) delay=0 value=1000 wait=1 falloff=0
+> Last attempted scene visibility: mesh hide_render=False hide_viewport=False 
+> hide_get=False; active_map=QSS_Map_e1m1
+> Current (restored) bake settings: engine=BLENDER_EEVEE target=IMAGE_TEXTURES 
+> samples=4096 diffuse_bounces=4 color=True diffuse=True direct=True indirect=True
+> Color management: view_transform=AgX look=None exposure=0.0 gamma=1.0
+> Compiler bounce: 16
+> Compiler bounce color scale: 0.0
+> Quake direct bake: luxels=n/a lit=n/a rays=n/a blocked=n/a raw_mean=n/a 
+> source_mean=n/a normalization=n/a
+> Mesh faces: 6605; materials: 110; loops=31052; vertices=31052
+> Attribute qss_bsp_face_id: 0 entries / 6605 faces
+> ...
+> Lightmap face attributes: MISSING OR STALE; required face count=6605; lengths=...
+ 
+**What the report tells us**
+
+- The failed sample is on BSP face 5828, luxel (9, 3), around Quake position `(-80, 640, 96)`.
+- The closest light is QSS_light_405, roughly 64.5 map units away. The next two are roughly 77.6 and 80.4 units away. All three use delay 0, value 1000/200/1000, wait 1 and no explicit falloff.
+- The problem is not a light sitting directly on the bad surface. The previous exact-zero-distance explanation is not supported by these measured distances.
+- The original source luxel is finite; only the new Cycles result is invalid. The four bad atlas pixels still represent one final Quake luxel. Atlas rollback works.
+- The report shows the lightmap mesh attributes with zero entries after the failed operation. These attributes were present while the bake and face/light attribution were being calculated, because the diagnostic successfully mapped face 5828 and its world position. The failure cleanup/diagnostics report appears to be removing or invalidating them before the later report section inspects them. This is a separate report/cleanup issue; it does not invalidate the saved face attribution.
+
+**Code change made on PR #5**
+
+The three closest lights share Quake's delay-0 setting. PR #5 source used an experimental Cycles-only shader to bend Blender's normal point-light falloff into an ericw-style linear falloff. The earlier attempt changed how that shader calculated distance, but the exact same single bad luxel remained.
+
+A targeted 0.21.19 candidate now:
+- Uses Blender's normal point-light falloff for delay-0 lights in Cycles, rather than the experimental custom falloff graph.
+- Keeps SLOPGATE's existing Quake-to-Blender energy calibration, range and user brightness scale. It is a practical native-light approximation; the delay-0 Cycles bake will no longer aim to reproduce ericw's linear curve exactly.
+- Keeps the delay-5 custom correction unchanged.
+- Keeps Quake Direct as a separate lighting path.
+- Adds explicit tests for the selected falloff behaviour and updates the visible add-on version consistently to 0.21.19 in `__init__.py`, `addon.py` and README.
+- Retains the non-finite bake rejection and atlas/calibration rollback. No invalid luxel is silently clamped or accepted.
+
+Source commit: `a781e3f43d24e42bb19145cda13da3973d5044cd` on `fix/0.21.17-world-aligned-lightmap-charts`.
+
+**Automated build evidence**
+
+- GitHub Actions run [43983168256](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43983168256) succeeded on the exact source commit.
+- Python compilation, package assembly and **300 standalone tests** passed.
+- Installer artifact [Quake-Surface-Studio-v0.21.19-Blender-Install, ID 14283692364](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43983168256/artifacts/14283692364), 312,721 bytes.
+- SHA-256: `4451116ff2fb4af0e3b8ae1955d596249778b4d630afa4f467fe55927543417a`.
+- PR #5 remains open/draft; no merge. The 0.21.19 build is a candidate, not an official release.
+- No Blender GUI bake or Ironwail runtime validation was performed by the assistant. The one-luxel problem is not declared fixed until the user re-imports e1m1, bakes with 0.21.19 and compares the result.
+
+**Next user test**
+
+Install 0.21.19 and re-import e1m1 so its lights are recreated under the new falloff policy. Run the Cycles bake. If it completes, inspect the light levels in Blender and Ironwail. If it fails again, send the new Save Lighting Diagnostics report; the important question is whether the same face/luxel still becomes invalid and whether the report says the delay-0 lights are using the native fallback.
+
+The report's zero-length face attributes after failure should also be investigated before relying on later face-statistics sections. Do not infer that the original imported mesh was missing its data from the post-failure report alone.
+
