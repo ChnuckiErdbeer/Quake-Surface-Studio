@@ -420,6 +420,36 @@ class WorldChartSamplingTests(unittest.TestCase):
         self.assertEqual(positions[0], (496.0, 32.0, 0.0))
         self.assertEqual(positions[-1], (496.0, 48.0, -16.0))
 
+    def test_affine_classic_grid_sampler_matches_xyz_reference_sampler(self):
+        size = 64
+        pixels = [0.0] * (size * size * 4)
+        for y in range(size):
+            for x in range(size):
+                offset = (y * size + x) * 4
+                pixels[offset:offset + 4] = (
+                    x / (size - 1), y / (size - 1), 0.25, 1.0
+                )
+        texinfo = (0.0, 1.0, 0.0, -32.0, 0.0, 0.0, -1.0, 0.0)
+        plane_normal = (1.0, 0.0, 0.0)
+        plane_distance = 496.0
+        s_values = (0.0, 16.0, 32.0)
+        t_values = (0.0, 16.0, 32.0)
+        positions = lightmap_export.world_chart_grid_positions(
+            texinfo, plane_normal, plane_distance, s_values, t_values
+        )
+        reference = lightmap_export.sample_rgb_from_world_chart_positions(
+            pixels, size, 1, 4, 4, 1, 1, positions,
+            (0.0, 1.0, 0.0), (0.0, 0.0, -1.0), 0.0, -32.0,
+        )
+        optimized = lightmap_export.sample_classic_face_grid_from_world_chart(
+            pixels, size, 1, 4, 4, 1, 1,
+            texinfo, plane_normal, plane_distance,
+            0.0, 0.0, 3, 3,
+            (0.0, 1.0, 0.0), (0.0, 0.0, -1.0), 0.0, -32.0,
+        )
+        self.assertEqual(optimized, reference)
+
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
