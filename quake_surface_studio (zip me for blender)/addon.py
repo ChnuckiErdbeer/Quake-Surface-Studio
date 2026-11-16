@@ -7659,19 +7659,15 @@ def _qss_world_chart_face_rgb_samples(obj, image, pixels, poly_index, parsed=Non
     info = _qss_read_source_face_sample(mesh, poly_index, face_id, parsed)
     if info is None or info.get('decoupled_lmvecs') is not None:
         return None
-    sample_s = [float(info['s_min']) + sx * 16.0 for sx in range(info['width'])]
-    sample_t = [float(info['t_min']) + sy * 16.0 for sy in range(info['height'])]
-    positions = lightmap_export_utils.world_chart_grid_positions(
-        info['texinfo'], info['plane_normal'], info['plane_distance'],
-        sample_s, sample_t,
-    )
     size = int(image.size[0])
-    return lightmap_export_utils.sample_rgb_from_world_chart_positions(
+    return lightmap_export_utils.sample_classic_face_grid_from_world_chart(
         pixels, size, _qss_lightmap_pixel_scale(obj, image),
         info['atlas_x'], info['atlas_y'],
         int(obj.get('qss_lightmap_gutter', 2)),
         max(1, int(obj.get('qss_lightmap_scale', 1))),
-        positions, info['chart_axis_s'], info['chart_axis_t'],
+        info['texinfo'], info['plane_normal'], info['plane_distance'],
+        info['s_min'], info['t_min'], info['width'], info['height'],
+        info['chart_axis_s'], info['chart_axis_t'],
         info['chart_s_min'], info['chart_t_min'],
     )
 
