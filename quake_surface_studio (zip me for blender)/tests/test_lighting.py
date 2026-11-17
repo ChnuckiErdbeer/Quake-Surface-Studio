@@ -463,3 +463,25 @@ class EricwContributionGateTests(unittest.TestCase):
             lighting.ericw_light_value(300, 0, 200, world_dist=2, falloff=100),
             0.0,
         )
+
+
+class CyclesNativeFallbackSourceContractTests(unittest.TestCase):
+    def test_blender_native_fallback_clears_only_qss_owned_light_graphs(self):
+        addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
+        with open(addon_path, "r", encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("def _qss_clear_owned_cycles_light_nodes(light_data):", source)
+        helper_start = source.index("def _qss_clear_owned_cycles_light_nodes(light_data):")
+        helper_end = source.index("\ndef ", helper_start + 5)
+        helper = source[helper_start:helper_end]
+        self.assertIn("_qss_cycles_falloff_tree_is_owned(light_data)", helper)
+        self.assertIn("node_tree.nodes.clear()", helper)
+        self.assertNotIn("use_nodes = False", helper)
+
+    def test_native_fallback_records_actual_node_tree_not_use_nodes_flag(self):
+        addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
+        with open(addon_path, "r", encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("def _qss_cycles_light_node_summary(light_data, limit=8):", source)
+        self.assertIn("light_node_tree_qss_owned", source)
+        self.assertIn("light_node_tree={light['light_node_tree']}", source)
