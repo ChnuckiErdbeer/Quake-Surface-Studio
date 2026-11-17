@@ -259,8 +259,8 @@ def parse_bsp(path):
                                    "area": area, "max_plane_error": max_plane_error,
                                    "lightofs": lightofs, "sample_count": sample_count,
                                    "light_range_ok": light_range_ok, "texture": texname})
-    entity_text = lumps["entities"].split(b"\\0", 1)[0].decode("latin1", errors="replace")
-    entity_blocks = re.findall(r"\\{([^{}]*)\\}", entity_text, re.S)
+    entity_text = lumps["entities"].split(b"\0", 1)[0].decode("latin1", errors="replace")
+    entity_blocks = re.findall(r"\{([^{}]*)\}", entity_text, re.S)
     worldspawn_raw = entity_blocks[0][:3000] if entity_blocks else ""
     entity_list = parse_entities(lumps["entities"])
     lights = []
