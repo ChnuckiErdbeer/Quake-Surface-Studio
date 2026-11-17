@@ -123,15 +123,35 @@ class LightingHelpersTests(unittest.TestCase):
 
 
 class BlenderLivePreviewCalibrationTests(unittest.TestCase):
-    def test_default_ericw_softangle_maps_to_hard_blender_spot_edge(self):
-        self.assertEqual(lighting.blender_spot_blend_from_ericw_angles(40, 0), 0.0)
+    def test_default_ericw_softangle_uses_narrow_cycles_safe_blend(self):
+        blend = lighting.blender_spot_blend_from_ericw_angles(40, 0)
+        self.assertEqual(blend, lighting.CYCLES_MIN_SPOT_BLEND)
+        self.assertGreater(blend, 0.0)
+        self.assertLess(blend, 0.02)
 
-    def test_positive_ericw_softangle_maps_to_proportional_blender_blend(self):
+    def test_positive_ericw_softangle_keeps_proportional_blend(self):
         self.assertAlmostEqual(lighting.blender_spot_blend_from_ericw_angles(40, 30), 0.25)
-        self.assertEqual(lighting.blender_spot_blend_from_ericw_angles(40, 40), 0.0)
+        # A zero-width transition also receives the finite Cycles-safe floor.
+        self.assertEqual(
+            lighting.blender_spot_blend_from_ericw_angles(40, 40),
+            lighting.CYCLES_MIN_SPOT_BLEND,
+        )
 
-    def test_invalid_spot_angles_use_hard_edge(self):
-        self.assertEqual(lighting.blender_spot_blend_from_ericw_angles(float('nan'), 0), 0.0)
+    def test_invalid_spot_angles_use_cycles_safe_blend(self):
+        self.assertEqual(
+            lighting.blender_spot_blend_from_ericw_angles(float('nan'), 0),
+            lighting.CYCLES_MIN_SPOT_BLEND,
+        )
+        self.assertEqual(
+            lighting.blender_spot_blend_from_ericw_angles('bad', 0),
+            lighting.CYCLES_MIN_SPOT_BLEND,
+        )
+
+    def test_ericw_reference_still_has_an_exact_hard_spot_boundary(self):
+        import math
+        outer_cos = math.cos(math.radians(20.0))
+        self.assertEqual(lighting.ericw_spot_factor(outer_cos - 1e-6, 40, 0), 0.0)
+        self.assertEqual(lighting.ericw_spot_factor(outer_cos, 40, 0), 1.0)
 
     def test_cycles_margin_scales_with_atlas_resolution(self):
         self.assertEqual(lighting.lightmap_bake_margin_pixels(2, 1), 2)
