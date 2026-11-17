@@ -851,7 +851,7 @@ def json_safe(value):
     return value
 
 
-def world_plane_frame(plane, side=0):
+def _world_plane_frame_legacy(plane, side=0):
     """Match lightmap_export.world_plane_frame for a classic Quake BSP plane."""
     sign = -1.0 if int(side) else 1.0
     normal = [float(plane[i]) * sign for i in range(3)]
@@ -908,7 +908,7 @@ def world_chart_diagnostic(parsed, target_face_id, target_position=TARGET,
                 or len(face["polygon"]) < 3):
             continue
         try:
-            frame = world_plane_frame(planes[plane_id], int(face["side"]))
+            frame = _world_plane_frame_legacy(planes[plane_id], int(face["side"]))
         except ValueError:
             continue
         plane_key = tuple(round(value / 1e-4) for value in (
