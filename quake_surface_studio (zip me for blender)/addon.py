@@ -3335,7 +3335,7 @@ def _qss_cycles_light_node_summary(light_data, limit=8):
         entries.append(f"...+{len(nodes) - len(entries)}")
     return f"{kind}[{','.join(entries)}]"
 
-def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
+def _qss_build_cycles_delay_falloff_nodes(light_data, delay, allow_initial_import_tree=False):
     """Build a Cycles multiplier that restores ericw falloff over Blender's inverse-square lamps.
 
     Blender 5.3 creates a simple Emission-to-Light-Output tree by default and
@@ -3348,7 +3348,9 @@ def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
     existing_tree = getattr(light_data, "node_tree", None)
     if (existing_tree is not None and len(existing_tree.nodes) > 0
             and not _qss_cycles_falloff_tree_is_owned(light_data)
-            and not light_node_utils.is_default_light_node_tree(light_data)):
+            and not light_node_utils.is_safe_to_replace_light_node_tree(
+                light_data, qss_created_by_current_import=allow_initial_import_tree
+            )):
         raise RuntimeError("Existing user-authored light nodes were preserved; QSS Cycles falloff was not installed")
 
     if hasattr(light_data, "use_nodes") and not bool(light_data.use_nodes):
@@ -3485,7 +3487,7 @@ def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
     return node_tree
 
 
-def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
+def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value, allow_initial_import_tree=False):
     """Enable ericw-style Cycles falloff for supported delay-0 and delay-5 lights."""
     light_data = light_obj.data
 
@@ -3510,7 +3512,9 @@ def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
     existing_tree = getattr(light_data, "node_tree", None)
     if (existing_tree is not None and len(existing_tree.nodes) > 0
             and not _qss_cycles_falloff_tree_is_owned(light_data)
-            and not light_node_utils.is_default_light_node_tree(light_data)):
+            and not light_node_utils.is_safe_to_replace_light_node_tree(
+                light_data, qss_created_by_current_import=allow_initial_import_tree
+            )):
         light_obj["qss_cycles_falloff_active"] = False
         light_obj["qss_cycles_falloff_profile"] = "user_nodes_preserved_native_fallback"
         light_obj["qss_cycles_falloff_error"] = (
@@ -3541,7 +3545,9 @@ def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
         ) != int(delay) or node_tree is None or not required.issubset(
             {node.name for node in node_tree.nodes}
         ):
-            node_tree = _qss_build_cycles_delay_falloff_nodes(light_data, int(delay))
+            node_tree = _qss_build_cycles_delay_falloff_nodes(
+                light_data, int(delay), allow_initial_import_tree=allow_initial_import_tree
+            )
         nodes = node_tree.nodes
         by_name = {node.name: node for node in nodes}
         by_name["QSS_Ericw_LightFalloff"].inputs["Strength"].default_value = 1.0
@@ -3787,7 +3793,8 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
         light_obj['qss_quake_world_dist'] = float(world_dist)
         light_obj['qss_quake_anglescale'] = float(anglescale)
         light_obj['qss_applied_energy_scale'] = energy_scale
-        light_obj['qss_quake_light_delay'] = int(_parse_entity_float(entity, 'delay', 0))
+        delay = int(_parse_entity_float(entity, 'delay', 0))
+        light_obj['qss_quake_light_delay'] = delay
         light_obj['qss_quake_light_style'] = int(light_style)
         light_obj['qss_quake_style_was_inferred'] = bool(style_inferred)
         light_obj['qss_quake_color'] = list(color_rgb)
@@ -3812,7 +3819,19 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
         light_obj['qss_quake_no_staticlight'] = bool(_parse_entity_float(entity, '_nostaticlight', 0.0) != 0.0)
         light_obj['qss_quake_world_dist'] = float(world_dist)
         light_obj['qss_quake_world_range'] = float(world_range)
-        light_obj['qss_quake_delay_note'] = 'This diagnostic build uses Blender-native Cycles falloff for all delays; exact Quake-style direct lighting remains available through the separate Quake Direct path.'
+        light_obj['qss_quake_delay_note'] = (
+            'Cycles applies Quake delay-0 and delay-5 falloff corrections when the '
+            'QSS light graph is active; other delays use the native fallback. '
+            'Eevee realtime preview always uses Blender-native falloff.'
+        )
+        # This light datablock was just created by this import operation. Allow
+        # QSS to replace Blender's starter Emission -> Light Output nodes once.
+        # Subsequent updates use the normal ownership/default-tree checks, so
+        # user-edited light graphs are still preserved.
+        if lighting_utils.cycles_uses_ericw_falloff_correction(delay):
+            _qss_update_cycles_delay_falloff(
+                light_obj, delay, intensity, allow_initial_import_tree=True
+            )
         light_count += 1
 
     # Worldspawn sunlight is a directional source in ericw-tools.
@@ -11072,7 +11091,7 @@ def _qss_diagnostics_text(context, obj):
     for light_obj in active_map_objects:
         if light_obj.type != 'LIGHT' or light_obj.get('qss_light_role') not in {'quake_entity_light', 'quake_world_sunlight'}:
             continue
-        lines.append('  {} type={} color={} energy={:.6g} W style={} inferred={} value={} delay={} range={} manual_calibration={} cycles_profile={} cycles_custom_active={} light_node_tree_qss_owned={} light_node_tree={} spot_size={:.6g} spot_blend={:.6g}'.format(
+        lines.append('  {} type={} color={} energy={:.6g} W style={} inferred={} value={} delay={} range={} manual_calibration={} cycles_profile={} cycles_custom_active={} cycles_error={} light_node_tree_qss_owned={} light_node_tree={} spot_size={:.6g} spot_blend={:.6g}'.format(
             light_obj.name, light_obj.data.type, tuple(round(float(v), 4) for v in light_obj.data.color),
             float(light_obj.data.energy), light_obj.get('qss_quake_light_style', 0),
             light_obj.get('qss_quake_style_was_inferred', False), light_obj.get('qss_quake_light_value', ''),
@@ -11080,6 +11099,7 @@ def _qss_diagnostics_text(context, obj):
             light_obj.get('qss_manual_energy_calibration', 1.0),
             light_obj.get('qss_cycles_falloff_profile', 'unknown'),
             light_obj.get('qss_cycles_falloff_active', False),
+            str(light_obj.get('qss_cycles_falloff_error', '')).replace(' ', '_'),
             _qss_cycles_falloff_tree_is_owned(light_obj.data),
             _qss_cycles_light_node_summary(light_obj.data),
             float(getattr(light_obj.data, 'spot_size', 0.0)),
@@ -11432,8 +11452,8 @@ class QSS_OT_set_lighting_mode(Operator):
     mode: EnumProperty(
         name="Lighting mode",
         items=(("source", "Original", "Display imported BSP lightmaps"),
-               ("realtime", "Eevee", "Preview scene lights in Material Preview"),
-               ("cycles", "Cycles", "Preview scene lights in Cycles"),
+               ("realtime", "Eevee", "Fast live preview using Blender-native falloff (approximate)"),
+               ("cycles", "Cycles", "Preview scene lights with Quake delay-0/5 falloff corrections (slower)"),
                ("baked", "Baked", "Display the generated lightmap")),
     )
 
