@@ -22232,3 +22232,20 @@ The candidate correction sets `CYCLES_MIN_SPOT_BLEND = 0.01` and ensures the imp
 The production branch is now version 0.21.22 at commit `8a138c4d66d6aa16878acd3bde41b9b3578abf29`. Python compile/tests and package CI are running; no Blender runtime bake or engine visual comparison has yet been performed by the assistant. The 0.01 floor is a reasoned candidate based on the Cycles source, not a proven runtime fix.
 
 Acceptance remains: fresh-import original rerelease E1M1, all 252 lights present, no manual Blend changes, successful full-map bake with no non-finite luxels, and visual comparison of the six spotlight edges in the Quake rerelease. Classic engine face-edge filtering is still a separate issue.
+
+
+
+### Final CI and installer verification
+
+- Final workflow run: `44180237973`, conclusion **success**.
+- Run URL: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/44180237973
+- Exact source commit tested: `8a138c4d66d6aa16878acd3bde41b9b3578abf29`.
+- Python compilation passed.
+- Standalone test suite: **312 tests passed** (`Ran 312 tests ... OK`).
+- BSP export integrity checks passed.
+- Blender-ready install package assembly and artifact upload passed.
+- Installer artifact: `Quake-Surface-Studio-v0.21.22-Blender-Install`, artifact ID `14371921535`, size 316,758 bytes.
+- Artifact SHA-256: `641b7fe160ee487c87865b076614c5a6a98720730398a8c0695627bc9833c340`.
+- Installer page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/44180237973/artifacts/14371921535
+
+These CI results validate the source tests and package, not Blender's actual Cycles runtime. The original rerelease E1M1 full-map bake and six-cone visual comparison remain the decisive user acceptance test.
