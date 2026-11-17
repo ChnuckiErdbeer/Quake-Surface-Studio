@@ -21909,3 +21909,50 @@ The six pale-blue spotlights are entities 403–408 in e1m1.decompile.map:
 - Inspect the six spotlight energy/falloff and cone coverage against the ericw result, while separately inspecting face 5828's boundary luxel handling and the actual Blender light node trees on 0.21.20.
 - Any brightness change needs side-by-side ericw / SLOPGATE lightmap comparison, not a global eyeballed multiplier.
 - No code changes, new tests, new installer, or merge were made for this clarification.
+
+
+## 2026-11-17 — User asks to resume lighting investigation; Blender 5.3 light-node fallback correction
+
+**User request and communication preference**
+
+The user welcomed the next stage of investigation and reiterated that explanations should be understandable to technically enthusiastic level designers, not written like a programmer-to-programmer debugging log. Keep user-facing updates focused on visible map results and practical next steps; retain implementation detail in this archive/handoff.
+
+**Latest user-supplied context recovered**
+
+- The user explicitly connected QSS_light_405 to the original six pale-blue spotlights (MAP entities 403–408, _color "181 238 255", light "1000", no explicit angle or _softangle). In ericw they are subtle blue shimmers; in SLOPGATE they looked much too bright and had a lightmap edge glitch.
+- The repeatable failed luxel is on BSP face 5828 at Quake position (-80, 640, 96), at the intersection of perpendicular brush faces using tech07_2, close to spotlight 405. The exact cause of the NaN is still not proven.
+- 0.21.20 produced the identical four non-finite atlas pixels after all custom Quake Cycles correction profiles were nominally disabled. spottest02 had succeeded on 0.21.19; this does not validate the e1m1 corner.
+- Prior diagnostic output included use_light_nodes=True. On Blender 5.3 this is not a useful enabled/disabled indicator: the compatibility property always reads True and assignments are ignored. The actual contents of the light's node tree must be inspected.
+
+**Source inspection finding**
+
+PR #5 branch fix/0.21.17-world-aligned-lightmap-charts at pre-fix source 21344ec1cbbe60edf321958b9d358598bcfe01ed had a real fallback defect:
+- _qss_update_cycles_delay_falloff() attempted to disable a QSS-owned custom light graph by assigning light_data.use_nodes = False.
+- _import_bsp_entities() did the same for newly created lights.
+- Blender 5.1+ / 5.3 keeps Light.use_nodes as a compatibility property that always returns True and ignores setting it False. Consequently the 0.21.20 report could say cycles_custom_active=False while the actual QSS shader graph still existed. The old report field did not prove native falloff was active.
+- This makes the 0.21.20 isolation test inconclusive. It did not reliably remove the custom light node trees. This is a concrete compatibility bug and a stronger lead for the persistent NaN than the previously suspected face/material issue.
+
+**Patch committed to PR #5**
+
+- Commit 9d9b650339f3b0be64830290a241126e5c16e4ef changes the actual fallback: it removes the node graph only when every node is explicitly tagged as owned by SLOPGATE. Any graph containing untagged/user-authored nodes is preserved.
+- Removed reliance on setting use_nodes=False for QSS fallback and import.
+- Added a compact helper that reports the real node names/types and QSS ownership, rather than relying on Blender's always-True use_nodes compatibility property.
+- Expanded nearest-light and active-map diagnostics to show actual node tree contents and whether it is QSS-owned.
+- This is a corrective diagnostic change. It does not yet prove the NaN is fixed; Blender 5.3 runtime bake must confirm.
+
+**Version and test coverage**
+
+- Bumped package bl_info version to 0.21.21.
+- Updated package and repository README to 0.21.21.
+- Added two source-contract tests to tests/test_lighting.py, checking that fallback clears actual QSS-owned nodes and diagnostics inspect the actual tree rather than the obsolete flag.
+- File commits after the code patch: tests 67c63b5d472fbdb6cf3401885ecff548378b3d8f; package version d0285b36d73c0dfeca1782bfe4bed6e85386ff8e; package README b77bbd1dcaa136ffb39a6d4aa828f067277aa994; root README / latest branch tip c929614765a5cd299a5a82e01548e9a90763311f.
+- No CI run/artifact has yet been verified for this commit. Do not provide an installer link or claim tests passed until GitHub Actions produces and the ZIP is verified.
+- No Blender runtime bake, brightness comparison, or Ironwail validation has been performed by the assistant. PR #5 remains open/draft; no merge.
+
+**Important next steps**
+
+1. Check current PR #5 branch head and workflow status. Confirm the 0.21.21 commit builds, tests and packages.
+2. Once the ZIP is verified, ask the user to install 0.21.21, re-import e1m1, and run one bake. This time the report should show light_node_tree=empty (or no QSS-owned nodes) for lights 405/404/330, not merely use_nodes=True/False.
+3. If the same NaN persists with empty native light trees, move to Cycles GPU/corner-sample handling at face 5828; do not keep changing falloff profiles.
+4. Treat the excessive blue spotlight brightness as a separate acceptance item. Native Blender falloff is only an approximation to ericw's delay-0 linear attenuation, so even a successful NaN fix may not correct brightness. Compare the six-light group against ericw using the committed images and a controlled per-light sample comparison before selecting a brightness conversion.
+5. Treat the original engine blur/face-edge clipping as a third separate issue. Do not claim the 0.21.13 Enhanced-only rim or later world-chart work fixed it without Ironwail comparison.
