@@ -21967,3 +21967,40 @@ PR #5 branch fix/0.21.17-world-aligned-lightmap-charts at pre-fix source 21344ec
 - Download: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/44005218004/artifacts/14293447941
 - ZIP downloaded and verified locally: 52 entries, no corrupt member, installable quake_surface_studio/__init__.py present, checksum matches the GitHub artifact digest.
 - This is not Blender runtime validation. User still needs to test a fresh e1m1 import and Cycles bake. PR #5 remains open/draft; no merge.
+
+
+## 2026-11-17 — Additional repeated e1m1 non-finite bake popup; 0.21.21 follow-up build
+
+**User message (verbatim)**
+
+> Cycles bake failed; atlas and light calibration restored: Cycles bake produced non-finite luxel luminance samples; baked=1/165763, source=0/165763, non-finite atlas RGB values=12, non-finite atlas pixels=4, first atlas pixel coordinates=[(1594, 2000), (1595, 2000), (1594, 2001), (1595, 2001)]. The atlas was restored. This is not a zero-light bake; inspect the offending Cycles light/shader samples.
+
+**Interpretation**
+
+- This is another occurrence of the exact same failure signature: 1 bad baked luxel out of 165,763; zero bad source luxels; four adjacent atlas pixels / twelve RGB channel values, at (1594,2000), (1595,2000), (1594,2001), (1595,2001). It is not a generic black bake and SLOPGATE correctly restores the atlas.
+- The popup by itself does not identify which build/artifact the user was running and does not expose the new light-node diagnostic. Do not attribute it to the newest commit unless the user confirms the matching installer. Do not treat it as a root-cause diagnosis.
+- Do not ask the user to repeat the same bake just to recreate this popup. If the failure was from the earlier 0.21.21 artifact built from c929614, the later artifact below is a materially different build and one targeted retest is worthwhile. If the failure was already from the latest artifact (9e72bc5), no further bake should be requested until the new Save Lighting Diagnostics output is reviewed.
+
+**Repository moved one commit beyond the first 0.21.21 installer**
+
+- Latest PR #5 source head: 9e72bc5a77b30322ab53b00be0ec139380ae45f4, commit title Restore exact Quake Cycles falloff on Blender 5.3 (0.21.21). Commit author is the repository user.
+- The preceding source head c929614765a5cd299a5a82e01548e9a90763311f / artifact 14293447941 treated all delays as native fallback and could clear QSS-owned graphs, but it could not distinguish Blender 5.3's untouched default Emission-to-Light-Output tree from a user-custom graph. Thus it was not a valid test of installing the exact Quake Cycles falloff correction for a freshly imported Blender 5.3 light.
+- The newer commit adds light_node_utils.py to recognize only Blender's untouched default two-node light graph. It safely replaces that default with the QSS delay-0 linear / delay-5 soft inverse-square graph, while preserving any genuinely edited/custom light graph. It changes the distance probe to use a guarded reciprocal of the Light Falloff Linear output, with bounded distances, avoiding the previous Inf/Inf form at the source.
+- The new code is intended to restore the subtle ericw-style attenuation and make the six blue delay-0 spotlights less over-bright, while preserving user-custom graphs. It does not yet prove the one bad e1m1 luxel is fixed.
+
+**Latest build / CI / installer**
+
+- CI run 44005701116, job 133780413705, passed Python compilation, 311 standalone tests and Blender package assembly/upload.
+- Version remains 0.21.21, but this is a later source revision than the previous 0.21.21 artifact. Do not confuse the two installers.
+- Latest installer: Quake-Surface-Studio-v0.21.21-Blender-Install, artifact ID 14294590886, 316,032 bytes.
+- SHA-256: 7bcc940fe7651eaae1a623dcd0cebefc6153c3bf799f63d48f17930561fdf71e.
+- Download: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/44005701116/artifacts/14294590886
+- ZIP independently downloaded and checked: 54 entries; no corrupt member; installable quake_surface_studio/__init__.py present; local checksum matches GitHub upload digest.
+- CI/package is verified, but no Blender 5.3 interactive test has been performed by the assistant. PR #5 remains open/draft; no merge.
+
+**Next diagnostic action**
+
+- Use only the latest artifact 14294590886 if the user's repeated popup came from the previous artifact 14293447941. Import a fresh e1m1 so the light setup is newly initialized; a previously imported map may retain old node graphs.
+- If the same error then occurs, do not run another bake. Select e1m1 in Object Mode, click Save Lighting Diagnostics, and provide only the Non-finite luxel face/world/light matches section for the nearest lights. The decisive fields are light_node_tree (expected qss[...] for delay 0) and light_node_tree_qss_owned=True for the relevant QSS correction; if not, we know the intended correction did not install. Also inspect cycles_profile and cycles_custom_active.
+- If latest-build diagnostics confirm QSS graphs are active and the same luxel remains non-finite, move away from changing general light attenuation. Focus on the exact face 5828 corner luxel and Cycles GPU treatment; preserve rollback.
+
