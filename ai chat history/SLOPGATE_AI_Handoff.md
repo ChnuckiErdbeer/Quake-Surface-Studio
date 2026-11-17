@@ -1277,3 +1277,33 @@ Those should include the nearest three lights plus `cycles_profile`, custom-acti
 If diagnostics confirm the native path for all three nearest lights, move investigation away from the custom Quake falloff graphs toward face 5828's material/UV/geometry and/or the GPU Cycles sampling path. Do not keep modifying light falloff or add a clamp that hides non-finite values.
 
 No new source code, tests, artifact or merge occurred after this 0.21.20 user test report. PR #5 stays open/draft at `21344ec1cbbe60edf321958b9d358598bcfe01ed`. CI run `43987390162`, 300 tests, successful package, artifact ID `14286680280`, size 313,031 bytes, SHA-256 `a37d55487a010cf76da4d897b7989588dcdfa230997cb8cfd2120f4e88cdee75`.
+
+
+## 2026-11-17 — Spotlight 405 and geometric corner at the bad e1m1 luxel
+
+The user identified the wall at Quake position `(-80,640,96)` in Ironwail as visibly lit by spotlight `QSS_light_405`, and pushed the decompiled map to `testressource26.11.16_01/e1m1.decompile.map`.
+
+### Decompiled MAP review
+- MAP blob `1cf32f62cb9dc977665e48eecfbcc6c9b5d7f49e`, 1,697,287 bytes, 24,864 lines.
+- Entity index 405 is the imported `QSS_light_405`:
+  - `classname light`, `light 1000`, `_color 181 238 255`
+  - `mangle 0 -30 0`
+  - `origin -120 624 144`
+  - no explicit `angle` or `_softangle`
+- ericw-tools documentation says spotlight angle default is 40° and soft-angle default is 0 (hard cone). The source `light/entities.cc::SetupSpotlights` sets the cutoff to `-cos(angle / 2)`; 40° is therefore a 20° half-angle. QSS import maps that to Blender `spot_size=0.698132` rad (40°) and `spot_blend=0`.
+- Other nearby source lights: point `(-128,584,72)`, value 200; spotlight `(-48,696,144)`, value 1000, mangle `270 330 0`.
+
+### Face 5828 sample is at a brush corner
+The known bad luxel centre is face 5828, local luxel (9,3), Quake position `(-80,640,96)`. Parsed the decompiled MAP's convex brush side planes and found the sample lies exactly at the intersection of perpendicular planes `x=-80` and `y=640`. Both corresponding surface faces use texture `tech07_2`. Matching brush records occur near MAP lines 20258 and 20325. This is a brush-corner / face-boundary sample, not an interior point on a broad wall.
+
+Vector from light 405 to the sample is `(40,16,-48)`, distance 64.4981. Mangle yaw 0 / pitch -30 gives axis approximately `(0.866,0,-0.5)`; the sample direction is about 24.6° from the axis. With the 40° full cone (20° half-angle), it is roughly 4.6° outside the nominal cone. This does not contradict the user's Ironwail observation that the wall region is illuminated; it means the exact luxel centre is near/outside the hard cutoff and other local contributions may be involved. The other nearby spotlight is similarly near/outside its nominal cone at the exact coordinate.
+
+### 0.21.20 report interpretation
+The 0.21.20 report marks the three nearest lights as `cycles_profile=native_fallback_delay0`, `cycles_custom_active=False`, `spot_blend=0`. QSS's custom Cycles falloff is therefore not marked active at the bad sample. The report also says `use_light_nodes=True`; that is a separate Blender flag and does not say which node graph is present. The existing diagnostics do not list the actual node names or links, so do not claim that no Blender light node tree exists based solely on `cycles_custom_active=False`.
+
+### Next source investigation
+- Stop changing general light falloff.
+- Focus on a single GPU bake luxel at the intersection of two brush faces near the hard edge of spotlight 405.
+- Inspect whether face 5828's lightmap UV sample maps exactly onto a polygon boundary and how Cycles GPU handles that sample.
+- A controlled test of a tiny spot-edge softness or an inward face-local sample offset may be considered, but preserve ericw/Quake lighting and classic BSP luxel placement in any final fix.
+- No new source changes or installer from this MAP inspection. PR #5 remains at 0.21.20 source commit `21344ec1cbbe60edf321958b9d358598bcfe01ed`, CI 300 tests, artifact `14286680280` as above.
