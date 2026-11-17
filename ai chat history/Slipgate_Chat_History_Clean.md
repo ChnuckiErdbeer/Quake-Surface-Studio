@@ -22266,3 +22266,26 @@ Source inspection confirms a likely cause:
 Do not reduce global brightness or every lamp's energy yet: that changes the intensity at all distances but does not correct the falloff curve. The next source fix should make the intended correction graph active for freshly imported QSS lights without taking over genuinely user-authored trees. First inspect `qss_cycles_falloff_active`, `qss_cycles_falloff_profile`, `qss_cycles_falloff_error` and node-tree summary for the six spotlights and ordinary delay-0 lights in a 0.21.22 diagnostics report. The user should also state whether the live preview was Realtime/Eevee or Cycles.
 
 No code was changed and no fresh Blender diagnostics were run during this investigation. Bake completion is user-confirmed; brightness fidelity remains open.
+
+
+
+## 2026-11-17 — E1M1 diagnostics isolate inactive falloff graph; 0.21.23 correction packaged
+
+The user supplied 0.21.22 diagnostics from Blender 5.3.0 for original E1M1. The report confirms:
+- Preview mode `realtime`, render engine `BLENDER_EEVEE`.
+- Full Cycles bake completed, `FINISHED`, 0 non-finite luxels.
+- Raw bake mean 3.15409998; source mean 0.29474011; final atlas mean 0.29514125; max luxel 33.60558; source-match normalization 0.09344666.
+- GPU / 4096 samples / 2 diffuse bounces / 2048 atlas / 6,437 receiver faces.
+- 252 imported lights. Representative delay-0 and delay-5 lights report `user_nodes_preserved_native_fallback`, `cycles_custom_active=False`, with a two-node Emission-to-Light-Output graph. Delay-3 entries show native fallback.
+- QSS mesh diagnostics also report 0-length face attributes for 6,605 faces and 0-length UV data for 31,052 loops. Treat this as a separate stale-mesh warning; the next acceptance test must start with a clean fresh import and verify these are rebuilt.
+
+The report identifies two separate brightness causes. Eevee Realtime ignores light shader node trees, so its live preview uses Blender-native falloff and remains approximate. The Cycles bake also lacked QSS's custom correction for delay 0 and 5 because the node classifier called Blender's generated starter graph `user-custom` and preserved it. The raw bake was globally normalized to match the source mean (0.295141 vs 0.294740, about 0.14% difference), but the maximum local luxel remained 33.6056; source-mean matching does not correct the spatial distribution of near-light hotspots.
+
+The new source correction in SLOPGATE 0.21.23 adds a one-time safe replacement permission for the just-created light datablocks during BSP import. It installs the custom Quake/Cycles falloff graph for delay 0 and delay 5. The permission is passed only at that import point. Subsequent operations still preserve user-edited node graphs, using the existing QSS-owned/default-tree checks. Diagnostics now expose `cycles_error`, and the UI describes Eevee Realtime as approximate and Cycles preview as the slower corrected mode.
+
+Source branch `fix/0.21.17-world-aligned-lightmap-charts`, final commit `8cd21cc144687c0808c8639c8af07962e5351162`. CI workflow `44192399427` passed compilation, **314 tests**, BSP export integrity and package upload. Artifact ID `14377536600`, 317,905 bytes; SHA-256 `3dde455049ce33ebfc8afc5c37205ab9df44ac283100932ef3518896920a5816`.
+
+- Workflow: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/44192399427
+- Installer: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/44192399427/artifacts/14377536600
+
+This is not yet a proven brightness fix. Acceptance: install 0.21.23, freshly re-import original unrecompiled E1M1, confirm delay-0/5 diagnostics show `cycles_custom_active=True`, proper `ericw_delay0_linear` / `ericw_delay5_soft_inverse_square` profiles and empty `cycles_error`; switch to Cycles preview; then run a full-map bake with all lights and inspect near-wall hot spots. Eevee Realtime remains a native-falloff approximation. Keep classic engine edge filtering separate. No 0.21.23 Blender runtime test has yet been performed by the assistant.
