@@ -1258,3 +1258,22 @@ The 0.21.20 diagnostic source commit `21344ec1cbbe60edf321958b9d358598bcfe01ed` 
 - Workflow: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43987390162
 
 This confirms automated tests and package creation only. It is not a Blender 5.3 runtime bake test. The user must test e1m1 in Blender. 0.21.20 remains a diagnostic candidate, not an official release.
+
+
+## 2026-11-17 — 0.21.20 still produces same e1m1 non-finite luxel
+
+The user tested 0.21.20 and reports the identical short error: one bad baked luxel out of 165,763; zero bad source luxels; 12 non-finite RGB channel values across the same four atlas pixels `(1594,2000)`, `(1595,2000)`, `(1594,2001)`, `(1595,2001)`. Same map face/luxel attribution from prior report remains face 5828 at (-80,640,96), unless a newer report proves otherwise.
+
+0.21.20 disables **all** QSS custom Cycles falloff graphs (including delay 5). Thus the custom delay-0/delay-5 shader graphs are not the leading cause. However the generic error dialog does not confirm the actual lamp mode at render time. 0.21.20 added `cycles_profile`, `cycles_custom_active`, `use_light_nodes`, `spot_size`, `spot_blend`, and energy to nearest-light attribution and active-map lamp diagnostics.
+
+### Next step
+
+Do not ask for another bake. Ask the user to run **Save Lighting Diagnostics** now, after the failed 0.21.20 bake, with e1m1 selected and in Object Mode. Ask for only:
+- `Last attempted lamp states`
+- `Non-finite luxel face/world/light matches`
+
+Those should include the nearest three lights plus `cycles_profile`, custom-active state and light-node state. Expected 0.21.20 values: `cycles_profile=native_fallback_delay0` for delay-0 lights (or `native_fallback` for other delays), `cycles_custom_active=False`, `use_light_nodes=False` for QSS-owned graphs. The key check is that no custom QSS light nodes were active. The old 0.21.19 report cannot verify this.
+
+If diagnostics confirm the native path for all three nearest lights, move investigation away from the custom Quake falloff graphs toward face 5828's material/UV/geometry and/or the GPU Cycles sampling path. Do not keep modifying light falloff or add a clamp that hides non-finite values.
+
+No new source code, tests, artifact or merge occurred after this 0.21.20 user test report. PR #5 stays open/draft at `21344ec1cbbe60edf321958b9d358598bcfe01ed`. CI run `43987390162`, 300 tests, successful package, artifact ID `14286680280`, size 313,031 bytes, SHA-256 `a37d55487a010cf76da4d897b7989588dcdfa230997cb8cfd2120f4e88cdee75`.
