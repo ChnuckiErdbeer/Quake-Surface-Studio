@@ -207,15 +207,15 @@ def ericw_light_value(light_value: float, delay: int, distance: float,
 
 
 def cycles_uses_ericw_falloff_correction(delay: int) -> bool:
-    """Return whether Cycles should use a QSS custom Quake falloff shader.
+    """Return whether Cycles applies the exact Quake attenuation correction.
 
-    Custom delay-0 falloff was disabled in 0.21.19 after a repeatable
-    non-finite e1m1 luxel. 0.21.20 also disables the remaining delay-5
-    shader so a large-map bake can confirm whether any custom light graph
-    causes the sample. All Quake lights use Blender's native Cycles falloff
-    in this diagnostic candidate. Quake Direct remains independent.
+    ericw delay 0 (linear) and delay 5 (soft inverse-square) have dedicated
+    Cycles node graphs. Other Quake delay types retain their native fallback.
     """
-    return False
+    try:
+        return int(delay) in {0, 5}
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def ericw_cycles_light_falloff_correction(
@@ -233,9 +233,9 @@ def ericw_cycles_light_falloff_correction(
       * delay 0: the midpoint of its finite linear radius (energy = I*R^2/8)
       * delay 5: the ericw 128/(wait*world_dist) reference distance (energy = I*R^2/4)
 
-    Cycles' Light Falloff node exposes both 1/d and 1/d^2. Their ratio recovers
-    distance, allowing the light shader to multiply the native inverse-square
-    result by this correction. Distances and radius are in Quake map units.
+    Cycles' Light Falloff node exposes a Linear (1/d) output. The node graph
+    takes its reciprocal with a safe floor, avoiding an Inf/Inf distance
+    calculation at the light origin. Distances and radius are in Quake map units.
     The return value is a dimensionless multiplier; other delays are unchanged.
     """
     import math

@@ -7,18 +7,30 @@ import lighting
 
 
 class CyclesFalloffPolicyTests(unittest.TestCase):
-    def test_delay_zero_uses_native_blender_falloff(self):
-        self.assertFalse(lighting.cycles_uses_ericw_falloff_correction(0))
+    def test_delay_zero_uses_the_exact_ericw_correction(self):
+        self.assertTrue(lighting.cycles_uses_ericw_falloff_correction(0))
 
-    def test_delay_five_uses_native_blender_falloff_during_nan_isolation(self):
-        self.assertFalse(lighting.cycles_uses_ericw_falloff_correction(5))
+    def test_delay_five_uses_the_exact_ericw_correction(self):
+        self.assertTrue(lighting.cycles_uses_ericw_falloff_correction(5))
 
-    def test_all_other_delays_use_the_native_fallback(self):
+    def test_all_other_delays_keep_the_native_fallback(self):
         for delay in (1, 2, 3, 4, 6, -1):
             self.assertFalse(lighting.cycles_uses_ericw_falloff_correction(delay))
 
-    def test_invalid_delay_uses_the_native_fallback(self):
+    def test_invalid_delay_keeps_the_native_fallback(self):
         self.assertFalse(lighting.cycles_uses_ericw_falloff_correction("invalid"))
+
+    def test_delay_zero_correction_is_finite_at_the_light_origin(self):
+        import math
+        value = lighting.ericw_cycles_light_falloff_correction(0, 0.0, 1000.0)
+        self.assertTrue(math.isfinite(value))
+        self.assertEqual(value, 0.0)
+
+    def test_delay_five_correction_is_finite_at_the_light_origin(self):
+        import math
+        value = lighting.ericw_cycles_light_falloff_correction(5, 0.0, 1000.0)
+        self.assertTrue(math.isfinite(value))
+        self.assertEqual(value, 0.0)
 
 
 class LightingHelpersTests(unittest.TestCase):

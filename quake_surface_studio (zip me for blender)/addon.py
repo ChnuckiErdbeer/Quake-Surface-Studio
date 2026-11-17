@@ -25,11 +25,11 @@ from bpy.props import StringProperty, FloatProperty, FloatVectorProperty, BoolPr
 from bpy.types import Operator, Panel, Menu
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
-from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils, map_sync, surface_policy
+from . import bsp, color, lighting as lighting_utils, light_node_utils, material_utils, lightmap_export as lightmap_export_utils, map_sync, surface_policy
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils, image_undo
 
 
-ADDON_VERSION = (0, 21, 20)
+ADDON_VERSION = (0, 21, 21)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -3313,13 +3313,19 @@ def _qss_clear_owned_cycles_light_nodes(light_data):
 
 
 def _qss_cycles_light_node_summary(light_data, limit=8):
-    """Describe the real light node tree; Light.use_nodes is not informative in Blender 5.3."""
+    """Describe the actual node graph; the Blender 5.3 use_nodes flag is not useful."""
     node_tree = getattr(light_data, "node_tree", None)
     if node_tree is None:
-        return "no-tree"
+        return "native-no-tree"
     nodes = list(node_tree.nodes)
     if not nodes:
-        return "empty"
+        return "native-empty"
+    if _qss_cycles_falloff_tree_is_owned(light_data):
+        kind = "qss"
+    elif light_node_utils.is_default_light_node_tree(light_data):
+        kind = "blender-default"
+    else:
+        kind = "user-custom"
     entries = []
     for node in nodes[:max(1, int(limit))]:
         node_type = getattr(node, "bl_idname", getattr(node, "type", "NODE"))
@@ -3327,31 +3333,26 @@ def _qss_cycles_light_node_summary(light_data, limit=8):
         entries.append(f"{node.name}:{node_type}{marker}")
     if len(nodes) > len(entries):
         entries.append(f"...+{len(nodes) - len(entries)}")
-    return ",".join(entries)
-
+    return f"{kind}[{','.join(entries)}]"
 
 def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
-    """Build a Cycles-only multiplier that converts the base point falloff.
+    """Build a Cycles multiplier that restores ericw falloff over Blender's inverse-square lamps.
 
-    The standard QSS lamp energy is already calibrated at one reference point.
-    With Smooth=0, the Light Falloff node's Quadratic output is Strength / d².
-    Recover d as sqrt(Strength / Quadratic), avoiding Linear/Quadratic: at the
-    light origin both Linear and Quadratic can be infinite, so their ratio is
-    Inf/Inf (NaN). The safe quadratic denominator and square-root form remain
-    finite at zero distance. The math nodes then apply the exact ericw delay 0
-    or delay 5 profile. Eevee ignores this light node tree and retains the
-    ordinary lamp-energy approximation.
+    Blender 5.3 creates a simple Emission-to-Light-Output tree by default and
+    reports Light.use_nodes=True even for that untouched default. That tree is
+    safe for QSS to replace; a genuinely edited user tree is not. The distance
+    probe uses the Light Falloff node's Linear output (proportional to 1/d),
+    then takes its reciprocal. The input floor and distance caps keep the math
+    finite at the source and far outside the Quake light radius.
     """
-    # Never clear a node graph that did not originate from this helper.
-    # Fresh imported QSS lights have nodes disabled; an existing enabled tree
-    # that is not fully QSS-owned belongs to the user.
     existing_tree = getattr(light_data, "node_tree", None)
-    if (bool(light_data.use_nodes) and existing_tree is not None
-            and len(existing_tree.nodes) > 0
-            and not _qss_cycles_falloff_tree_is_owned(light_data)):
+    if (existing_tree is not None and len(existing_tree.nodes) > 0
+            and not _qss_cycles_falloff_tree_is_owned(light_data)
+            and not light_node_utils.is_default_light_node_tree(light_data)):
         raise RuntimeError("Existing user-authored light nodes were preserved; QSS Cycles falloff was not installed")
 
-    light_data.use_nodes = True
+    if hasattr(light_data, "use_nodes") and not bool(light_data.use_nodes):
+        light_data.use_nodes = True
     node_tree = getattr(light_data, "node_tree", None)
     if node_tree is None:
         raise RuntimeError("Blender did not create a node tree for this light")
@@ -3368,80 +3369,91 @@ def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
     falloff.inputs["Strength"].default_value = 1.0
     falloff.inputs["Smooth"].default_value = 0.0
 
-    safe_quadratic = _qss_make_cycles_math_node(
-        nodes, "QSS_SafeQuadratic", "MAXIMUM", (-680, -40)
+    safe_linear = _qss_make_cycles_math_node(
+        nodes, "QSS_SafeLinear", "MAXIMUM", (-680, -40)
     )
-    safe_quadratic.inputs[1].default_value = 1e-20
+    safe_linear.inputs[1].default_value = 1e-20
 
-    distance_squared = _qss_make_cycles_math_node(
-        nodes, "QSS_DistanceSquaredMeters", "DIVIDE", (-460, 120)
-    )
-    distance_squared.inputs[0].default_value = 1.0
     distance_m = _qss_make_cycles_math_node(
-        nodes, "QSS_DistanceMeters", "SQRT", (-240, 120)
+        nodes, "QSS_DistanceMeters", "DIVIDE", (-460, 120)
     )
+    distance_m.inputs[0].default_value = 1.0
     distance_quake = _qss_make_cycles_math_node(
-        nodes, "QSS_DistanceQuakeUnits", "DIVIDE", (-20, 120)
+        nodes, "QSS_DistanceQuakeUnits", "DIVIDE", (-240, 120)
     )
+    capped_distance_quake = _qss_make_cycles_math_node(
+        nodes, "QSS_CappedDistanceQuakeUnits", "MINIMUM", (-20, 120)
+    )
+    capped_distance_quake.inputs[1].default_value = 1e9
 
-    links.new(falloff.outputs["Quadratic"], safe_quadratic.inputs[0])
-    links.new(safe_quadratic.outputs[0], distance_squared.inputs[1])
-    links.new(distance_squared.outputs[0], distance_m.inputs[0])
+    links.new(falloff.outputs["Linear"], safe_linear.inputs[0])
+    links.new(safe_linear.outputs[0], distance_m.inputs[1])
     links.new(distance_m.outputs[0], distance_quake.inputs[0])
+    links.new(distance_quake.outputs[0], capped_distance_quake.inputs[0])
 
     if int(delay) == 0:
         normalized = _qss_make_cycles_math_node(
-            nodes, "QSS_NormalizedRadius", "DIVIDE", (0, 180)
+            nodes, "QSS_NormalizedRadius", "DIVIDE", (0, 220)
         )
+        nonnegative = _qss_make_cycles_math_node(
+            nodes, "QSS_NonnegativeRadius", "MAXIMUM", (220, 220)
+        )
+        nonnegative.inputs[1].default_value = 0.0
+        clamped = _qss_make_cycles_math_node(
+            nodes, "QSS_ClampedRadius", "MINIMUM", (440, 220)
+        )
+        clamped.inputs[1].default_value = 1.0
         one_minus = _qss_make_cycles_math_node(
-            nodes, "QSS_OneMinusRadius", "SUBTRACT", (220, 180)
+            nodes, "QSS_OneMinusRadius", "SUBTRACT", (660, 220)
         )
-        positive_remainder = _qss_make_cycles_math_node(
-            nodes, "QSS_PositiveRemainder", "MAXIMUM", (440, 180)
-        )
-        positive_remainder.inputs[1].default_value = 0.0
+        one_minus.inputs[0].default_value = 1.0
         normalized_squared = _qss_make_cycles_math_node(
-            nodes, "QSS_NormalizedRadiusSquared", "MULTIPLY", (220, -80)
+            nodes, "QSS_NormalizedRadiusSquared", "MULTIPLY", (220, -40)
         )
         times_eight = _qss_make_cycles_math_node(
-            nodes, "QSS_DelayZeroScale", "MULTIPLY", (440, -80)
+            nodes, "QSS_DelayZeroScale", "MULTIPLY", (440, -40)
         )
         times_eight.inputs[1].default_value = 8.0
         correction = _qss_make_cycles_math_node(
-            nodes, "QSS_EricwCorrection", "MULTIPLY", (660, 100)
+            nodes, "QSS_EricwCorrection", "MULTIPLY", (880, 180)
         )
 
-        links.new(distance_quake.outputs[0], normalized.inputs[0])
-        links.new(normalized.outputs[0], one_minus.inputs[1])
-        one_minus.inputs[0].default_value = 1.0
-        links.new(one_minus.outputs[0], positive_remainder.inputs[0])
-        links.new(normalized.outputs[0], normalized_squared.inputs[0])
-        links.new(normalized.outputs[0], normalized_squared.inputs[1])
+        links.new(capped_distance_quake.outputs[0], normalized.inputs[0])
+        links.new(normalized.outputs[0], nonnegative.inputs[0])
+        links.new(nonnegative.outputs[0], clamped.inputs[0])
+        links.new(clamped.outputs[0], one_minus.inputs[1])
+        links.new(clamped.outputs[0], normalized_squared.inputs[0])
+        links.new(clamped.outputs[0], normalized_squared.inputs[1])
         links.new(normalized_squared.outputs[0], times_eight.inputs[0])
         links.new(times_eight.outputs[0], correction.inputs[0])
-        links.new(positive_remainder.outputs[0], correction.inputs[1])
+        links.new(one_minus.outputs[0], correction.inputs[1])
     elif int(delay) == 5:
         scaled_distance = _qss_make_cycles_math_node(
             nodes, "QSS_WaitScaledDistance", "MULTIPLY", (0, 180)
         )
+        capped_scaled_distance = _qss_make_cycles_math_node(
+            nodes, "QSS_CappedWaitScaledDistance", "MINIMUM", (220, 180)
+        )
+        capped_scaled_distance.inputs[1].default_value = 1e12
         shifted_distance = _qss_make_cycles_math_node(
-            nodes, "QSS_ShiftedDistance", "ADD", (220, 180)
+            nodes, "QSS_ShiftedDistance", "ADD", (440, 180)
         )
         shifted_distance.inputs[1].default_value = lighting_utils.ERICW_LIGHT_SCALE
         shift_ratio = _qss_make_cycles_math_node(
-            nodes, "QSS_ShiftRatio", "DIVIDE", (440, 180)
+            nodes, "QSS_ShiftRatio", "DIVIDE", (660, 180)
         )
         shift_ratio_squared = _qss_make_cycles_math_node(
-            nodes, "QSS_ShiftRatioSquared", "MULTIPLY", (660, 180)
+            nodes, "QSS_ShiftRatioSquared", "MULTIPLY", (880, 180)
         )
         times_four = _qss_make_cycles_math_node(
-            nodes, "QSS_DelayFiveScale", "MULTIPLY", (880, 180)
+            nodes, "QSS_DelayFiveScale", "MULTIPLY", (1100, 180)
         )
         times_four.inputs[1].default_value = 4.0
 
-        links.new(distance_quake.outputs[0], scaled_distance.inputs[0])
-        links.new(scaled_distance.outputs[0], shifted_distance.inputs[0])
-        links.new(scaled_distance.outputs[0], shift_ratio.inputs[0])
+        links.new(capped_distance_quake.outputs[0], scaled_distance.inputs[0])
+        links.new(scaled_distance.outputs[0], capped_scaled_distance.inputs[0])
+        links.new(capped_scaled_distance.outputs[0], shifted_distance.inputs[0])
+        links.new(capped_scaled_distance.outputs[0], shift_ratio.inputs[0])
         links.new(shifted_distance.outputs[0], shift_ratio.inputs[1])
         links.new(shift_ratio.outputs[0], shift_ratio_squared.inputs[0])
         links.new(shift_ratio.outputs[0], shift_ratio_squared.inputs[1])
@@ -3474,7 +3486,7 @@ def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
 
 
 def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
-    """Enable the experimental Cycles correction only for delay-5 lights."""
+    """Enable ericw-style Cycles falloff for supported delay-0 and delay-5 lights."""
     light_data = light_obj.data
 
     if not lighting_utils.cycles_uses_ericw_falloff_correction(delay):
@@ -3496,15 +3508,18 @@ def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
         return False
 
     existing_tree = getattr(light_data, "node_tree", None)
-    if (bool(light_data.use_nodes) and existing_tree is not None
-            and len(existing_tree.nodes) > 0
-            and not _qss_cycles_falloff_tree_is_owned(light_data)):
+    if (existing_tree is not None and len(existing_tree.nodes) > 0
+            and not _qss_cycles_falloff_tree_is_owned(light_data)
+            and not light_node_utils.is_default_light_node_tree(light_data)):
         light_obj["qss_cycles_falloff_active"] = False
         light_obj["qss_cycles_falloff_profile"] = "user_nodes_preserved_native_fallback"
         light_obj["qss_cycles_falloff_error"] = (
-            "Existing user-authored light nodes were left untouched; this light uses native falloff"
+            "User-custom light nodes were left untouched; QSS Quake falloff was not applied"
         )
         return False
+
+    if not bool(light_data.use_nodes):
+        light_data.use_nodes = True
 
     world_dist = max(1e-6, float(light_obj.get("qss_quake_world_dist", 1.0)))
     wait = max(1e-6, float(light_obj.get("qss_quake_wait", 1.0)))
@@ -3514,11 +3529,12 @@ def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
     falloff = max(0.0, float(light_obj.get("qss_quake_falloff", 0.0)))
 
     try:
-        node_tree = getattr(light_data, "node_tree", None) if light_data.use_nodes else None
+        node_tree = getattr(light_data, "node_tree", None)
         required = {
-            "QSS_Ericw_LightFalloff", "QSS_SafeQuadratic",
+            "QSS_Ericw_LightFalloff", "QSS_SafeLinear",
             "QSS_DistanceMeters", "QSS_DistanceQuakeUnits",
-            "QSS_Ericw_Emission", "QSS_Ericw_LightOutput",
+            "QSS_CappedDistanceQuakeUnits", "QSS_Ericw_Emission",
+            "QSS_Ericw_LightOutput",
         }
         if int(light_data.get("qss_cycles_delay_falloff_version", 0)) != 1 or int(
             light_data.get("qss_cycles_delay_falloff_profile", -1)
@@ -3526,9 +3542,6 @@ def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
             {node.name for node in node_tree.nodes}
         ):
             node_tree = _qss_build_cycles_delay_falloff_nodes(light_data, int(delay))
-        else:
-            light_data.use_nodes = True
-
         nodes = node_tree.nodes
         by_name = {node.name: node for node in nodes}
         by_name["QSS_Ericw_LightFalloff"].inputs["Strength"].default_value = 1.0
