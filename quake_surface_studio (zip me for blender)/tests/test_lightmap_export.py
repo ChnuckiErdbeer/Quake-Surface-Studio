@@ -1,0 +1,209 @@
+import os
+import struct
+import sys
+import unittest
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import lightmap_export
+
+
+class LightmapExportTests(unittest.TestCase):
+    def test_resolution_selects_expected_lmshift(self):
+        expected = {1: 4, 2: 3, 4: 2, 8: 1}
+        for resolution, shift in expected.items():
+            with self.subTest(resolution=resolution):
+                result = lightmap_export.choose_luxel_grid(
+                    [0, 64], [0, 64], resolution
+                )
+                self.assertEqual(result[0], shift)
+                self.assertEqual(result[3:], (64 // (1 << shift) + 1,) * 2)
+
+    def test_oversized_face_coarsens_to_engine_limit(self):
+        shift, s_min, t_min, width, height = lightmap_export.choose_luxel_grid(
+            [0, 2048], [0, 1024], 8
+        )
+        self.assertGreaterEqual(shift, 4)
+        self.assertLessEqual(width, 256)
+        self.assertLessEqual(height, 256)
+
+    def test_fails_when_face_exceeds_limit_even_at_classic_spacing(self):
+        with self.assertRaisesRegex(ValueError, 'even at 16 units per luxel'):
+            lightmap_export.choose_luxel_grid([0, 8192], [0, 8192], 8)
+
+    def test_bilinear_sampler_interpolates_four_pixels(self):
+        pixels = (
+            0.0, 0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0,
+            1.0, 1.0, 1.0, 1.0,
+        )
+        sampled = lightmap_export.bilinear_sample_rgba(pixels, 2, 2, 0.5, 0.5)
+        self.assertEqual(sampled, (0.5, 0.5, 0.25, 1.0))
+
+    def test_face_atlas_sampling_converts_linear_rgb_to_bytes(self):
+        pixels = (0.5, 0.25, 1.0, 1.0) * 16
+        sampled = lightmap_export.sample_face_rgb_from_atlas(
+            pixels, image_size=4, working_resolution=1,
+            atlas_x=0, atlas_y=0, gutter=0, pixels_per_luxel=1,
+            base_s_min=0, base_t_min=0, s_min=0, t_min=0,
+            sample_width=1, sample_height=1, spacing=16,
+        )
+        self.assertEqual(sampled, bytes((128, 64, 255)))
+
+    def test_builds_face_ordered_extension_with_classic_prefix_offsets(self):
+        records = {
+            0: {"shift": 3, "width": 2, "height": 1, "rgb": bytes((255, 0, 0, 0, 255, 0))},
+            2: {"shift": 2, "width": 1, "height": 2, "rgb": bytes((0, 0, 255, 255, 255, 255))},
+        }
+        result = lightmap_export.build_lightmap_extension_data(3, records, base_sample_count=10)
+        self.assertEqual(result["LMSHIFT"], bytes((3, 4, 2)))
+        self.assertEqual(result["LMSTYLE"], bytes((0, 255, 0)))
+        self.assertEqual(
+            result["LMOFFSET"],
+            b"".join((int(10).to_bytes(4, "little"), int(0xFFFFFFFF).to_bytes(4, "little"),
+                      int(12).to_bytes(4, "little")))
+        )
+        self.assertEqual(result["RGBLIGHTING_APPEND"], records[0]["rgb"] + records[2]["rgb"])
+        self.assertEqual(result["LIGHTING_APPEND"], bytes((54, 182, 18, 255)))
+        self.assertEqual(result["enhanced_sample_count"], 4)
+
+
+    def test_arbitrary_coordinate_sampler_matches_classic_grid_centres(self):
+        pixels = []
+        for y in range(4):
+            for x in range(4):
+                pixels.extend((x / 3.0, y / 3.0, 0.5, 1.0))
+        sampled = lightmap_export.sample_face_rgb_at_coordinates(
+            pixels, image_size=4, working_resolution=1,
+            atlas_x=0, atlas_y=0, gutter=0, pixels_per_luxel=1,
+            base_s_min=0, base_t_min=0,
+            s_coordinates=(0, 16), t_coordinates=(0, 16),
+        )
+        self.assertEqual(len(sampled), 12)
+        self.assertEqual(sampled[0:3], bytes((0, 255, 128)))
+        self.assertEqual(sampled[9:12], bytes((85, 170, 128)))
+
+    def test_arbitrary_coordinate_sampler_rejects_non_finite_coordinates(self):
+        with self.assertRaisesRegex(ValueError, "finite"):
+            lightmap_export.sample_face_rgb_at_coordinates(
+                [0.0, 0.0, 0.0, 1.0] * 4, 2, 1, 0, 0, 0, 1,
+                0, 0, (float("nan"),), (0,),
+            )
+
+
+    def test_builds_decoupled_lightmap_records_with_independent_axes(self):
+        faces = [
+            (0, 0, 0, 3, 0, 0, 255, 255, 255, 0),
+            (0, 0, 0, 3, 0, 255, 255, 255, 255, -1),
+        ]
+        texinfos = [(2.0, 0.0, 0.0, 8.0, 0.0, 4.0, 0.0, 16.0, 0, 0)]
+        records = {0: {
+            "shift": 3, "width": 3, "height": 2,
+            "s_min": 8, "t_min": 16, "rgb": bytes(18),
+        }}
+        offsets = (100).to_bytes(4, "little") + (0xFFFFFFFF).to_bytes(4, "little")
+        data = lightmap_export.build_decoupled_lightmap_data(faces, texinfos, records, offsets)
+        self.assertEqual(len(data), 40 * 2)
+        first = __import__("struct").unpack_from("<HHI8f", data, 0)
+        self.assertEqual(first[:3], (3, 2, 100))
+        self.assertEqual(first[3:], (0.25, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0))
+        second = __import__("struct").unpack_from("<HHI8f", data, 40)
+        self.assertEqual(second[:3], (0, 0, 0xFFFFFFFF))
+        self.assertEqual(second[3:], (0.0,) * 8)
+
+    def test_decoupled_builder_rejects_missing_offsets(self):
+        with self.assertRaisesRegex(ValueError, "one uint32"):
+            lightmap_export.build_decoupled_lightmap_data(
+                [(0, 0, 0, 3, 0, 0, 255, 255, 255, 0)],
+                [(1, 0, 0, 0, 0, 1, 0, 0, 0, 0)],
+                {}, b"",
+            )
+
+    def test_rejects_invalid_face_sample_buffer(self):
+        with self.assertRaisesRegex(ValueError, 'does not match'):
+            lightmap_export.build_lightmap_extension_data(
+                1, {0: {"shift": 3, "width": 2, "height": 2, "rgb": bytes(3)}}, 0
+            )
+
+    def test_rejects_invalid_resolution_and_shift(self):
+        with self.assertRaises(ValueError):
+            lightmap_export.choose_luxel_grid([0, 64], [0, 64], 3)
+        with self.assertRaisesRegex(ValueError, 'invalid LMSHIFT'):
+            lightmap_export.build_lightmap_extension_data(
+                1, {0: {"shift": 5, "width": 1, "height": 1, "rgb": bytes(3)}}, 0
+            )
+
+
+    def test_half_luxel_edge_padding_adds_resampled_rim(self):
+        source = bytes(
+            channel
+            for value in (0, 100, 200, 255)
+            for channel in (value, value, value)
+        )
+        record = {"shift": 4, "width": 2, "height": 2, "s_min": 0, "t_min": 16, "rgb": source}
+
+        padded, did_pad = lightmap_export.add_half_luxel_edge_padding(record)
+
+        self.assertTrue(did_pad)
+        self.assertEqual((padded["width"], padded["height"]), (3, 3))
+        self.assertEqual(len(padded["rgb"]), 3 * 3 * 3)
+        red = list(padded["rgb"][0::3])
+        self.assertEqual(red, [
+            0, 50, 100,
+            100, 139, 178,
+            200, 228, 255,
+        ])
+        self.assertEqual((padded["s_min"], padded["t_min"]), (-8.0, 8.0))
+        self.assertEqual(record["rgb"], source)
+
+    def test_half_luxel_edge_padding_offsets_explicit_decoupled_vectors(self):
+        record = {
+            "shift": 4, "width": 2, "height": 1,
+            "lmvecs": (1.0, 0.0, 0.0, -4.0, 0.0, 1.0, 0.0, 8.0),
+            "rgb": bytes((10, 20, 30, 40, 50, 60)),
+        }
+        padded, did_pad = lightmap_export.add_half_luxel_edge_padding(record)
+        self.assertTrue(did_pad)
+        self.assertEqual((padded["width"], padded["height"]), (3, 2))
+        self.assertEqual(padded["lmvecs"], (1.0, 0.0, 0.0, -3.5, 0.0, 1.0, 0.0, 8.5))
+
+    def test_half_luxel_edge_padding_offsets_classic_luxel_grid_origin(self):
+        faces = [(0, 0, 0, 3, 0, 0, 255, 255, 255, 0)]
+        texinfos = [(2.0, 0.0, 0.0, 8.0, 0.0, 4.0, 0.0, 16.0, 0, 0)]
+        record = {
+            "shift": 3, "width": 2, "height": 1,
+            "s_min": 16, "t_min": 32, "rgb": bytes(6),
+        }
+        padded, did_pad = lightmap_export.add_half_luxel_edge_padding(record)
+        self.assertTrue(did_pad)
+        self.assertEqual((padded["s_min"], padded["t_min"]), (12.0, 28.0))
+        offsets = (100).to_bytes(4, "little")
+        data = lightmap_export.build_decoupled_lightmap_data(
+            faces, texinfos, {0: padded}, offsets
+        )
+        values = struct.unpack_from("<HHI8f", data, 0)
+        self.assertEqual(values[:3], (3, 2, 100))
+        self.assertAlmostEqual(values[3], 0.25)
+        self.assertAlmostEqual(values[6], -0.5)
+        self.assertAlmostEqual(values[10], -1.5)
+
+    def test_half_luxel_edge_padding_skips_dimensions_over_engine_limit(self):
+        record = {
+            "shift": 4, "width": 256, "height": 1,
+            "s_min": 0, "t_min": 0, "rgb": bytes(256 * 3),
+        }
+        padded, did_pad = lightmap_export.add_half_luxel_edge_padding(record)
+        self.assertFalse(did_pad)
+        self.assertEqual(padded, record)
+
+    def test_half_luxel_edge_padding_rejects_invalid_rgb_length(self):
+        with self.assertRaisesRegex(ValueError, "needs 6"):
+            lightmap_export.add_half_luxel_edge_padding({
+                "shift": 4, "width": 2, "height": 1,
+                "s_min": 0, "t_min": 0, "rgb": bytes(3),
+            })
+
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

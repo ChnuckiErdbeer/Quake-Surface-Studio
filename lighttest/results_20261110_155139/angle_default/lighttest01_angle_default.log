@@ -1,0 +1,98 @@
+---- qbsp / ericw-tools 2.0.0-alpha11 ----
+
+--- Options Summary ---
+    "litwater" was set to "1" (from command line)
+
+Input file: /home/chnucki/Quake-Surface-Studio/lighttest/results_20261110_155139/angle_default/lighttest01_angle_default.map
+Output file: /home/chnucki/Quake-Surface-Studio/lighttest/results_20261110_155139/angle_default/lighttest01_angle_default.bsp
+
+INFO: using built-in palette.
+    20 entities
+     3 unique textures
+     9 texinfos
+    90 unique planes
+
+INFO: world extents calculated to 8136 units
+     97 brushes
+    582 sides
+
+            0 texture frames added
+Processing hull 0...
+    97 SOLID brushes
+    97 brushes total
+    582 visible sides
+INFO: calculating BSP for 97 brushes with 582 sides
+     97 brushes
+    582 visible faces
+    589 nodes
+     25 expensive split nodes
+    564 mid-split nodes
+    590 leaves
+    232 SOLID leafs
+    358 EMPTY leafs
+    590 leafs total
+    14 max tree height
+    10 avg tree height
+    2,220 tree portals
+    285 outside leaves
+    0 detail filled leafs
+     97 brushes
+    160 visible faces
+    422 non-visible faces
+    217 nodes
+    140 non-visible nodes
+    217 expensive split nodes
+    218 leaves
+     97 SOLID leafs
+    121 EMPTY leafs
+    218 leafs total
+    15 max tree height
+    10 avg tree height
+    1,006 tree portals
+    93 outside leaves
+    0 detail filled leafs
+    1,006 tree portals
+    392 sides visible
+      196 makefaces
+       70 merged
+    4,563 subdivided
+    140 nodes pruned
+    28 player-occupiable leaves
+    28 clusters of leaves
+    55 vis portals
+    28 EMPTY leafs
+    50 SOLID leafs
+    78 leafs total
+    15 max tree height
+     9 avg tree height
+       970 edges added by tjunctions
+     4,689 faces optimized through MWT
+    10,348 triangles computed from MWT
+        38 faces created via optimization of MWT triangles
+    9,901 edges
+    4,727 faces
+Processing hull 1...
+Processing hull 2...
+Writing lighttest01_angle_default.bsp as Quake BSP bsp29
+Wrote lighttest01_angle_default.bsp
+
+count   lump name    byte size 
+      1 models               64
+     90 planes             1800
+   5178 vertexes          62136
+     77 nodes              1848
+      8 texinfos            320
+   4727 faces             94540
+    194 clipnodes          1552
+     29 leafs               812
+   4871 marksurfaces       9742
+   9902 edges             39608
+  19802 surfedges         79208
+      3 textures          16456
+        lightdata             0
+        visdata               0
+        entdata            2988
+
+0.107s seconds elapsed
+
+

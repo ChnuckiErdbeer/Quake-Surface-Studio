@@ -1,0 +1,42 @@
+---- light / ericw-tools 2.0.0-alpha11 ----
+LoadBSPFile: '/mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/spottest02-compile.bsp'
+BSP is version Quake BSP bsp29
+INFO: using built-in palette.
+Loading extended texinfo flags from /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/spottest02-compile.texinfo.json...
+Loading extended content flags from /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/spottest02-compile.content.json...
+4 entities read, 1 are lights.
+
+--- Options Summary ---
+    "dirt" was set to "1" (from command line)
+    "minlight_dirt" was set to "1" (from command line)
+    "phong" was set to "1" (from command line)
+    "bounce" was set to "1" (from command line)
+    "surflightscale" was set to "0.700000" (from command line)
+    "sunlight_dirt" was set to "1.000000" (from command line)
+    "sunlight2_dirt" was set to "1.000000" (from command line)
+    "surflight_subdivide" was set to "64.000000" (from command line)
+    "soft" was set to "2" (from command line)
+    "extra" was set to "4" (from command line)
+
+Embree_TraceInit: Embree version: 4.4.0
+Embree_TraceInit: 
+	0 sky faces
+	51 solid faces
+	0 filtered faces
+	0 shadow-casting skip faces
+SetupLights: 1 initial lights
+SetupLights: 1 after surface lights
+SetupLights: 1 after jittering
+Final count: 1 lights, 0 suns in use.
+       48 dirtmap vectors
+0 surface light points in use.
+map uses color: false
+lightmap size (total): 3904
+Lighting Completed.
+
+0 switchable light styles (32 max)
+Writing /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/spottest02-compile.bsp as Quake BSP bsp29
+0.043s seconds elapsed
+0 empty lightmaps
+
+

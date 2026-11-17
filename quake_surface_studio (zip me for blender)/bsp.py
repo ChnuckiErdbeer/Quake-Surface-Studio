@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import struct
 from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence
@@ -38,6 +39,7 @@ SIZE_EDGE = 4
 SIZE_SURFEDGE = 4
 SIZE_TEXINFO = 40
 SIZE_FACE = 20
+SIZE_MODEL = 64  # dmodel_t: 9 floats + 7 signed 32-bit integers
 
 MAX_CLASSIC_TEXTURES = 512
 MAX_CLASSIC_TEXINFO = 4096
@@ -64,6 +66,43 @@ def _checked_slice(data: bytes, offset: int, length: int, what: str) -> bytes:
     if offset < 0 or length < 0 or offset + length > len(data):
         raise BSPError(f"{what} points outside its lump (offset={offset}, length={length}).")
     return data[offset:offset + length]
+
+
+def face_winding_needs_reversal(vertices, plane_normal, side=0, flip_z=False):
+    """Return whether a face's vertex order opposes its oriented BSP plane normal.
+
+    BSP face normals are defined by both the referenced plane and dface.side.
+    A reflected Z-up to Z-down import also reverses mesh winding. Compare the
+    actual polygon area vector after the coordinate reflection to the intended
+    transformed normal, so Cycles/Eevee see the correct front side.
+    """
+    points = [tuple(float(value) for value in point[:3]) for point in vertices]
+    if len(points) < 3:
+        return False
+    area_normal = [0.0, 0.0, 0.0]
+    for index, current in enumerate(points):
+        following = points[(index + 1) % len(points)]
+        x0, y0, z0 = current
+        x1, y1, z1 = following
+        if flip_z:
+            z0, z1 = -z0, -z1
+        area_normal[0] += (y0 - y1) * (z0 + z1)
+        area_normal[1] += (z0 - z1) * (x0 + x1)
+        area_normal[2] += (x0 - x1) * (y0 + y1)
+
+    normal = [float(value) for value in plane_normal[:3]]
+    if len(normal) != 3:
+        raise BSPError("A BSP face plane normal must contain three components.")
+    if int(side):
+        normal = [-value for value in normal]
+    if flip_z:
+        normal[2] = -normal[2]
+    dot = sum(area_normal[index] * normal[index] for index in range(3))
+    area_sq = sum(value * value for value in area_normal)
+    normal_sq = sum(value * value for value in normal)
+    if area_sq <= 1e-20 or normal_sq <= 1e-20:
+        return False
+    return dot < -1e-10 * math.sqrt(area_sq * normal_sq)
 
 
 class BSP29:
@@ -144,6 +183,7 @@ class BSP29:
             LUMP_FACES: SIZE_FACE,
             LUMP_EDGES: SIZE_EDGE,
             LUMP_SURFEDGES: SIZE_SURFEDGE,
+            LUMP_MODELS: SIZE_MODEL,
         }
         for lump_id, record_size in fixed.items():
             length = len(self.lumps[lump_id])
@@ -182,6 +222,36 @@ class BSP29:
         # short texinfo, 4 style bytes, int lightofs.
         lump = self.lumps[LUMP_FACES]
         return [struct.unpack_from("<Hhihh4Bi", lump, i) for i in range(0, len(lump), SIZE_FACE)]
+
+    def models(self) -> list[tuple]:
+        """Return dmodel_t records: mins, maxs, origin, headnodes, visleafs, face range."""
+        lump = self.lumps[LUMP_MODELS]
+        return [struct.unpack_from("<9f7i", lump, offset)
+                for offset in range(0, len(lump), SIZE_MODEL)]
+
+    def face_model_ids(self) -> list[int]:
+        """Map each BSP face to its owning inline model index (world model is 0)."""
+        face_count = len(self.faces())
+        model_records = self.models()
+        if not model_records:
+            return [0] * face_count
+        owners: list[Optional[int]] = [None] * face_count
+        for model_index, model in enumerate(model_records):
+            first_face, num_faces = int(model[14]), int(model[15])
+            if first_face < 0 or num_faces < 0 or first_face + num_faces > face_count:
+                raise BSPError(
+                    f"BSP model {model_index} has an invalid face range "
+                    f"({first_face}, {num_faces}) for {face_count} faces."
+                )
+            for face_id in range(first_face, first_face + num_faces):
+                if owners[face_id] is not None and owners[face_id] != model_index:
+                    raise BSPError(
+                        f"BSP face {face_id} is assigned to overlapping models "
+                        f"{owners[face_id]} and {model_index}."
+                    )
+                owners[face_id] = model_index
+        # Tolerate unclaimed faces from non-conforming compilers as world geometry.
+        return [0 if owner is None else int(owner) for owner in owners]
 
     def face_vertex_indices(self, face: tuple, edges=None, surfedges=None) -> list[int]:
         if edges is None:
@@ -346,6 +416,22 @@ def build_texture_lump(entries: Iterable[MipTexture]) -> bytes:
         struct.pack_into("<i", out, 4 + 4 * i, offset)
         out.extend(entry.blob)
     return bytes(out)
+
+
+
+def replace_face_lightofs(faces_lump: bytes, face_index: int, lightofs: int) -> bytes:
+    """Return a face lump with one dface_t lightofs field replaced."""
+    if len(faces_lump) % SIZE_FACE:
+        raise BSPError("Face lump has an invalid size.")
+    count = len(faces_lump) // SIZE_FACE
+    if face_index < 0 or face_index >= count:
+        raise BSPError(f"Face index {face_index} is out of range.")
+    value = int(lightofs)
+    if value < -1 or value > 0x7FFFFFFF:
+        raise BSPError("Lightmap offset exceeds the signed 32-bit BSP29 field.")
+    result = bytearray(faces_lump)
+    struct.pack_into("<i", result, face_index * SIZE_FACE + 16, value)
+    return bytes(result)
 
 
 def replace_face_texinfo(faces_lump: bytes, face_index: int, texinfo_index: int) -> bytes:
@@ -527,6 +613,136 @@ def read_wad2_textures(path: str) -> dict[str, MipTexture]:
 
 
 
+def parse_inline_model_references(entities: Sequence[dict[str, str]], model_count: int) -> list[tuple[int, int]]:
+    """Return (inline_model_index, entity_index) for valid entity model '*n' keys."""
+    result = []
+    for entity_index, entity in enumerate(entities):
+        match = re.fullmatch(r"\s*\*(\d+)\s*", str(entity.get("model", "")))
+        if not match:
+            continue
+        model_index = int(match.group(1))
+        if 0 < model_index < int(model_count):
+            result.append((model_index, entity_index))
+    return result
+
+
+def _entity_key_enabled(entity: dict[str, str], *keys: str) -> bool:
+    """Interpret conventional numeric/boolean entity keys without assuming a classname."""
+    for key in keys:
+        raw = str(entity.get(key, "")).strip().casefold()
+        if not raw:
+            continue
+        if raw in {"true", "yes", "on"}:
+            return True
+        if raw in {"false", "no", "off"}:
+            continue
+        try:
+            if float(raw) != 0.0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def inline_model_shadow_policy(entity: dict[str, str]) -> str:
+    """Return the coarse ericw-compatible bmodel shadow policy.
+
+    Inline brush models do not cast shadows by default. '_shadow' 1 enables
+    full shadow casting; -1 explicitly disables it (notably func_detail/group).
+    The finer self/world-only/switchable modes require model-aware ray filtering
+    and are returned as special modes for the importer to handle conservatively.
+    """
+    shadow = str(entity.get("_shadow", "")).strip()
+    if shadow:
+        try:
+            value = float(shadow)
+        except (TypeError, ValueError):
+            value = 0.0
+        if value == -1.0:
+            return "none"
+        if value == 1.0:
+            return "all"
+
+    if _entity_key_enabled(entity, "_shadowworldonly"):
+        return "world_only"
+    if _entity_key_enabled(entity, "_shadowself", "_selfshadow"):
+        return "self"
+    if _entity_key_enabled(entity, "_switchableshadow"):
+        return "switchable"
+    return "none"
+
+
+
+def transform_inline_model_position(position, entity: dict[str, str]) -> tuple[float, float, float]:
+    """Apply a Quake brush entity's initial origin/angles to one model-local point.
+
+    This mirrors WinQuake's entity transform order: translate, yaw about Z,
+    negative pitch about Y, then roll about X. The result remains in Quake
+    coordinates; Blender axis reflection and unit conversion happen afterward.
+    """
+    try:
+        origin_values = [float(value) for value in str(entity.get("origin", "0 0 0")).replace(",", " ").split()]
+    except (TypeError, ValueError):
+        origin_values = []
+    if len(origin_values) < 3:
+        origin_values = [0.0, 0.0, 0.0]
+    try:
+        angle_text = str(entity.get("angles", "")).replace(",", " ").split()
+        angle_values = (
+            [float(value) for value in angle_text[:3]]
+            if len(angle_text) >= 3 else [0.0, 0.0, 0.0]
+        )
+    except (TypeError, ValueError):
+        angle_values = [0.0, 0.0, 0.0]
+
+    x, y, z = (float(value) for value in position[:3])
+    pitch, yaw, roll = (math.radians(value) for value in angle_values[:3])
+
+    # OpenGL post-multiplies the Quake entity rotations, so column vectors
+    # experience roll (X), negative pitch (Y), then yaw (Z).
+    cr, sr = math.cos(roll), math.sin(roll)
+    y1, z1 = y * cr - z * sr, y * sr + z * cr
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    x2, z2 = x * cp + z1 * sp, -x * sp + z1 * cp
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    x3, y3 = x2 * cy - y1 * sy, x2 * sy + y1 * cy
+    return (
+        x3 + origin_values[0],
+        y3 + origin_values[1],
+        z2 + origin_values[2],
+    )
+
+
+def inverse_transform_inline_model_position(position, entity: dict[str, str]) -> tuple[float, float, float]:
+    """Undo transform_inline_model_position, returning Quake model-local coordinates."""
+    try:
+        origin_values = [float(value) for value in str(entity.get("origin", "0 0 0")).replace(",", " ").split()]
+    except (TypeError, ValueError):
+        origin_values = []
+    if len(origin_values) < 3:
+        origin_values = [0.0, 0.0, 0.0]
+    try:
+        angle_text = str(entity.get("angles", "")).replace(",", " ").split()
+        angle_values = (
+            [float(value) for value in angle_text[:3]]
+            if len(angle_text) >= 3 else [0.0, 0.0, 0.0]
+        )
+    except (TypeError, ValueError):
+        angle_values = [0.0, 0.0, 0.0]
+
+    x, y, z = (float(position[index]) - origin_values[index] for index in range(3))
+    pitch, yaw, roll = (math.radians(value) for value in angle_values[:3])
+
+    # Reverse the forward order: inverse yaw, inverse negative pitch, inverse roll.
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    x1, y1 = x * cy + y * sy, -x * sy + y * cy
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    x2, z2 = x1 * cp - z * sp, x1 * sp + z * cp
+    cr, sr = math.cos(roll), math.sin(roll)
+    y3, z3 = y1 * cr + z2 * sr, -y1 * sr + z2 * cr
+    return (x2, y3, z3)
+
+
 def parse_entities_lump(entities_lump: bytes) -> list[dict[str, str]]:
     """Parse Quake's brace-delimited entity lump into ordered key/value maps.
 
@@ -639,8 +855,54 @@ def _palette_from_pak(path: str) -> Optional[bytes]:
     return None
 
 
+def _find_palette_in_game_root(root: str) -> tuple[Optional[bytes], str]:
+    """Search one game directory: all loose palettes first, then PACK archives."""
+    root = os.path.abspath(os.path.expanduser(str(root or "")))
+    if not root or not os.path.isdir(root):
+        return None, ""
+
+    loose = []
+    packs = []
+    for base, dirs, files in os.walk(root):
+        depth = os.path.relpath(base, root).count(os.sep)
+        dirs.sort(key=str.casefold)
+        if depth >= 3:
+            dirs[:] = []
+        for filename in sorted(files, key=str.casefold):
+            low = filename.casefold()
+            path = os.path.join(base, filename)
+            if low == "palette.lmp":
+                loose.append(path)
+            elif low.startswith("pak") and low.endswith(".pak"):
+                packs.append(path)
+
+    # Quake's loose files override any packaged version, regardless of
+    # whether the loose palette lives directly in gfx/ or a mod subfolder.
+    for path in loose:
+        try:
+            return load_palette_file(path), path
+        except (OSError, BSPError):
+            continue
+
+    def pak_order(path):
+        match = re.fullmatch(r"pak(\d+)\.pak", os.path.basename(path), flags=re.IGNORECASE)
+        return (int(match.group(1)) if match else -1, os.path.basename(path).casefold())
+
+    # Higher numbered PACK archives take precedence over lower numbered ones.
+    for pak_path in sorted(packs, key=pak_order, reverse=True):
+        palette = _palette_from_pak(pak_path)
+        if palette:
+            return palette, pak_path + "!gfx/palette.lmp"
+    return None, ""
+
 def find_quake_palette(game_dir: str = "", palette_file: str = "") -> tuple[Optional[bytes], str]:
-    """Find a 768-byte palette.lmp directly or inside a Quake PAK archive."""
+    """Find a Quake palette in the selected mod, then fall back to base id1.
+
+    A mod-specific loose palette or PAK takes precedence. When game_dir is a
+    mod directory (for example <quake>/ad), the sibling <quake>/id1 directory
+    is searched only after the selected mod. When game_dir is the installation
+    root, its id1 directory is treated as the base game.
+    """
     # An explicitly selected palette file takes precedence over game archives.
     if palette_file:
         explicit = os.path.expanduser(palette_file)
@@ -650,37 +912,32 @@ def find_quake_palette(game_dir: str = "", palette_file: str = "") -> tuple[Opti
             except (OSError, BSPError):
                 pass
 
-    candidates = []
-    if game_dir:
-        root = os.path.abspath(os.path.expanduser(game_dir))
-        candidates.extend([
-            os.path.join(root, "gfx", "palette.lmp"),
-            os.path.join(root, "id1", "gfx", "palette.lmp"),
-            os.path.join(root, "palette.lmp"),
-        ])
-        # Prefer loose palettes (e.g. mod overrides) before looking inside PAKs.
-        for path in candidates:
-            if os.path.isfile(path):
-                try:
-                    return load_palette_file(path), path
-                except (OSError, BSPError):
-                    continue
+    if not game_dir:
+        return None, ""
 
-        for base, dirs, files in os.walk(root):
-            # Keep this search bounded and avoid crawling an entire Steam library.
-            depth = os.path.relpath(base, root).count(os.sep)
-            if depth >= 3:
-                dirs[:] = []
-            for filename in files:
-                low = filename.lower()
-                if low == "palette.lmp":
-                    path = os.path.join(base, filename)
-                    try:
-                        return load_palette_file(path), path
-                    except (OSError, BSPError):
-                        pass
-                elif low.startswith("pak") and low.endswith(".pak"):
-                    palette = _palette_from_pak(os.path.join(base, filename))
-                    if palette:
-                        return palette, os.path.join(base, filename) + "!gfx/palette.lmp"
+    selected = os.path.abspath(os.path.expanduser(str(game_dir)))
+    selected_name = os.path.basename(os.path.normpath(selected)).casefold()
+    roots = []
+
+    if selected_name == "id1":
+        roots.append(selected)
+    elif os.path.isdir(os.path.join(selected, "id1")):
+        # A Quake installation root was selected instead of a particular mod.
+        roots.extend((os.path.join(selected, "id1"), selected))
+    else:
+        # A mod folder has priority; the original game's id1 is its sibling.
+        roots.append(selected)
+        base_id1 = os.path.join(os.path.dirname(os.path.normpath(selected)), "id1")
+        if os.path.isdir(base_id1):
+            roots.append(base_id1)
+
+    seen = set()
+    for root in roots:
+        identity = os.path.normcase(os.path.abspath(root))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        palette, origin = _find_palette_in_game_root(root)
+        if palette is not None:
+            return palette, origin
     return None, ""

@@ -1,0 +1,33 @@
+name: Quake Texture Converter GUI tests
+
+on:
+  push:
+    paths:
+      - "related tools/quake_texture_converter_fullbright_gui/**"
+      - ".github/workflows/converter-gui-tests.yml"
+  pull_request:
+    paths:
+      - "related tools/quake_texture_converter_fullbright_gui/**"
+      - ".github/workflows/converter-gui-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  converter-gui:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install image dependency
+        run: python -m pip install Pillow
+      - name: Compile converter GUI modules
+        working-directory: "related tools/quake_texture_converter_fullbright_gui"
+        run: python -m compileall -q .
+      - name: Run OpenRaster preview tests
+        working-directory: "related tools/quake_texture_converter_fullbright_gui"
+        run: python -m unittest discover -s tests -v

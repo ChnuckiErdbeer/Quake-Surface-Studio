@@ -1,0 +1,380 @@
+6 x 3 cubes of 1024 mu walllengh. Each has a light 8 mu above the center of its floor.
+
+All have the following identical keys:
+
+"wait" "1"
+"_color" "255 255 255"
+
+they differ in "delay" and "light" tho and they are named in their targetname after that:
+
+d0_50 (has delay 0 and light 50. Here is the matrix of all 18 lights:
+
+d0_50	d0_300 	d0_900
+d1_50	d1_300 	d1_900
+d2_50	d2_300 	d2_900
+d3_50	d3_300 	d3_900
+d4_50	d4_300 	d4_900
+d5_50	d5_300 	d5_900
+
+
+
+this is the full complile log:
+
+#### Using working directory '/mnt/sde1/FPS/IdTech2/QuakeDev'
+#### Exporting map file '/mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.map'
+#### Executing '/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-alpha11-Linux/qbsp -splitturb /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.map'
+---- qbsp / ericw-tools 2.0.0-alpha11 ----
+low priority not compiled into this version
+logging to /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.log (truncate)
+
+--- Options Summary ---
+    "litwater" was set to "1" (from command line)
+
+Input file: /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.map
+Output file: /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.bsp
+
+INFO: using built-in palette.
+---- LoadMapFile ----
+    20 entities
+     3 unique textures
+     9 texinfos
+    90 unique planes
+
+---- ProcessMapBrushes ----
+INFO: world extents calculated to 8136 units
+[100%] time elapsed: 00:00:00.000319
+     97 brushes
+    582 sides
+
+            0 texture frames added
+Processing hull 0...
+---- Brush_LoadEntity ----
+[100%] time elapsed: 00:00:00.000372
+---- CountBrushes ----
+    97 SOLID brushes
+    97 brushes total
+    582 visible sides
+INFO: calculating BSP for 97 brushes with 582 sides
+---- BrushBSP ----
+     97 brushes
+    582 visible faces
+[done] time elapsed: 00:00:00.003336
+    589 nodes
+     25 expensive split nodes
+    564 mid-split nodes
+    590 leaves
+---- CountLeafs ----
+    232 SOLID leafs
+    358 EMPTY leafs
+    590 leafs total
+    14 max tree height
+    10 avg tree height
+---- MakeTreePortals ----
+[100%] time elapsed: 00:00:00.001050
+---- CalcTreeBounds ----
+[done] time elapsed: 00:00:00.000190
+    2,220 tree portals
+---- FillOutside ----
+    285 outside leaves
+[done] time elapsed: 00:00:00.000146
+---- FillDetail ----
+    0 detail filled leafs
+---- BrushBSP ----
+     97 brushes
+    160 visible faces
+    422 non-visible faces
+[done] time elapsed: 00:00:00.000492
+    217 nodes
+    140 non-visible nodes
+    217 expensive split nodes
+    218 leaves
+---- CountLeafs ----
+     97 SOLID leafs
+    121 EMPTY leafs
+    218 leafs total
+    15 max tree height
+    10 avg tree height
+---- MakeTreePortals ----
+[100%] time elapsed: 00:00:00.000366
+---- CalcTreeBounds ----
+[done] time elapsed: 00:00:00.000073
+    1,006 tree portals
+---- FillOutside ----
+    93 outside leaves
+[done] time elapsed: 00:00:00.000060
+---- FillDetail ----
+    0 detail filled leafs
+---- MakeTreePortals ----
+[100%] time elapsed: 00:00:00.000380
+---- CalcTreeBounds ----
+[done] time elapsed: 00:00:00.000045
+    1,006 tree portals
+---- MarkVisibleSides ----
+    392 sides visible
+---- MakeFaces ----
+      196 makefaces
+       70 merged
+    4,563 subdivided
+---- PruneNodes ----
+    140 nodes pruned
+---- WritePortalFile ----
+[done] time elapsed: 00:00:00.000114
+    28 player-occupiable leaves
+    28 clusters of leaves
+    55 vis portals
+---- CountLeafs ----
+    28 EMPTY leafs
+    50 SOLID leafs
+    78 leafs total
+    15 max tree height
+     9 avg tree height
+---- TJunc ----
+[100%] time elapsed: 00:00:00.053429
+       970 edges added by tjunctions
+     4,689 faces optimized through MWT
+    10,348 triangles computed from MWT
+        38 faces created via optimization of MWT triangles
+---- EmitFaces ----
+    9,901 edges
+    4,727 faces
+Processing hull 1...
+Processing hull 2...0
+---- FinishBSPFile ----
+Writing /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.bsp as Quake BSP bsp29
+Wrote /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.bsp
+
+count   lump name    byte size 
+      1 models               64
+     90 planes             1800
+   5178 vertexes          62136
+     77 nodes              1848
+      8 texinfos            320
+   4727 faces             94540
+    194 clipnodes          1552
+     29 leafs               812
+   4871 marksurfaces       9742
+   9902 edges             39608
+  19802 surfedges         79208
+      3 textures          16456
+        lightdata             0
+        visdata               0
+        entdata            2527
+
+0.123s seconds elapsed
+#### Finished with exit code 0
+
+#### Executing '/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-alpha11-Linux/vis /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile'
+---- vis / ericw-tools 2.0.0-alpha11 ----
+low priority not compiled into this version
+logging to /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile-vis.log (truncate)
+
+--- Options Summary ---
+
+LoadBSPFile: '/mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.bsp'
+BSP is version Quake BSP bsp29
+INFO: using built-in palette.
+Loading extended texinfo flags from /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.texinfo.json...
+    28 leafs
+    28 clusters
+    55 portals
+Calculating Base Vis:
+[100%] time elapsed: 00:00:00.000300
+Calculating Full Vis:
+[100%] time elapsed: 00:00:00.000318
+Expanding clusters...
+average leafs visible: 10
+c_noclip: 0
+c_chains: 694
+visdatasize:121  compressed from 112
+---- CalcAmbientSounds ----
+[100%] time elapsed: 00:00:00.001071
+Writing /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.bsp as Quake BSP bsp29
+0.01s elapsed
+#### Finished with exit code 0
+
+#### Executing '/mnt/sde1/FPS/IdTech2/QuakeDev/##tools/ericw-tools-2.0.0-alpha11-Linux/light -extra4 -soft 2 -dirt 1 -bounce 1 -surflight_subdivide 64 -surflightscale 0.7 -phong /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile'
+---- ClearLightmapSurfaces ----
+---- light / ericw-tools 2.0.0-alpha11 ----
+low priority not compiled into this version
+logging to /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile-light.log (truncate)
+LoadBSPFile: '/mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.bsp'
+BSP is version Quake BSP bsp29
+INFO: using built-in palette.
+---- load_textures ----
+Loading extended texinfo flags from /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.texinfo.json...
+Loading extended content flags from /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.content.json...
+---- LoadEntities ----
+20 entities read, 18 are lights.
+
+--- Options Summary ---
+    "dirt" was set to "1" (from command line)
+    "minlight_dirt" was set to "1" (from command line)
+    "phong" was set to "1" (from command line)
+    "bounce" was set to "1" (from command line)
+    "surflightscale" was set to "0.700000" (from command line)
+    "sunlight_dirt" was set to "1.000000" (from command line)
+    "sunlight2_dirt" was set to "1.000000" (from command line)
+    "surflight_subdivide" was set to "64.000000" (from command line)
+    "soft" was set to "2" (from command line)
+    "extra" was set to "4" (from command line)
+
+Embree_TraceInit: Embree version: 4.4.0
+Embree_TraceInit: 
+	0 sky faces
+	4727 solid faces
+	0 filtered faces
+	0 shadow-casting skip faces
+SetupLights: 18 initial lights
+---- MakeSurfaceLights ----
+SetupLights: 18 after surface lights
+SetupLights: 18 after jittering
+Final count: 18 lights, 0 suns in use.
+---- SetupDirt ----
+       48 dirtmap vectors
+---- LightWorld ----
+---- ClearLightmapSurfaces ----
+---- CalculateVertexNormals ----
+[100%] time elapsed: 00:00:00.005389
+---- MakeFaceCache ----
+[100%] time elapsed: 00:00:00.072123
+---- CreateLightmapSurfaces ----
+[100%] time elapsed: 00:00:00.292219
+---- MakeRadiositySurfaceLights ----
+[100%] time elapsed: 00:00:00.000222
+0 surface light points in use.
+---- Direct Lighting ----
+[100%] time elapsed: 00:00:06.549906
+---- MakeBounceLights ----
+[100%] time elapsed: 00:00:00.000891
+---- Indirect Lighting (pass 0) ----
+[100%] time elapsed: 00:00:02.544462
+---- Post-Processing ----
+[100%] time elapsed: 00:00:00.000425
+---- SaveLightmapSurfaces ----
+WARNING: a face has exceeded max light styles (4). Use -verbose to find which faces.
+[100%] time elapsed: 00:00:00.182502
+map uses color: false
+lightmap size (total): 930152
+[100%] time elapsed: 00:00:00.151642
+Lighting Completed.
+
+---- ClearLightmapSurfaces ----
+15 switchable light styles (32 max)
+Writing /mnt/sde1/FPS/IdTech2/QuakeDev/id1/maps/lighttest01-compile.bsp as Quake BSP bsp29
+9.849s seconds elapsed
+0 empty lightmaps
+#### Finished with exit code 0
+
+#### Executing '/mnt/sde1/FPS/IdTech2/QuakeDev/ironwail +game hellojam26map +map lighttest01-compile'
+Command line: /mnt/sde1/FPS/IdTech2/QuakeDev/ironwail +game hellojam26map +map lighttest01-compile
+Found SDL version 2.30.0
+Terminal input not available.
+Detected 8 CPUs.
+Initializing Ironwail v0.8.2
+Host_Init
+
+Using add-on server "https://kexquake.s3.amazonaws.com"
+Playing registered version.
+Using renderer/network isolation.
+Console initialized.
+UDP Initialized
+Server using protocol 999 (RMQ)
+Exe: 22:41:55 Aug 11 2026 (Linux 64-bit)
+384.0 megabyte heap
+
+Video initialization
+Video mode: 1280 x 636 24bit Z24 S8 60Hz
+GL_VENDOR:   NVIDIA Corporation
+GL_RENDERER: NVIDIA GeForce RTX 3080/PCIe/SSE2
+GL_VERSION:  4.3.0 NVIDIA 580.178.04
+FOUND: EXT_texture_filter_anisotropic
+FOUND: ARB_buffer_storage
+FOUND: ARB_multi_bind
+FOUND: ARB_bindless_texture
+FOUND: ARB_shader_draw_parameters
+FOUND: ARB_clip_control
+
+Sound Initialization
+SDL audio spec  : 44100 Hz, 1024 samples, 2 channels
+SDL audio driver: pulseaudio - Built-in Audio Digital Stereo (IEC958), 65536 bytes buffer
+Audio: 16 bit, stereo, 44100 Hz
+
+Language initialization
+Loaded 1679 strings from 'localization/loc_english.txt'
+
+========= Quake Initialized =========
+
+Level editing environment detected, enabling map_checks
+(pass -nomapchecks or set map_checks to 0 to disable)
+Note: map_checks overrides gl_zfix, r_oit, and r_alphasort
+
+Add-on server status:
+ 29 add-ons available for download
+  0 add-ons already installed
+
+execing quake.rc
+execing default.cfg
+execing ironwail.cfg
+couldn't exec autoexec.cfg
+Wrote ironwail.cfg.
+
+----------------------------------------
+
+"game" changed to "id1;hellojam26map"
+Loaded 1679 strings from 'localization/loc_english.txt'
+
+=====================================
+
+Map checklist (lighttest01-compile.bsp):
+
+[x] lightmap data
+[x] vis data
+[ ] trigger_changelevel
+[ ] info_intermission
+[ ] skill spawnflags/triggers
+[ ] info_player_coop (0/3+)
+[ ] info_player_deathmatch (0/5+)
+[ ] music track (worldspawn "sounds" field)
+[ ] map title (worldspawn "message" field)
+
+=====================================
+
+3 demo(s) in loop
+execing quake.rc
+execing default.cfg
+execing ironwail.cfg
+couldn't exec autoexec.cfg
+"game" is already "id1;hellojam26map"
+
+=====================================
+
+Map checklist (lighttest01-compile.bsp):
+
+[x] lightmap data
+[x] vis data
+[ ] trigger_changelevel
+[ ] info_intermission
+[ ] skill spawnflags/triggers
+[ ] info_player_coop (0/3+)
+[ ] info_player_deathmatch (0/5+)
+[ ] music track (worldspawn "sounds" field)
+[ ] map title (worldspawn "message" field)
+
+=====================================
+
+changes will not take effect until the next level load.
+
+FITZQUAKE 0.85 SERVER (53716 CRC)
+
+----------------------------------------
+
+
+Using protocol 999
+Couldn't find a cdrip for track 0
+player entered the game
+[INFO] Arcane Dimensions V1.90 (Beta4) 
+Client player removed
+Wrote ironwail.cfg.
+Shutting down SDL sound
+#### Finished with exit code 0
+

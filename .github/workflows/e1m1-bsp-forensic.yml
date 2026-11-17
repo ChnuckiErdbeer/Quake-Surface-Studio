@@ -1,0 +1,45 @@
+name: E1M1 BSP forensic comparison
+
+on:
+  push:
+    branches:
+      - fix/v0.11.1-metadata-style-order-test
+    paths:
+      - "testressource26.11.16_01/analyze_e1m1_bsp_pair.py"
+      - "testressource26.11.16_01/e1m1_rerel.bsp"
+      - "testressource26.11.16_01/e1m1_rerel.lit"
+      - "testressource26.11.16_01/e1m1_dec01-compile.bsp"
+      - "testressource26.11.16_01/e1m1_dec01-compile.lit"
+      - ".github/workflows/e1m1-bsp-forensic.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out test BSPs
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Parse and compare both BSPs
+        run: |
+          set -o pipefail
+          python "testressource26.11.16_01/analyze_e1m1_bsp_pair.py" \
+            "testressource26.11.16_01/e1m1_rerel.bsp" \
+            "testressource26.11.16_01/e1m1_rerel.lit" \
+            "testressource26.11.16_01/e1m1_dec01-compile.bsp" \
+            "testressource26.11.16_01/e1m1_dec01-compile.lit" \
+            | tee e1m1-bsp-comparison.stdout.json
+      - name: Upload forensic report
+        uses: actions/upload-artifact@v4
+        with:
+          name: e1m1-bsp-forensic-comparison
+          path: |
+            e1m1-bsp-comparison.json
+            e1m1-bsp-comparison.stdout.json
+          if-no-files-found: error
