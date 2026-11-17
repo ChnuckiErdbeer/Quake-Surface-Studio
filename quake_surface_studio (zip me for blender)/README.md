@@ -1,3 +1,13 @@
+# SLOPGATE 0.21.23
+
+## 0.21.23 — Install Quake falloff correction on newly imported lights
+
+- Freshly imported QSS light datablocks now receive the Cycles Quake falloff graph for ericw delay 0 (linear) and delay 5 (soft inverse-square), even when Blender's generated starter node tree does not match the strict existing default-tree classifier.
+- The one-time permission to replace Blender's starter nodes applies only during the import operation that created the light. Later updates still require a QSS-owned graph or a recognized untouched Blender default, preserving genuinely user-edited light-node trees.
+- Diagnostics now report the reason a Quake falloff graph could not be installed.
+- The lighting-mode descriptions distinguish the fast Eevee approximation from the slower Cycles preview, which can use the Quake delay-0/5 corrections.
+- Fresh import, full-map Cycles bake and brightness comparison on the original rerelease E1M1 are still required before declaring falloff fidelity fixed.
+
 # SLOPGATE 0.21.22
 
 ## 0.21.22 — Cycles-safe Quake spotlight edges
