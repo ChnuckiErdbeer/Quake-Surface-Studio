@@ -21866,3 +21866,46 @@ This is the same exact error and same four atlas pixels / single luxel as the 0.
 **Working conclusion / next development focus**
 
 Stop changing global light falloff. Focus on the single sample where a hard-edged spotlight's cutoff meets a perpendicular brush corner. Inspect how Cycles GPU baking shades that edge sample, whether face 5828's sample lies exactly on the polygon boundary, and whether a small controlled cone softness or a safe per-face edge-sample treatment changes the result. Do not ship a workaround that silently zeros the luxel or damages the classic Quake lightmap. No new source changes/build were made from this MAP review.
+
+
+## 2026-11-17 — User connects spotlight 405 to original six-blue-spotlight edge/brightness complaint
+
+**User clarification (verbatim)**
+
+> Very good! Also the light is one of the six spotlights causing me initially to complain about the blur edge thing. (look it up if you dont remember.) They when baked. seemed way too bright and had the mentioned glitch in the lightmap. in ericw they are just subtle blue shimmers.
+
+**Earlier complaint recovered from the archive**
+
+In the 2026-11-13 entry, the user described that the lightmaps looked good in Blender, but the game deliberately blurs the low-resolution lightmaps. At face boundaries this blur sometimes caused harsh edges, with a light spot appearing to be abruptly cut off because the blur needed more sample area beyond the face's own lightmap rectangle. The assistant/handoff correctly treated this as **lightmap clipping after engine blur**, not simply insufficient softness within a luxel.
+
+The 0.21.13 attempt added a half-luxel support rim to eligible Enhanced BSPX per-face lightmaps. The archive records that the user saw no visible difference in either Ironwail or the Quake 2021 rerelease; the archive explicitly says not to continue changing Enhanced-only padding and present it as a fix. The 0.21.14 candidate later changed supersampled-pixel reduction to four-point sub-luxel quadrature, intended to preserve narrow-spotlight coverage near luxel-block edges. These are historical edge-coverage changes and are not proven fixes for the current classic-BSP29 e1m1 result.
+
+**Six-light group identified in the decompiled e1m1 MAP**
+
+The six pale-blue spotlights are entities 403–408 in e1m1.decompile.map:
+- Each has classname=light, light=1000, _color=181 238 255, and a mangle direction.
+- None of the six has an explicit angle or _softangle; ericw defaults to a 40-degree outer cone and zero softness (hard edge).
+- Spotlight 405 is one member of this six-light group; it is at (-120,624,144), mangle 0 -30 0, and is the spotlight the user identifies as directly lighting the current wall near the failing luxel.
+- The neighbouring lights in the group are 403 (80,696,144), 404 (-48,696,144), 406 (-120,504,144), 407 (-216,1688,-16), and 408 (472,1688,-16).
+- There is one additional similarly coloured 1000-value directed light at entity 427 elsewhere in the MAP; it is not part of entities 403–408 cluster.
+- The user says these six are only subtle blue shimmers when the same map is lit with ericw-tools, but appeared far too bright in SLOPGATE's Cycles bake and were associated with the lightmap glitch.
+
+**Important distinction: three related but separate symptoms**
+
+1. **Original engine blur/face-edge clipping:** the light spot gets cut off at a BSP face boundary because engine-side lightmap filtering reaches beyond the face's own sample rectangle. The 0.21.13 Enhanced-only padding test did not visibly improve Ironwail or the Quake rerelease.
+2. **Blue-spotlight brightness mismatch:** the six pale-blue lights look like subtle shimmers under ericw but are much too bright in SLOPGATE's bake. Need a controlled comparison of their effective brightness/coverage and falloff; do not infer that the same solution as face-edge clipping fixes this.
+3. **Current single non-finite sample:** on e1m1 face 5828 at (-80,640,96), exactly where two perpendicular tech07_2 brush faces meet. This lies near the hard cone boundary of light 405. The 0.21.20 build disabled QSS's custom Cycles falloff for all light delays but still produces the same NaN. This is not yet proven to be the cause of either of the visual symptoms above.
+
+**0.21.20 evidence to retain**
+- Nearest-light diagnostics show delay-0 lights 405, 330 and 404 have cycles_custom_active=False, cycles_profile=native_fallback_delay0, and spot_blend=0.
+- The report also says use_light_nodes=True; this is a separate Blender state flag, so actual contents of each light's node tree have not yet been verified. Do not overstate that no Blender light nodes are present.
+- Current 0.21.20 failure remains 1/165,763 non-finite baked luxels, zero bad source luxels, four atlas pixels (1594,2000), (1595,2000), (1594,2001), (1595,2001).
+- spottest02 successfully baked with 0.21.19; this does not validate the e1m1 six-light group.
+
+**Next investigation direction**
+- Do not repeat Enhanced-only edge padding.
+- Do not keep changing global light falloff in response to the unchanged NaN.
+- Treat visual edge clipping, excessive blue spotlight brightness, and the single NaN as related evidence but separate acceptance criteria.
+- Inspect the six spotlight energy/falloff and cone coverage against the ericw result, while separately inspecting face 5828's boundary luxel handling and the actual Blender light node trees on 0.21.20.
+- Any brightness change needs side-by-side ericw / SLOPGATE lightmap comparison, not a global eyeballed multiplier.
+- No code changes, new tests, new installer, or merge were made for this clarification.
