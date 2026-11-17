@@ -22043,3 +22043,23 @@ The user added the actual failing original `e1m1_rerel.bsp` and `.lit` to `testr
 The target face is not malformed and the blue spotlights are not missing. Absolute UV/atlas placement is now a testable candidate for why Cycles produces a non-finite 2x2 block at that one luxel; a difference in global scene/BVH ray interactions remains another possibility. The next discriminating test is to keep the original BSP and all lights/geometry unchanged, rebuild its atlas at 2x using SLOPGATE's existing **Change Lightmap Resolution** operator, and run a bake. Save a .blend copy first if painted/generated lightmaps need preserving: that operator discards those lightmaps and rebuilds from the original BSP. A successful bake would point toward atlas layout/UV sampling; a repeat failure at the same world luxel would point away from simple atlas placement. Do not describe this as a fix until tested.
 
 No production add-on code or installer changed in this investigation. The latest modifications were only to the read-only forensic analyzer. No Blender runtime bake or Ironwail visual comparison was run by the assistant. Keep the non-finite luxel, Nightdive spotlight fidelity, and original engine edge blur/clipping acceptance tests separate.
+
+
+## 2026-11-17 — SLOPGATE session handoff reviewed
+
+### You
+
+> Hi! Welcome to SLOPGATE. Go to [the handoff folder](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/tree/refs/heads/fix/v0.11.1-metadata-style-order-test/ai%20chat%20history) and study the handoff.
+
+### ChatGPT — repository orientation
+
+Reviewed `SLOPGATE_AI_Handoff.md` and `SLOPGATE_Field_Notes.md`, plus the archive introduction and latest November 17 technical entries. The full historical transcript and supporting workflow PDFs were not read in this orientation pass; consult them when a specific historical detail or document is needed.
+
+- The literal supplied URL's `refs/heads/` segment was not a valid branch ref. The intended branch is `fix/v0.11.1-metadata-style-order-test`.
+- At the start of this review, that branch pointed to `56628f7585a23e8bc6ca80b9e3bebf91628f99ac`, titled **Simulate alternate E1M1 chart packing order**. Its only file change is in the read-only forensic analyzer `testressource26.11.16_01/analyze_e1m1_bsp_pair.py`: it adds a reverse-chart-ID packing simulation and reports the alternate atlas rectangle / predicted pixel for the known face-5828 luxel. No Actions workflow was associated with this commit; no analyzer run/result, production add-on change, test, installer, Blender bake or engine test was established by this review.
+- The preceding commit `778113d9de2c77402926528c09aa9075f65c44d3` archived the original-vs-rebuilt Nightdive E1M1 BSP comparison. The original and rebuilt BSPs contain the same target face geometry and light entities; the same world-space luxel maps to different absolute atlas coordinates.
+- Live PR state checked during this review: PRs #1–#5 are open and draft. PR #1's head was `56628f7585a23e8bc6ca80b9e3bebf91628f99ac`; PR #5's head was `9e72bc5a77b30322ab53b00be0ec139380ae45f4`. PR #3 → #4 → #5 remains the stacked lightmap sequence; PR #2 is independent.
+- Latest documented user runtime status remains: 0.21.21 artifact `14294590886` reproduces the single non-finite baked luxel on BSP face 5828 at Quake position `(-80,640,96)`; the one-light `spottest02` succeeds. The known failure lies at a brush corner and near the hard cone edge of spotlight 405. The six pale-blue Nightdive spotlights' brightness mismatch and the original in-game face-edge blur/clipping remain separate acceptance issues.
+- The immediate controlled runtime discriminator recorded in the handoff is to save a copy of the Blender project, rebuild the original E1M1 lightmap atlas at 2x using **Change Lightmap Resolution**, then bake once. This changes atlas packing/coordinates while leaving the map and lights unchanged. The new reverse-order analyzer calculation is an offline diagnostic addition; it is not itself a Blender runtime result.
+
+No production add-on code changed in this session. No tests, build, installer, Blender runtime test, Ironwail test or PR merge were performed. This entry records repository orientation only.
