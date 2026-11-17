@@ -1186,3 +1186,33 @@ This is an isolation experiment, not a proven final lighting fix. It intentional
 The user's post-failure report listed zero entries for all face-domain attributes and both UV layers. Code review shows the bake operator restores the user's original mode before returning. If the user began in Edit Mode, the subsequent Save Lighting Diagnostics operator reads the regular Mesh attribute/UV collections while the object is back in Edit Mode. The zero counts may be caused by that reporting context rather than data loss. The face 5828 diagnostic was successfully generated during the bake itself.
 
 For another report, ask the user to switch the e1m1 object to **Object Mode after the failed bake**, then click Save Lighting Diagnostics. This should allow the report's regular Mesh attribute/UV reads to return valid entry counts. Do not ask the user to re-import solely because of those zero counts until Object Mode diagnostics confirms the data is actually missing.
+
+
+## 2026-11-17 — 0.21.19 Blender test results: spottest02 passes; e1m1 still fails
+
+The user tested the 0.21.19 installer in Blender 5.3.0:
+- e1m1 still produces the same non-finite bake error: 1/165,763 bad baked luxels, 0/165,763 bad source luxels; 12 non-finite RGB channel values across four atlas pixels `(1594,2000)`, `(1595,2000)`, `(1594,2001)`, `(1595,2001)`.
+- spottest02 completes successfully.
+  - 1 imported delay-0 spotlight (`QSS_light_002`, raw Quake value 300, range 600).
+  - GPU, 4096 samples, two diffuse bounces.
+  - 2.22 s Cycles, 2.83 s total.
+  - 3,858 sampled luxels; 3,845 lit; 36/36 light-receiving faces lit.
+  - zero non-finite bake/source luxels and zero non-finite atlas pixels.
+  - raw sampled mean 0.4274429424; source mean 0.02375913635; source-match normalization 0.05558434586; final atlas mean 0.02375913636 and max 0.936521.
+  - Raw atlas maximum before normalization 16.84865. This illustrates that the source-mean normalization is active and successful in this map.
+
+**Meaning:** the 0.21.19 delay-0 native-falloff path works on spottest02's single delay-0 spotlight, but e1m1 still exposes one map-specific non-finite sample. Do not call the e1m1 problem fixed. Do not assume that the original delay-0 custom shader is the only cause: we need a new e1m1 report after the fallback change.
+
+The spottest02 report again shows zero-length mesh attributes/UV arrays. Earlier source review indicates the bake operator restores the user's original mode before returning, while the report reads regular Mesh collections; an Edit Mode report can therefore show misleading zeros. Tell the user to switch the active BSP mesh to **Object Mode** before generating the next diagnostics report. Do not diagnose metadata loss solely from the Edit Mode report.
+
+### Immediate next information needed
+
+Obtain a fresh full **e1m1** Save Lighting Diagnostics report immediately after its failed 0.21.19 bake, with the e1m1 object selected and in Object Mode. Inspect:
+- `Last attempted lamp states`
+- `Non-finite luxel face/world/light matches`
+- `IMPORTED LIGHTS (active BSP map only)`
+- active-map light count and per-light delay/value/range/energy.
+
+Compare with the previous 0.21.18 attribution: face 5828, luxel (9,3), map position (-80,640,96), nearest lights #405 (delay0/value1000), #330 (delay0/value200), #404 (delay0/value1000). Determine whether the same luxel and neighbours persist under 0.21.19 before changing more code.
+
+No further source change, new build, test run, or merge was made in this response. PR #5 remains open/draft at `a781e3f43d24e42bb19145cda13da3973d5044cd`; CI 300 tests succeeded. The 0.21.19 package link/digest are recorded above.
