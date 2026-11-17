@@ -189,6 +189,63 @@ def polygon_topology_metrics(polygon, normal):
         "winding_dot": float(winding_dot),
     }
 
+def simulate_qss_atlas(faces, atlas_sizes=(512, 1024, 2048), gutter=2):
+    # Mirrors addon.py::_pack_lightmap_rectangles ordering and scale fallback.
+    records = []
+    for face in faces:
+        if face["lightofs"] < 0 or not face["styles"] or not face["extents"]:
+            continue
+        width, height = face["extents"]["luxel_dimensions"]
+        records.append({"face_id": face["index"], "width": width, "height": height})
+    ordered = sorted(records, key=lambda r: (-r["height"], -r["width"], r["face_id"]))
+    for scale in (2, 1):
+        for atlas_size in atlas_sizes:
+            x = y = row_h = 0
+            placements = {}
+            failed = False
+            for rec in ordered:
+                rw = rec["width"] * scale + 2*gutter
+                rh = rec["height"] * scale + 2*gutter
+                if rw > atlas_size or rh > atlas_size:
+                    failed = True
+                    break
+                if x + rw > atlas_size:
+                    x = 0
+                    y += row_h
+                    row_h = 0
+                if y + rh > atlas_size:
+                    failed = True
+                    break
+                placements[rec["face_id"]] = (x, y, rw, rh)
+                x += rw
+                row_h = max(row_h, rh)
+            if not failed:
+                target = placements.get(TARGET_FACE)
+                near = []
+                if target:
+                    tx, ty, tw, th = target
+                    for face_id, (px, py, pw, ph) in placements.items():
+                        if face_id == TARGET_FACE:
+                            continue
+                        dx = max(0, max(px-(tx+tw), tx-(px+pw)))
+                        dy = max(0, max(py-(ty+th), ty-(py+ph)))
+                        dist = math.hypot(dx, dy)
+                        if dist <= 8:
+                            near.append({"face": face_id, "gap_px": dist,
+                                         "rect": [px, py, pw, ph]})
+                    near.sort(key=lambda item: item["gap_px"])
+                return {
+                    "atlas_size": atlas_size, "luxel_scale": scale, "gutter": gutter,
+                    "lightmapped_face_count": len(placements),
+                    "target_face": TARGET_FACE,
+                    "target_rect": list(target) if target else None,
+                    "target_chart_nearby_rectangles": near[:20],
+                    "target_right_margin": atlas_size-(target[0]+target[2]) if target else None,
+                    "target_top_margin": atlas_size-(target[1]+target[3]) if target else None,
+                }
+    return {"error": "QSS packer failed all configured atlas sizes",
+            "lightmapped_face_count": len(records)}
+
 def parse_bsp(path):
     data = Path(path).read_bytes()
     if len(data) < 124: raise ValueError(f"{path}: BSP header truncated ({len(data)} bytes)")
@@ -375,6 +432,7 @@ def parse_bsp(path):
             "winding_opposed_sample": [face["index"] for face in faces if face["polygon"] and face["topology"]["winding_dot"] < -1e-6][:50],
         },
     }
+    result["atlas_layout"] = simulate_qss_atlas(faces)
     result["_all_faces"] = faces
     result["_entities"] = entity_list
     result["_worldspawn_raw"] = worldspawn_raw
@@ -584,6 +642,8 @@ def main():
         "original_face_5828_matches_in_rebuild": face_matches,
         "entity_comparison": compare_entities(original, rebuilt),
         "local_face_neighborhood_comparison": compare_neighborhood(original, rebuilt),
+        "original_atlas_layout": original["atlas_layout"],
+        "rebuilt_atlas_layout": rebuilt["atlas_layout"],
         "original_spotlight_geometry_paths": spotlight_geometry_paths(original),
         "rebuilt_spotlight_geometry_paths": spotlight_geometry_paths(rebuilt),
     }
