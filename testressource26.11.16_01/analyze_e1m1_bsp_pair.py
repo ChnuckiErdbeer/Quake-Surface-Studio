@@ -259,6 +259,9 @@ def parse_bsp(path):
                                    "area": area, "max_plane_error": max_plane_error,
                                    "lightofs": lightofs, "sample_count": sample_count,
                                    "light_range_ok": light_range_ok, "texture": texname})
+    entity_text = lumps["entities"].split(b"\\0", 1)[0].decode("latin1", errors="replace")
+    entity_blocks = re.findall(r"\\{([^{}]*)\\}", entity_text, re.S)
+    worldspawn_raw = entity_blocks[0][:3000] if entity_blocks else ""
     entity_list = parse_entities(lumps["entities"])
     lights = []
     for i, ent in enumerate(entity_list):
@@ -290,6 +293,8 @@ def parse_bsp(path):
         "nearest_faces_to_failure_position": target_faces,
         "nearest_lights": lights[:12],
         "blue_spotlights": [x for x in lights if x["mangle"] and x["color"] and ("181 238 255" in x["color"] or "0.7098" in x["color"])],
+        "worldspawn_raw_first_entity": worldspawn_raw,
+        "worldspawn_parsed": entity_list[0] if entity_list else None,
         "model0": {
             "firstface": models[0][14], "numfaces": models[0][15],
             "headnodes": list(models[0][9:13]), "visleafs": models[0][13],
@@ -300,6 +305,7 @@ def parse_bsp(path):
     }
     result["_all_faces"] = faces
     result["_entities"] = entity_list
+    result["_worldspawn_raw"] = worldspawn_raw
     return result
 
 def lit_summary(path, bsp):
@@ -354,6 +360,52 @@ def compare_faces(original, rebuilt):
     candidates.sort(key=lambda x: (x["source_centroid_to_candidate_polygon"], x["centroid_distance"]))
     return candidates[:12]
 
+def compare_neighborhood(original, rebuilt, radius=128.0):
+    source_faces = [f for f in original["_all_faces"]
+                    if f["polygon"] and f["target_polygon_distance"] <= radius]
+    target_results = []
+    for src in sorted(source_faces, key=lambda f: f["target_polygon_distance"]):
+        src_n = normalize(src["normal"])
+        candidates = []
+        for dst in rebuilt["_all_faces"]:
+            if not dst["polygon"] or dst["numedges"] < 3:
+                continue
+            alignment = abs(dot(src_n, normalize(dst["normal"])))
+            if alignment < 0.999:
+                continue
+            plane_delta = min(
+                abs(dot(src_n, dst["centroid"])-src["plane_dist"]),
+                abs(dot(src_n, dst["centroid"])+src["plane_dist"]),
+            )
+            if plane_delta > 0.05:
+                continue
+            centroid_distance = length(sub(src["centroid"], dst["centroid"]))
+            polygon_distance_value = polygon_distance(src["centroid"], dst["polygon"])
+            same_vertices = sorted(tuple(v) for v in src["polygon"]) == sorted(tuple(v) for v in dst["polygon"])
+            candidates.append({
+                "face": dst["index"], "texture": dst["texture"],
+                "polygon_distance_from_source_centroid": polygon_distance_value,
+                "centroid_distance": centroid_distance, "same_vertex_set": same_vertices,
+                "same_texinfo_vectors": src["texinfo_vectors"] == dst["texinfo_vectors"],
+                "same_texture_digest": src["texture_digest"] == dst["texture_digest"],
+                "source_plane_delta": plane_delta,
+                "numedges": dst["numedges"], "area": dst["area"],
+                "texinfo_vectors": dst["texinfo_vectors"],
+                "polygon": dst["polygon"],
+            })
+        candidates.sort(key=lambda x: (not x["same_vertex_set"],
+                                       x["polygon_distance_from_source_centroid"],
+                                       x["centroid_distance"]))
+        target_results.append({
+            "original_face": src["index"], "texture": src["texture"],
+            "distance_to_failure_position": src["target_polygon_distance"],
+            "centroid": src["centroid"], "normal": src["normal"],
+            "numedges": src["numedges"], "area": src["area"],
+            "texinfo_vectors": src["texinfo_vectors"], "polygon": src["polygon"],
+            "best_rebuild_matches": candidates[:3],
+        })
+    return target_results[:80]
+
 def compare_entities(original, rebuilt):
     left, right = original["_entities"], rebuilt["_entities"]
     changes = []
@@ -369,7 +421,11 @@ def compare_entities(original, rebuilt):
                             "original_origin": a.get("origin"), "rebuilt_origin": b.get("origin"),
                             "changes": delta})
     return {"original_count": len(left), "rebuilt_count": len(right),
-            "exact_entity_dicts_match_in_order": not changes, "differences": changes[:100]}
+            "exact_entity_dicts_match_in_order": not changes, "differences": changes[:100],
+            "original_worldspawn": original["_entities"][0] if left else None,
+            "rebuilt_worldspawn": rebuilt["_entities"][0] if right else None,
+            "original_worldspawn_raw": original["_worldspawn_raw"],
+            "rebuilt_worldspawn_raw": rebuilt["_worldspawn_raw"]}
 
 def json_safe(value):
     if isinstance(value, float) and not math.isfinite(value):
@@ -388,12 +444,13 @@ def main():
     face_matches = compare_faces(original, rebuilt)
     report = {
         "target_world_quake": TARGET,
-        "original": {k: v for k, v in original.items() if k not in ("_all_faces", "_entities")},
+        "original": {k: v for k, v in original.items() if k not in ("_all_faces", "_entities", "_worldspawn_raw")},
         "original_lit": lit_summary(sys.argv[2], original),
         "rebuilt": {k: v for k, v in rebuilt.items() if k not in ("_all_faces", "_entities")},
         "rebuilt_lit": lit_summary(sys.argv[4], rebuilt),
         "original_face_5828_matches_in_rebuild": face_matches,
         "entity_comparison": compare_entities(original, rebuilt),
+        "local_face_neighborhood_comparison": compare_neighborhood(original, rebuilt),
     }
     out = json.dumps(json_safe(report), indent=2, allow_nan=False)
     Path("e1m1-bsp-comparison.json").write_text(out, encoding="utf-8")
