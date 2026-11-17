@@ -21956,3 +21956,14 @@ PR #5 branch fix/0.21.17-world-aligned-lightmap-charts at pre-fix source 21344ec
 3. If the same NaN persists with empty native light trees, move to Cycles GPU/corner-sample handling at face 5828; do not keep changing falloff profiles.
 4. Treat the excessive blue spotlight brightness as a separate acceptance item. Native Blender falloff is only an approximation to ericw's delay-0 linear attenuation, so even a successful NaN fix may not correct brightness. Compare the six-light group against ericw using the committed images and a controlled per-light sample comparison before selecting a brightness conversion.
 5. Treat the original engine blur/face-edge clipping as a third separate issue. Do not claim the 0.21.13 Enhanced-only rim or later world-chart work fixed it without Ironwail comparison.
+
+
+## 2026-11-17 — SLOPGATE 0.21.21 CI and installer verified
+
+- GitHub Actions run 44005218004 / job 133778790906 succeeded.
+- Python compilation passed and 302 standalone tests passed.
+- Blender install artifact: Quake-Surface-Studio-v0.21.21-Blender-Install, ID 14293447941, 313,890 bytes.
+- SHA-256: 768aae8f3e6aa04ee34b2390d570f7ba013e844c4844c4fe81fa5301b69c17a8.
+- Download: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/44005218004/artifacts/14293447941
+- ZIP downloaded and verified locally: 52 entries, no corrupt member, installable quake_surface_studio/__init__.py present, checksum matches the GitHub artifact digest.
+- This is not Blender runtime validation. User still needs to test a fresh e1m1 import and Cycles bake. PR #5 remains open/draft; no merge.
