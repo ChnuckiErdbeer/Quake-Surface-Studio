@@ -1342,3 +1342,15 @@ These may interact around the same lights/geometry but the source and acceptance
 - Independently investigate the face-corner luxel / Cycles GPU issue causing the unchanged NaN.
 - Any blue brightness correction must be checked with side-by-side lightmap images, not a global brightness slider guess.
 - No source, test, installer or merge changes were made for this clarification. Current candidate is still 0.21.20 on open/draft PR #5; see preceding entries for commit, CI and artifact details.
+
+
+## 2026-11-17 — Current lighting investigation: 0.21.21 fallback correction
+
+- Current candidate source is on PR #5 branch fix/0.21.17-world-aligned-lightmap-charts. Code correction commit: 9d9b650339f3b0be64830290a241126e5c16e4ef. Subsequent test/version/README commits make the current docs branch tip c929614765a5cd299a5a82e01548e9a90763311f before archive/handoff updates.
+- Candidate version is 0.21.21. Package bl_info was bumped; package/root README updated. tests/test_lighting.py gained two source-contract checks.
+- Important confirmed bug: Blender 5.3's Light.use_nodes is not a reliable on/off switch; it reads True and ignores assignment False. The old 0.21.20 fallback only changed this compatibility property, so custom QSS light shader graphs could remain in the actual node tree. Thus the 0.21.20 all-native-falloff isolation test was inconclusive.
+- New fallback explicitly clears the light node tree only if every node carries the QSS ownership marker. Any untagged/user-authored node tree is preserved. Diagnostics now report actual node names/types and whether the graph is QSS-owned, instead of interpreting use_nodes.
+- The 0.21.21 candidate has not yet had CI or artifact validation confirmed. Do not send an installer link until the Actions run completes and the ZIP/package is verified.
+- User's three acceptance issues remain separate: (1) e1m1 Cycles bake NaN at face 5828 / world (-80,640,96), near light 405 and a perpendicular brush corner; (2) six pale-blue spotlights 403–408 are too bright in SLOPGATE compared with subtle ericw shimmer; (3) original engine blur/face-edge clipping. The new patch primarily makes the light-node fallback test real; it does not claim to fix all three.
+- Next: verify CI/artifact; ask user to install 0.21.21, re-import e1m1, bake once, then inspect report fields light_node_tree and light_node_tree_qss_owned for lights 405/404/330. Expected native fallback is an empty node tree (or at least no QSS-owned custom graph). If NaN persists with empty trees, focus on face/corner/GPU bake path. Keep the old atlas rollback.
+- No PR merges. No Blender 5.3 runtime validation by assistant.
