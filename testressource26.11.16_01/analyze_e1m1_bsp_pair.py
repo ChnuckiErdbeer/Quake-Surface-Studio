@@ -129,6 +129,66 @@ def parse_textures(data):
         names.append(raw.decode("latin1", errors="replace"))
     return names
 
+def polygon_topology_metrics(polygon, normal):
+    if len(polygon) < 3:
+        return {"concave": False, "concave_turns": 0, "collinear_turns": 0,
+                "self_intersections": 0, "repeated_vertices": 0, "winding_dot": 0.0}
+    axis = max(range(3), key=lambda i: abs(normal[i]))
+    axes = [i for i in range(3) if i != axis]
+    points = [(float(p[axes[0]]), float(p[axes[1]])) for p in polygon]
+    n = len(points)
+    cross_values = []
+    eps = 1e-6
+    for i in range(n):
+        a, b, c = points[i-1], points[i], points[(i+1) % n]
+        cross_values.append((b[0]-a[0])*(c[1]-b[1]) - (b[1]-a[1])*(c[0]-b[0]))
+    positive = sum(1 for value in cross_values if value > eps)
+    negative = sum(1 for value in cross_values if value < -eps)
+    collinear = sum(1 for value in cross_values if abs(value) <= eps)
+    concave_turns = min(positive, negative) if positive and negative else 0
+
+    def orient(a, b, c):
+        return (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0])
+    def on_segment(a, b, p):
+        return (min(a[0], b[0])-eps <= p[0] <= max(a[0], b[0])+eps
+                and min(a[1], b[1])-eps <= p[1] <= max(a[1], b[1])+eps)
+    def intersects(a, b, c, d):
+        o1, o2, o3, o4 = orient(a,b,c), orient(a,b,d), orient(c,d,a), orient(c,d,b)
+        if ((o1 > eps and o2 < -eps) or (o1 < -eps and o2 > eps)) and ((o3 > eps and o4 < -eps) or (o3 < -eps and o4 > eps)):
+            return True
+        return ((abs(o1) <= eps and on_segment(a,b,c))
+                or (abs(o2) <= eps and on_segment(a,b,d))
+                or (abs(o3) <= eps and on_segment(c,d,a))
+                or (abs(o4) <= eps and on_segment(c,d,b)))
+    crossings = 0
+    for i in range(n):
+        a, b = points[i], points[(i+1)%n]
+        for j in range(i+1, n):
+            if j == i or j == (i+1)%n or (j+1)%n == i:
+                continue
+            c, d = points[j], points[(j+1)%n]
+            if intersects(a,b,c,d):
+                crossings += 1
+
+    repeated = 0
+    for i in range(n):
+        for j in range(i+1, n):
+            if math.hypot(points[i][0]-points[j][0], points[i][1]-points[j][1]) <= eps:
+                repeated += 1
+
+    area_vec = (0.0, 0.0, 0.0)
+    for i, vertex in enumerate(polygon):
+        area_vec = add(area_vec, cross(vertex, polygon[(i+1)%n]))
+    winding_dot = dot(area_vec, normal)
+    return {
+        "concave": bool(concave_turns),
+        "concave_turns": int(concave_turns),
+        "collinear_turns": int(collinear),
+        "self_intersections": int(crossings),
+        "repeated_vertices": int(repeated),
+        "winding_dot": float(winding_dot),
+    }
+
 def parse_bsp(path):
     data = Path(path).read_bytes()
     if len(data) < 124: raise ValueError(f"{path}: BSP header truncated ({len(data)} bytes)")
@@ -204,6 +264,7 @@ def parse_bsp(path):
         repeats = sum(1 for x in edge_lengths if x < 1e-6)
         plane_errors = [abs(dot(pnormal, v)-pdist) for v in polygon] if polygon else []
         max_plane_error = max(plane_errors, default=0.0)
+        topology = polygon_topology_metrics(polygon, pnormal)
         area_vec = (0.0, 0.0, 0.0)
         if len(polygon) >= 3:
             for j, v in enumerate(polygon):
@@ -250,6 +311,7 @@ def parse_bsp(path):
             "bbox": [[min(v[k] for v in polygon), max(v[k] for v in polygon)] for k in range(3)] if polygon else [],
             "min_edge": min(edge_lengths, default=0.0), "zero_edges": repeats,
             "max_plane_error": max_plane_error,
+            "topology": topology,
             "target_plane_distance": abs(dot(pnormal, TARGET)-pdist) if finite_vec(pnormal) else float("inf"),
             "target_polygon_distance": polygon_distance(TARGET, polygon),
         }
@@ -302,6 +364,16 @@ def parse_bsp(path):
         "bad_face_references_sample": bad_face_refs[:20],
         "nonfinite_faces_sample": nonfinite_faces[:30],
         "suspicious_faces_sample": bad_poly_faces[:30],
+        "topology_quality": {
+            "concave_faces": sum(1 for face in faces if face["topology"]["concave"]),
+            "self_intersecting_faces": sum(1 for face in faces if face["topology"]["self_intersections"]),
+            "repeated_vertex_faces": sum(1 for face in faces if face["topology"]["repeated_vertices"]),
+            "collinear_vertex_faces": sum(1 for face in faces if face["topology"]["collinear_turns"]),
+            "winding_opposed_faces": sum(1 for face in faces if face["polygon"] and face["topology"]["winding_dot"] < -1e-6),
+            "concave_face_sample": [face["index"] for face in faces if face["topology"]["concave"]][:50],
+            "self_intersection_sample": [face["index"] for face in faces if face["topology"]["self_intersections"]][:50],
+            "winding_opposed_sample": [face["index"] for face in faces if face["polygon"] and face["topology"]["winding_dot"] < -1e-6][:50],
+        },
     }
     result["_all_faces"] = faces
     result["_entities"] = entity_list
