@@ -1524,3 +1524,45 @@ If the bake succeeds, restore the hard edge one light at a time to isolate which
 
 No source changes, tests, build, installer, Blender runtime bake, or PR merge were made. This remains an evidence-led isolation step; do not clamp or discard the bad luxel.
 
+
+
+## 2026-11-17 — User confirms original rerelease E1M1 bake succeeds with six spotlight Blend values restored
+
+### Confirmed user test
+
+The user retained the original, unrecompiled Quake rerelease E1M1 and all 252 lights, changed only the six Nightdive spotlights' Blender `Spot Blend` values from 0.0 to 1.0, and completed a Full Map Cycles bake.
+
+Exact user report:
+
+```
+Bake complete (Full map. ) 252 lights, 110 materials, 5557/5631 faces lit,
+157570/165763 raw luxels lit, mean 0.2951, max 30.64, raw mean 3.122,
+source mean 0.2947, atlas scale 0.09441, 2 diffuse bounces;
+total 3 min 20.9 s (Cycles 3 min 9.2 s).
+Switches to Baked Lightmaps preview.
+```
+
+This is now a verified-by-user successful bake of the original, unrecompiled rerelease E1M1. It proves the six lights do not need to be deleted; their current hard-edge Blender configuration was the critical variable changed in the successful test.
+
+### Updated root-cause assessment
+
+Known-good SLOPGATE 0.21.18 imported these six lights with `spot_blend=1.0`, because its old formula was `1 - soft_angle / cone` and the Nightdive entities omit `_softangle` (default 0). Later `98753c7` and `fbd760c` changed the mapping so Quake's zero softangle produces Blender `spot_blend=0.0` (hard edge). User's controlled test restored only the six values to 1.0 and the full original map bake succeeded.
+
+This is very strong evidence that the hard-edged spotlight representation introduced after 0.21.18 triggers the non-finite Cycles luxel failure. The previous chart/atlas placement hypothesis is now secondary: the shared world-chart system was already present in the known-good 0.21.18 build and is retained in this successful bake.
+
+### Bake quality evidence
+
+- 252 lights; all six Nightdive spotlights retained.
+- 5,557/5,631 faces lit; 157,570/165,763 raw luxels lit.
+- mean 0.2951; source mean 0.2947; raw mean 3.122; max 30.64.
+- Atlas match scale 0.09441, applied to atlas source matching only.
+- 2 diffuse bounces; total 3m20.9s, Cycles 3m9.2s.
+- Bake completed and entered Baked Lightmaps preview.
+
+### Required final correction
+
+Do not stop at a manual Blend workaround. Implement a Cycles-safe solution that preserves Quake/ericw's intended hard spotlight cone as closely as possible without producing non-finite luxels. `spot_blend=1.0` is an established successful compatibility reference, but it may make the visible cone edge too soft. Validate both full-map bake success and in-game cone appearance.
+
+The final acceptance test must be a fresh import of the original unrecompiled E1M1 with all six lights, no manual changes to their Blender properties, a successful full-map bake, and a Quake rerelease visual comparison. Keep classic engine face-edge filtering as a separate criterion.
+
+No production code, build or installer changed in this update; only user runtime evidence and the regression assessment were recorded.
