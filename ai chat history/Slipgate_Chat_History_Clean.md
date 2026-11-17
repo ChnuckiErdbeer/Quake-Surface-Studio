@@ -22249,3 +22249,20 @@ Acceptance remains: fresh-import original rerelease E1M1, all 252 lights present
 - Installer page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/44180237973/artifacts/14371921535
 
 These CI results validate the source tests and package, not Blender's actual Cycles runtime. The original rerelease E1M1 full-map bake and six-cone visual comparison remain the decisive user acceptance test.
+
+
+
+## 2026-11-17 — 0.21.22 bake completion; residual brightness is likely a falloff mismatch
+
+The user confirms the original E1M1 bake finishes with SLOPGATE 0.21.22. They report that live preview lights remain very bright and the baked lightmap is still somewhat bright near walls, especially close to lights. No new metrics or screenshot is provided.
+
+Source inspection confirms a likely cause:
+- ericw-tools default `delay 0` is linear attenuation; `delay 2` is inverse-square. `_falloff` sets the distance-to-zero for delay 0. Worldspawn `_dist` changes fade distance, while `_range` changes brightness independently. Source: https://ericw-tools.readthedocs.io/en/latest/light.html
+- SLOPGATE's native Blender preview approximates delay 0 with an inverse-square lamp calibrated only at the midpoint of its radius. That approximation becomes disproportionately bright nearer to the source, especially at close wall samples.
+- SLOPGATE has a Cycles correction-node graph for exact ericw delay 0 and delay 5 attenuation, but it is only installed if the light's node tree is recognized as Blender's untouched default. The prior 0.21.21 diagnostic recorded the six Nightdive spotlights as `user_nodes_preserved_native_fallback`, with `cycles_custom_active=False`; this means the exact falloff graph was not active for those lights in that test.
+- 0.21.22 changed only the non-zero spotlight Blend floor to avoid the Cycles bake singularity; it did not change Cycles falloff graph installation. A fresh 0.21.22 diagnostics report is needed to verify the same status in the current file.
+- Blender's Light Falloff node is Cycles-only, so Eevee/Realtime preview cannot use the correction graph and remains an approximation. Sources: https://docs.blender.org/manual/en/latest/render/shader_nodes/color/light_falloff.html and https://docs.blender.org/manual/en/5.4/render/cycles/light_settings.html
+
+Do not reduce global brightness or every lamp's energy yet: that changes the intensity at all distances but does not correct the falloff curve. The next source fix should make the intended correction graph active for freshly imported QSS lights without taking over genuinely user-authored trees. First inspect `qss_cycles_falloff_active`, `qss_cycles_falloff_profile`, `qss_cycles_falloff_error` and node-tree summary for the six spotlights and ordinary delay-0 lights in a 0.21.22 diagnostics report. The user should also state whether the live preview was Realtime/Eevee or Cycles.
+
+No code was changed and no fresh Blender diagnostics were run during this investigation. Bake completion is user-confirmed; brightness fidelity remains open.
