@@ -220,8 +220,10 @@ def parse_bsp(path):
         "nearest_lights": lights[:12],
         "blue_spotlights": [x for x in lights if x["mangle"] and x["color"] and ("181 238 255" in x["color"] or "0.7098" in x["color"])],
         "bad_face_references_sample": bad_face_refs[:20],
+        "nonfinite_faces_sample": nonfinite_faces[:30],
         "suspicious_faces_sample": bad_poly_faces[:30],
     }
+    result["_all_faces"] = faces
     return result
 
 def lit_summary(path, bsp):
@@ -245,7 +247,7 @@ def compare_faces(original, rebuilt):
     if not src: return {"error": "original does not contain face 5828"}
     src_centroid = src["centroid"]
     candidates = []
-    for f in rebuilt["_faces"]:
+    for f in rebuilt["_all_faces"]:
         if not f["polygon"] or f["numedges"] < 3: continue
         n_dot = abs(dot(normalize(src["normal"]), normalize(f["normal"])))
         if n_dot < 0.95: continue
@@ -261,82 +263,32 @@ def compare_faces(original, rebuilt):
     candidates.sort(key=lambda x: (x["source_centroid_to_candidate_polygon"], x["centroid_distance"]))
     return candidates[:12]
 
+def json_safe(value):
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(v) for v in value]
+    return value
+
 def main():
     if len(sys.argv) != 5:
         raise SystemExit("usage: analyze_e1m1_bsp_pair.py ORIGINAL.bsp ORIGINAL.lit REBUILT.bsp REBUILT.lit")
     original = parse_bsp(sys.argv[1])
     rebuilt = parse_bsp(sys.argv[3])
-    # Reparse the rebuilt face records so the report serializer does not get all polygon arrays.
-    # This keeps the textual report compact while preserving the full face geometry for matching.
-    original["_faces"] = None
-    rebuilt_with_faces = parse_bsp(sys.argv[3])
-    rebuilt["_faces"] = rebuilt_with_faces.pop("_faces", None)
-    # parse_bsp stores the face list separately for this comparison via this lightweight hook.
-    rebuilt["_faces"] = getattr(rebuilt_with_faces, "_faces", None) or []
-    # Rebuild candidate data directly from the returned nearest faces if no full face list is attached.
-    # The parser is also called below with a private collection switch.
-    rebuilt_full = parse_bsp(sys.argv[3])
-    rebuilt_faces = rebuilt_full.get("_all_faces", [])
-    if not rebuilt_faces:
-        # Recover full faces by parsing the source structure again in the collection mode.
-        rebuilt_faces = parse_all_face_geometries(sys.argv[3])
-    face_matches = compare_faces(original, {"_faces": rebuilt_faces},)
+    face_matches = compare_faces(original, rebuilt)
     report = {
         "target_world_quake": TARGET,
-        "original": {k: v for k, v in original.items() if k not in ("_faces", "_all_faces")},
+        "original": {k: v for k, v in original.items() if k != "_all_faces"},
         "original_lit": lit_summary(sys.argv[2], original),
-        "rebuilt": {k: v for k, v in rebuilt.items() if k not in ("_faces", "_all_faces")},
+        "rebuilt": {k: v for k, v in rebuilt.items() if k != "_all_faces"},
         "rebuilt_lit": lit_summary(sys.argv[4], rebuilt),
         "original_face_5828_matches_in_rebuild": face_matches,
     }
-    out = json.dumps(report, indent=2, allow_nan=False)
+    out = json.dumps(json_safe(report), indent=2, allow_nan=False)
     Path("e1m1-bsp-comparison.json").write_text(out, encoding="utf-8")
     print(out)
-
-def parse_all_face_geometries(path):
-    # Reuse the same parser logic, but retrieve the face polygons from the compact JSON report.
-    # This helper is replaced below by a second, direct pass to avoid serializing every face.
-    data = Path(path).read_bytes()
-    base = parse_bsp(path)
-    # nearest faces carry polygons in-memory as long as parse_bsp has not serialized them.
-    # A separate direct face pass reconstructs all records for the original-face match.
-    off, size = struct.unpack_from("<ii", data, 4 + 7*8)
-    face_blob = data[off:off+size]
-    off, size = struct.unpack_from("<ii", data, 4 + 1*8)
-    plane_blob = data[off:off+size]
-    off, size = struct.unpack_from("<ii", data, 4 + 3*8)
-    vertex_blob = data[off:off+size]
-    off, size = struct.unpack_from("<ii", data, 4 + 12*8)
-    edge_blob = data[off:off+size]
-    off, size = struct.unpack_from("<ii", data, 4 + 13*8)
-    surf_blob = data[off:off+size]
-    planes = [struct.unpack_from("<4fi", plane_blob, i) for i in range(0, len(plane_blob)-19, 20)]
-    vertices = [struct.unpack_from("<3f", vertex_blob, i) for i in range(0, len(vertex_blob)-11, 12)]
-    edges = [struct.unpack_from("<2H", edge_blob, i) for i in range(0, len(edge_blob)-3, 4)]
-    surfedges = [x[0] for x in struct.iter_unpack("<i", surf_blob[:len(surf_blob)//4*4])]
-    out = []
-    for fi, off in enumerate(range(0, len(face_blob)-19, 20)):
-        planenum, side, firstedge, numedges, texnum, *_ = struct.unpack_from("<Hhihh4Bi", face_blob, off)
-        if planenum >= len(planes) or firstedge < 0 or numedges < 0 or firstedge+numedges > len(surfedges): continue
-        normal = tuple(planes[planenum][:3]); pdist = float(planes[planenum][3])
-        if side: normal, pdist = mul(normal, -1.0), -pdist
-        polygon=[]
-        bad=False
-        for se in surfedges[firstedge:firstedge+numedges]:
-            ei=abs(se)
-            if ei>=len(edges): bad=True; break
-            edge=edges[ei]; vi=edge[0] if se>=0 else edge[1]
-            if vi>=len(vertices): bad=True; break
-            polygon.append(tuple(float(x) for x in vertices[vi]))
-        if bad or not polygon: continue
-        centroid=tuple(sum(v[k] for v in polygon)/len(polygon) for k in range(3))
-        area_vec=(0.0,0.0,0.0)
-        for j,v in enumerate(polygon): area_vec=add(area_vec,cross(v,polygon[(j+1)%len(polygon)]))
-        area=0.5*abs(dot(normalize(normal),area_vec)) if length(normal)>0 else 0.0
-        out.append({"index":fi,"polygon":polygon,"normal":normal,"plane_dist":pdist,
-                    "centroid":centroid,"area":area,"numedges":numedges,
-                    "texture":"","target_polygon_distance":polygon_distance(TARGET,polygon)})
-    return out
 
 if __name__ == "__main__":
     main()
