@@ -224,18 +224,36 @@ def build_current_qss_world_charts(faces, planes, edges, surfedges, models):
             face_model_ids[face_id] = model_id
     face_model_ids = [0 if value is None else int(value) for value in face_model_ids]
     records, keys, frames, edge_users = {}, {}, {}, {}
+    skip_stats = {
+        "input_faces": len(faces), "negative_lightofs": 0, "empty_styles": 0,
+        "empty_polygons": 0, "bad_surface_ranges": 0, "bad_plane_indices": 0,
+        "plane_frame_errors": {}, "bad_edge_indices": 0, "accepted_faces": 0,
+    }
     for face in faces:
         face_id = face["index"]
-        if face["lightofs"] < 0 or not face["styles"] or not face["polygon"]:
+        if face["lightofs"] < 0:
+            skip_stats["negative_lightofs"] += 1
+            continue
+        if not face["styles"]:
+            skip_stats["empty_styles"] += 1
+            continue
+        if not face["polygon"]:
+            skip_stats["empty_polygons"] += 1
             continue
         firstedge, edge_count = face["firstedge"], face["numedges"]
         plane_id = face["plane_index"]
-        if firstedge < 0 or edge_count < 3 or firstedge+edge_count > len(surfedges) or plane_id < 0 or plane_id >= len(planes):
+        if firstedge < 0 or edge_count < 3 or firstedge+edge_count > len(surfedges):
+            skip_stats["bad_surface_ranges"] += 1
+            continue
+        if plane_id < 0 or plane_id >= len(planes):
+            skip_stats["bad_plane_indices"] += 1
             continue
         try:
             plane = planes[plane_id]
             frame = world_plane_frame(plane[:3],plane[3],face["side"])
-        except Exception:
+        except Exception as exc:
+            label = f"{type(exc).__name__}: {exc}"
+            skip_stats["plane_frame_errors"][label] = skip_stats["plane_frame_errors"].get(label, 0) + 1
             continue
         plane_key = tuple(round(value/1e-4) for value in (*frame["normal"],frame["distance"]))
         keys[face_id] = (face_model_ids[face_id],tuple(int(v) for v in face["styles"]),plane_key)
@@ -247,9 +265,11 @@ def build_current_qss_world_charts(faces, planes, edges, surfedges, models):
                 break
             edge_ids.add(edge_id)
         if not valid:
+            skip_stats["bad_edge_indices"] += 1
             keys.pop(face_id,None)
             continue
         records[face_id] = face
+        skip_stats["accepted_faces"] += 1
         frames[face_id] = frame
         for edge_id in edge_ids:
             edge_users.setdefault(edge_id,[]).append(face_id)
@@ -291,7 +311,7 @@ def build_current_qss_world_charts(faces, planes, edges, surfedges, models):
         charts.append(chart)
         for face_id in members:
             face_to_chart[face_id]=chart_id
-    return charts,face_to_chart,shared_join_edges
+    return charts,face_to_chart,shared_join_edges,skip_stats
 
 def pack_current_qss_charts(charts, gutter=2, atlas_sizes=(512,1024,2048)):
     ordered=sorted(charts,key=lambda r:(-r["height"],-r["width"],r["chart_id"]))
@@ -321,13 +341,14 @@ def pack_current_qss_charts(charts, gutter=2, atlas_sizes=(512,1024,2048)):
     return {"error":"Atlas pack failed"}
 
 def current_qss_world_chart_report(parsed, target_face_id):
-    charts,face_to_chart,shared_edges=build_current_qss_world_charts(
+    charts,face_to_chart,shared_edges,skip_stats=build_current_qss_world_charts(
         parsed["_all_faces"],parsed["_planes"],parsed["_edges"],parsed["_surfedges"],parsed["_models"])
     pack=pack_current_qss_charts(charts)
     chart_id=face_to_chart.get(int(target_face_id))
     if chart_id is None:
         return {"target_face":target_face_id,"error":"Target face has no classic world chart",
-                "chart_count":len(charts),"shared_coplanar_join_edges":shared_edges}
+                "chart_count":len(charts),"shared_coplanar_join_edges":shared_edges,
+                "chart_build_skip_stats":skip_stats}
     chart=next(item for item in charts if item["chart_id"]==chart_id)
     rect=pack.get("placements",{}).get(chart_id)
     target=parsed["_all_faces"][int(target_face_id)]
@@ -382,6 +403,7 @@ def current_qss_world_chart_report(parsed, target_face_id):
         "chart_world_extents":[chart["s_min"],chart["s_max"],chart["t_min"],chart["t_max"]],
         "chart_luxel_dimensions":[chart["width"],chart["height"]],
         "atlas_size":pack.get("atlas_size"),"luxel_scale":pack.get("luxel_scale"),
+        "chart_build_skip_stats":skip_stats,
         "atlas_rectangle":list(rect) if rect else None,"luxel_9_3_world_point":point,
         "luxel_9_3_predicted_pixel":pixel,"shared_coplanar_join_edges":shared_edges,
     }
