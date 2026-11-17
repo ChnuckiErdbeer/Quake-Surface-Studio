@@ -29,26 +29,49 @@ def normalize(a):
     return mul(a, 1.0/n) if n > 1e-20 else (0.0, 0.0, 0.0)
 def finite_vec(v): return all(math.isfinite(x) for x in v)
 
+def closest_point_segment(p, a, b):
+    ab = sub(b, a)
+    denom = dot(ab, ab)
+    if denom <= 1e-20:
+        return a
+    t = max(0.0, min(1.0, dot(sub(p, a), ab)/denom))
+    return add(a, mul(ab, t))
+
 def closest_point_triangle(p, a, b, c):
-    # Ericson's closest-point-on-triangle algorithm.
-    ab, ac, ap = sub(b, a), sub(c, a), sub(p, a)
+    # Ericson's closest-point-on-triangle algorithm, with a degenerate fallback.
+    ab, ac = sub(b, a), sub(c, a)
+    if length(cross(ab, ac)) <= 1e-12:
+        candidates = (closest_point_segment(p, a, b),
+                      closest_point_segment(p, b, c),
+                      closest_point_segment(p, c, a))
+        return min(candidates, key=lambda q: length(sub(p, q)))
+    ap = sub(p, a)
     d1, d2 = dot(ab, ap), dot(ac, ap)
     if d1 <= 0 and d2 <= 0: return a
     bp = sub(p, b); d3, d4 = dot(ab, bp), dot(ac, bp)
     if d3 >= 0 and d4 <= d3: return b
     vc = d1*d4 - d3*d2
     if vc <= 0 and d1 >= 0 and d3 <= 0:
-        return add(a, mul(ab, d1/(d1-d3)))
+        denom = d1-d3
+        return add(a, mul(ab, d1/denom if abs(denom) > 1e-20 else 0.0))
     cp = sub(p, c); d5, d6 = dot(ab, cp), dot(ac, cp)
     if d6 >= 0 and d5 <= d6: return c
     vb = d5*d2 - d1*d6
     if vb <= 0 and d2 >= 0 and d6 <= 0:
-        return add(a, mul(ac, d2/(d2-d6)))
+        denom = d2-d6
+        return add(a, mul(ac, d2/denom if abs(denom) > 1e-20 else 0.0))
     va = d3*d6 - d5*d4
     if va <= 0 and (d4-d3) >= 0 and (d5-d6) >= 0:
-        return add(b, mul(sub(c, b), (d4-d3)/((d4-d3)+(d5-d6))))
-    denom = 1.0/(va+vb+vc)
-    return add(a, add(mul(ab, vb*denom), mul(ac, vc*denom)))
+        denom = (d4-d3)+(d5-d6)
+        return add(b, mul(sub(c, b), (d4-d3)/denom if abs(denom) > 1e-20 else 0.0))
+    denom = va+vb+vc
+    if abs(denom) <= 1e-20:
+        candidates = (closest_point_segment(p, a, b),
+                      closest_point_segment(p, b, c),
+                      closest_point_segment(p, c, a))
+        return min(candidates, key=lambda q: length(sub(p, q)))
+    inv_denom = 1.0/denom
+    return add(a, add(mul(ab, vb*inv_denom), mul(ac, vc*inv_denom)))
 
 def polygon_distance(p, verts):
     if len(verts) < 3: return float("inf")
