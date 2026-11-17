@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Read-only comparison of the original Nightdive E1M1 BSP and the ericw rebuild."""
 from __future__ import annotations
+import hashlib
 import json
 import math
 import re
@@ -86,6 +87,34 @@ def parse_entities(data):
         if kv: result.append(kv)
     return result
 
+def parse_texture_metadata(data):
+    if len(data) < 4: return []
+    count = struct.unpack_from("<i", data, 0)[0]
+    if count < 0 or count > 100000 or 4 + 4*count > len(data): return []
+    result = []
+    for i in range(count):
+        mip_off = struct.unpack_from("<i", data, 4 + 4*i)[0]
+        if mip_off < 0 or mip_off + 40 > len(data):
+            result.append({"name": "", "width": 0, "height": 0, "sha256": None})
+            continue
+        name_raw, width, height, *mip_offsets = struct.unpack_from("<16s6I", data, mip_off)
+        name = name_raw.split(b"\\0", 1)[0].decode("latin1", errors="replace")
+        chunks = []
+        valid = True
+        for level, rel_off in enumerate(mip_offsets):
+            if rel_off == 0: continue
+            w, h = max(1, width >> level), max(1, height >> level)
+            length = w*h
+            start = mip_off + rel_off
+            if start < mip_off or start + length > len(data):
+                valid = False
+                break
+            chunks.append(data[start:start+length])
+        digest = hashlib.sha256(b"".join(chunks)).hexdigest() if valid and chunks else None
+        result.append({"name": name, "width": width, "height": height,
+                       "sha256": digest, "mip_offsets": mip_offsets, "valid": valid})
+    return result
+
 def parse_textures(data):
     if len(data) < 4: return []
     count = struct.unpack_from("<i", data, 0)[0]
@@ -130,6 +159,10 @@ def parse_bsp(path):
     texinfos = [struct.unpack_from("<8fii", texinfo_data, i)
                 for i in range(0, len(texinfo_data)-39, 40)]
     texture_names = parse_textures(lumps["textures"])
+    texture_metadata = parse_texture_metadata(lumps["textures"])
+    model_data = lumps["models"]
+    models = [struct.unpack_from("<9f7i", model_data, i)
+              for i in range(0, len(model_data)-63, 64)]
 
     faces = []
     face_data = lumps["faces"]
@@ -179,9 +212,19 @@ def parse_bsp(path):
         centroid = tuple(sum(v[k] for v in polygon)/len(polygon) for k in range(3)) if polygon else (0,0,0)
         texname = ""
         extents = None
+        texture_vectors = None
+        texture_flags = None
+        texture_digest = None
+        if 0 <= texnum < len(texinfos):
+            ti = texinfos[texnum]
+            texture_vectors = [list(ti[0:4]), list(ti[4:8])]
+            texture_flags = ti[9]
+            mip_index = ti[8]
+            texname = texture_names[mip_index] if 0 <= mip_index < len(texture_names) else ""
+            if 0 <= mip_index < len(texture_metadata):
+                texture_digest = texture_metadata[mip_index].get("sha256")
         if 0 <= texnum < len(texinfos) and polygon:
             ti = texinfos[texnum]
-            texname = texture_names[ti[8]] if 0 <= ti[8] < len(texture_names) else ""
             st = [(dot(tuple(ti[0:3]), v)+ti[3], dot(tuple(ti[4:7]), v)+ti[7]) for v in polygon]
             smin, smax = min(p[0] for p in st), max(p[0] for p in st)
             tmin, tmax = min(p[1] for p in st), max(p[1] for p in st)
@@ -197,6 +240,10 @@ def parse_bsp(path):
             "index": fi, "plane_index": planenum, "side": side,
             "normal": pnormal, "plane_dist": pdist, "firstedge": firstedge,
             "numedges": numedges, "texinfo": texnum, "texture": texname,
+            "texinfo_vectors": texture_vectors, "texinfo_flags": texture_flags,
+            "texture_digest": texture_digest,
+            "model_indices": [mi for mi, model in enumerate(models)
+                              if model[14] <= fi < model[14] + model[15]],
             "styles": styles, "lightofs": lightofs, "sample_count_estimate": sample_count,
             "light_range_ok": light_range_ok, "extents": extents,
             "polygon": polygon, "centroid": centroid, "area": area,
@@ -233,6 +280,7 @@ def parse_bsp(path):
         "counts": {
             "planes": len(planes), "vertices": len(vertices), "edges": len(edges),
             "surfedges": len(surfedges), "texinfo": len(texinfos), "faces": len(faces),
+            "models": len(models),
             "lights": len(lights), "entities": len(entity_list),
             "nonfinite_vertices": sum(1 for v in vertices if not finite_vec(v)),
             "bad_face_references": len(bad_face_refs), "bad_light_ranges": len(bad_lighting),
@@ -242,11 +290,16 @@ def parse_bsp(path):
         "nearest_faces_to_failure_position": target_faces,
         "nearest_lights": lights[:12],
         "blue_spotlights": [x for x in lights if x["mangle"] and x["color"] and ("181 238 255" in x["color"] or "0.7098" in x["color"])],
+        "model0": {
+            "firstface": models[0][14], "numfaces": models[0][15],
+            "headnodes": list(models[0][9:13]), "visleafs": models[0][13],
+        } if models else None,
         "bad_face_references_sample": bad_face_refs[:20],
         "nonfinite_faces_sample": nonfinite_faces[:30],
         "suspicious_faces_sample": bad_poly_faces[:30],
     }
     result["_all_faces"] = faces
+    result["_entities"] = entity_list
     return result
 
 def lit_summary(path, bsp):
@@ -277,14 +330,46 @@ def compare_faces(original, rebuilt):
         plane_delta = min(abs(dot(normalize(src["normal"]), f["centroid"])-src["plane_dist"]),
                           abs(dot(normalize(src["normal"]), f["centroid"])+src["plane_dist"]))
         poly_dist = polygon_distance(src_centroid, f["polygon"])
-        candidates.append({"face": f["index"], "texture": f["texture"], "normal_alignment_abs": n_dot,
-                           "centroid_distance": length(sub(src_centroid, f["centroid"])),
-                           "source_centroid_to_candidate_polygon": poly_dist,
-                           "plane_delta_at_candidate_centroid": plane_delta,
-                           "target_polygon_distance": f["target_polygon_distance"],
-                           "numedges": f["numedges"], "area": f["area"]})
+        candidates.append({
+            "face": f["index"], "texture": f["texture"], "normal_alignment_abs": n_dot,
+            "centroid_distance": length(sub(src_centroid, f["centroid"])),
+            "source_centroid_to_candidate_polygon": poly_dist,
+            "plane_delta_at_candidate_centroid": plane_delta,
+            "target_polygon_distance": f["target_polygon_distance"],
+            "numedges": f["numedges"], "area": f["area"],
+            "plane_index": f["plane_index"], "side": f["side"],
+            "normal": f["normal"], "plane_dist": f["plane_dist"],
+            "texinfo": f["texinfo"], "texinfo_vectors": f["texinfo_vectors"],
+            "texinfo_flags": f["texinfo_flags"], "texture_digest": f["texture_digest"],
+            "styles": f["styles"], "lightofs": f["lightofs"],
+            "sample_count_estimate": f["sample_count_estimate"],
+            "extents": f["extents"], "model_indices": f["model_indices"],
+            "polygon": f["polygon"],
+            "same_vertex_set": sorted(tuple(v) for v in src["polygon"]) == sorted(tuple(v) for v in f["polygon"]),
+            "same_texinfo_vectors": src["texinfo_vectors"] == f["texinfo_vectors"],
+            "same_texinfo_flags": src["texinfo_flags"] == f["texinfo_flags"],
+            "same_texture_digest": src["texture_digest"] == f["texture_digest"],
+            "same_extents": src["extents"] == f["extents"],
+        })
     candidates.sort(key=lambda x: (x["source_centroid_to_candidate_polygon"], x["centroid_distance"]))
     return candidates[:12]
+
+def compare_entities(original, rebuilt):
+    left, right = original["_entities"], rebuilt["_entities"]
+    changes = []
+    for i in range(max(len(left), len(right))):
+        a = left[i] if i < len(left) else {}
+        b = right[i] if i < len(right) else {}
+        keys = sorted(set(a) | set(b))
+        delta = {k: {"original": a.get(k), "rebuilt": b.get(k)}
+                 for k in keys if a.get(k) != b.get(k)}
+        if delta:
+            changes.append({"entity_index": i, "original_class": a.get("classname"),
+                            "rebuilt_class": b.get("classname"),
+                            "original_origin": a.get("origin"), "rebuilt_origin": b.get("origin"),
+                            "changes": delta})
+    return {"original_count": len(left), "rebuilt_count": len(right),
+            "exact_entity_dicts_match_in_order": not changes, "differences": changes[:100]}
 
 def json_safe(value):
     if isinstance(value, float) and not math.isfinite(value):
@@ -303,11 +388,12 @@ def main():
     face_matches = compare_faces(original, rebuilt)
     report = {
         "target_world_quake": TARGET,
-        "original": {k: v for k, v in original.items() if k != "_all_faces"},
+        "original": {k: v for k, v in original.items() if k not in ("_all_faces", "_entities")},
         "original_lit": lit_summary(sys.argv[2], original),
-        "rebuilt": {k: v for k, v in rebuilt.items() if k != "_all_faces"},
+        "rebuilt": {k: v for k, v in rebuilt.items() if k not in ("_all_faces", "_entities")},
         "rebuilt_lit": lit_summary(sys.argv[4], rebuilt),
         "original_face_5828_matches_in_rebuild": face_matches,
+        "entity_comparison": compare_entities(original, rebuilt),
     }
     out = json.dumps(json_safe(report), indent=2, allow_nan=False)
     Path("e1m1-bsp-comparison.json").write_text(out, encoding="utf-8")
