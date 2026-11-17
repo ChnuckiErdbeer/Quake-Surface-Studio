@@ -28,6 +28,7 @@ jobs:
           python-version: "3.12"
       - name: Parse and compare both BSPs
         run: |
+          set -o pipefail
           python "testressource26.11.16_01/analyze_e1m1_bsp_pair.py" \
             "testressource26.11.16_01/e1m1_rerel.bsp" \
             "testressource26.11.16_01/e1m1_rerel.lit" \
