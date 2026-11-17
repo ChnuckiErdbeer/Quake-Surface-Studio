@@ -22114,3 +22114,54 @@ The 0.21.21 artifact `14294590886` still fails on the original E1M1 with exactly
 - Do not change the six spotlight energy/falloff, clamp the NaN, discard the luxel, or blame the empty `property 1` key without evidence. Keep the three acceptance criteria separate: successful finite original-map bake, correct Nightdive spotlight brightness, and engine-side face-edge filtering.
 - No new Blender bake, Ironwail test, add-on build, or production code modification was performed during this archaeology pass.
 
+
+
+## 2026-11-17 — User confirms six Nightdive spotlights cause original E1M1 bake failure; exact 0.21.18 known-good artifact identified
+
+### User report
+
+The user imported the original, unrecompiled rerelease E1M1 in the current SLOPGATE version, deleted the six Nightdive spotlights inside Blender, and confirmed that the bake then completed successfully. The user also identifies the last version that successfully baked the stock/remaster E1M1 as **SLOPGATE-0.21.18-Large-Map-Bake-Performance.zip**.
+
+This is stronger evidence than the earlier atlas-only hypothesis. The six-light group is now the primary regression focus. Removing all six proves that their presence is necessary for the observed failure in this test; it does not yet identify which individual light or which light property is causal.
+
+### Exact last-known-good build
+
+- Artifact: `Quake-Surface-Studio-v0.21.18-Blender-Install`, ID `14188889199` (user's local filename: SLOPGATE-0.21.18-Large-Map-Bake-Performance.zip).
+- GitHub Actions run: `43783467279`, successful, 290 standalone tests, compilation, BSP export integrity and package build.
+- Exact source commit: `7f182cf97cc1a3aa35c15408d429a478f87e08c2`, message **Constrain edge luxel extension to each face's classic sample rectangle**.
+- Artifact size 308,296 bytes; SHA-256 `18499457a52b39b232cce6c4f7567be6c7d028ca29fdcdc70de226ee4cf772e8`.
+- The 0.21.18 package already contains the 0.21.17 world-aligned chart import/export system and the 0.21.18 outward-rounded edge-luxel fill and face-rectangle constraint. Therefore those architectural chart changes were present in the user's last known-good stock E1M1 bake. They must not be treated as the primary cause by default.
+
+### First specific spotlight regression candidate
+
+Compare the import code in known-good commit `7f182cf` with the current 0.21.21 source `9e72bc5`:
+
+- In 0.21.18, `_import_bsp_entities()` assigned Blender `spot_blend` with `1 - soft_angle / cone`. For a Quake entity with the default `_softangle=0`, this yields Blender `spot_blend=1.0` (maximally softened Blender spotlight edge).
+- Commit `98753c71756fcd7e039578764da56beb2dfbb92d` added `blender_spot_blend_from_ericw_angles()`, explicitly mapping ericw `_softangle=0` to Blender `spot_blend=0.0` (hard edge).
+- Commit `fbd760c774464b3567786cf2e42fd9c52ee11430` integrated that mapping into `_import_bsp_entities()`. The accompanying test commit `4d5caaeb61c6158d7eff500ee6412d2414331d05` explicitly asserts that `(outer=40, inner=0)` maps to 0.0.
+- E1M1 Nightdive spotlights 403–408 omit explicit `angle` and `_softangle`; their ericw defaults are a 40° outer cone and 0° inner softness. Therefore the new importer changes all six Blender light edges from `spot_blend=1.0` in the known-good build to `spot_blend=0.0` in the current build.
+- The known bad luxel is near the hard cone boundary of light405. This is a strong, specific hypothesis for why the current Cycles bake fails only while this group is present. It is not yet proven; hard-edge mapping is also the more faithful representation of ericw's specified cone, so blindly reverting it as a final fix would sacrifice the intended light shape.
+
+### Other post-0.21.18 changes reviewed
+
+The 21 commits after the known-good source include:
+- `87640e1` / `fbd760c`: preserve floating-point HDR world-chart samples for calibration and restrict Quake Direct's light collection to the active map. These affect calibration / the separate Quake Direct pass, not the raw Cycles spot cone.
+- `98753c` / `fbd760c`: change the Blender spotlight edge blend as described above. This is the clearest spot-specific runtime change.
+- `8ddee09`: calculate source matching after luxel reduction. This changes calibration/validation timing after the Cycles bake, rather than the light's emitted shape.
+- `a3daef84`: change the custom Cycles falloff distance probe from Linear/Quadratic to a guarded square-root/quadratic form.
+- `a781e3f`: disable QSS's custom Cycles delay-0 falloff after the NaN report.
+- `21344ec`: attempt an all-native-falloff isolation test.
+- `9d9b650` and `9e72bc5`: correct Blender 5.3 light node-tree handling and attempt to recognize Blender's untouched default graph.
+- Historical diagnostic output for artifact `14294590886` said the six spotlights were `user_nodes_preserved_native_fallback`, `cycles_custom_active=False`, and the actual graph was summarized as `user-custom[Emission,Light Output]`. Thus the intended QSS custom falloff graph was not active on those lights in that particular test. This weakens (but does not globally rule out) the custom falloff graph as the immediate cause of that specific failure.
+- The earlier 0.21.18 source itself set `light_data.use_nodes=False`; on Blender 5.3 this is not a reliable way to disable default light nodes. The current node-classification work must be treated separately from the confirmed `spot_blend` property change.
+
+### Next controlled test before production changes
+
+On a fresh import of the original stock E1M1, retain all six Nightdive spotlights, and change only their Blender **Spot Shape → Blend** value from `0.0` to `1.0` (the value produced by the known-good 0.21.18 importer for the same default `_softangle=0`). Bake once.
+
+- If it completes, the hard-edge spotlight representation is strongly implicated. Then restore the hard edge one light at a time to identify the specific light(s) that trigger it, and design a Cycles-safe treatment that preserves the Quake cone as closely as possible.
+- If it still fails, keep this result and isolate the six light objects individually / in small groups. Do not infer that all six independently cause it just because removing them as a group succeeds.
+- Do not change atlas packing, the light energy, source matching, or the light's origin/direction during this test. Do not make another general falloff change or clamp the bad luxel.
+- Do not call the hard-edge mapping a final bug fix until this controlled test and the original E1M1 bake confirm it.
+
+No production source changes, new build, Blender bake by the assistant, or PR merge occurred in this response. Both project records are updated with the user's runtime evidence and this source comparison.
