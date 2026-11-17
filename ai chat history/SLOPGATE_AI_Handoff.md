@@ -1566,3 +1566,45 @@ Do not stop at a manual Blend workaround. Implement a Cycles-safe solution that 
 The final acceptance test must be a fresh import of the original unrecompiled E1M1 with all six lights, no manual changes to their Blender properties, a successful full-map bake, and a Quake rerelease visual comparison. Keep classic engine face-edge filtering as a separate criterion.
 
 No production code, build or installer changed in this update; only user runtime evidence and the regression assessment were recorded.
+
+
+
+## 2026-11-17 — SLOPGATE 0.21.22 candidate: Cycles-safe near-hard spotlight edge
+
+### Source-branch clarification
+
+The current SLOPGATE 0.21.21 source is on `fix/0.21.17-world-aligned-lightmap-charts`, not on this documentation-maintenance branch. This `fix/v0.11.1-metadata-style-order-test` branch has the latest handoff/archive entries but its add-on source snapshot is older. Do not use its add-on folder as the installer source.
+
+### Code change made
+
+- Updated the production source branch to SLOPGATE **0.21.22**, commit `8a138c4d66d6aa16878acd3bde41b9b3578abf29`.
+- In `quake_surface_studio (zip me for blender)/lighting.py`, added `CYCLES_MIN_SPOT_BLEND = 0.01`.
+- `blender_spot_blend_from_ericw_angles()` now floors any zero-width/invalid blend at 0.01 instead of returning exact zero. Positive `_softangle` values keep their existing proportional mapping, except that values collapsing to zero also receive the finite floor.
+- The Quake reference function `ericw_spot_factor()` remains unchanged and still evaluates the exact hard cone. Only Blender's imported Cycles light representation receives the narrow transition.
+- Added tests for default zero `_softangle`, positive `_softangle`, zero-width transitions, invalid input, and the unchanged exact Quake reference edge.
+- Bumped add-on version to 0.21.22 and added the release note in the source branch README.
+
+### Why 0.01, not 1.0
+
+The user's manual `Spot Blend = 1.0` test proves that a softened Blender spotlight configuration lets the original rerelease E1M1 bake complete, but it is too broad to adopt as the final light shape without visual comparison.
+
+Blender 5.3's Cycles source in `intern/cycles/scene/light.cpp` calculates the spot factor with:
+
+```
+spot_smooth = 1.0 / ((1.0 - cos_half_spot_angle) * smooth)
+```
+
+Here `smooth` is the spotlight blend value. A zero blend therefore creates an infinite intermediate. The new 0.01 floor keeps the calculation finite while limiting the fade to a very narrow rim, rather than softening the entire cone. The upstream source is available at:
+https://github.com/blender/blender/blob/blender-v5.3-release/intern/cycles/scene/light.cpp
+
+This is a mathematically motivated candidate, not yet a user-confirmed bake fix. The unit tests validate the mapping but cannot prove Cycles' actual full-map bake result.
+
+### Validation status and next acceptance test
+
+- Source changes and the version bump are committed; the final 0.21.22 GitHub Actions run is pending at the time of this note.
+- No Blender runtime bake or Quake rerelease visual comparison has been performed by the assistant.
+- The next test is a **fresh import** of the original, unrecompiled rerelease E1M1 using the 0.21.22 installer, with all 252 lights and no manual property edits. Check that the full-map bake completes with no non-finite luxels.
+- Compare the six Nightdive spotlight boundaries against the rerelease/ericw reference. The 0.01 transition is intended to look nearly hard, but this visual check is still required.
+- Keep classic in-engine face-edge filtering separate from this Cycles bake acceptance test.
+
+Do not call the regression closed until the fresh-import bake succeeds and the spotlight appearance is acceptable. The earlier user test at Blend=1.0 remains a separate, confirmed workaround result.
