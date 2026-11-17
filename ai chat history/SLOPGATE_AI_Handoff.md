@@ -1354,3 +1354,14 @@ These may interact around the same lights/geometry but the source and acceptance
 - User's three acceptance issues remain separate: (1) e1m1 Cycles bake NaN at face 5828 / world (-80,640,96), near light 405 and a perpendicular brush corner; (2) six pale-blue spotlights 403–408 are too bright in SLOPGATE compared with subtle ericw shimmer; (3) original engine blur/face-edge clipping. The new patch primarily makes the light-node fallback test real; it does not claim to fix all three.
 - Next: verify CI/artifact; ask user to install 0.21.21, re-import e1m1, bake once, then inspect report fields light_node_tree and light_node_tree_qss_owned for lights 405/404/330. Expected native fallback is an empty node tree (or at least no QSS-owned custom graph). If NaN persists with empty trees, focus on face/corner/GPU bake path. Keep the old atlas rollback.
 - No PR merges. No Blender 5.3 runtime validation by assistant.
+
+
+### 0.21.21 CI and installer verification
+
+- GitHub Actions run 44005218004, job 133778790906, completed successfully on source head c929614765a5cd299a5a82e01548e9a90763311f.
+- Python compilation passed; 302 standalone tests passed; Blender add-on package assembly and artifact upload passed.
+- Artifact Quake-Surface-Studio-v0.21.21-Blender-Install, ID 14293447941, 313,890 bytes.
+- SHA-256: 768aae8f3e6aa04ee34b2390d570f7ba013e844c4844c4fe81fa5301b69c17a8.
+- Download: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/44005218004/artifacts/14293447941
+- Downloaded ZIP was independently checked: 52 entries, ZIP test passed, installable root quake_surface_studio/__init__.py present, local SHA-256 matches GitHub upload digest.
+- This verifies CI/package only. No Blender GUI bake or Ironwail runtime test has been performed by the assistant. 0.21.21 remains an experimental candidate on open draft PR #5.
