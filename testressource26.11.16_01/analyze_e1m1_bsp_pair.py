@@ -313,8 +313,11 @@ def build_current_qss_world_charts(faces, planes, edges, surfedges, models):
             face_to_chart[face_id]=chart_id
     return charts,face_to_chart,shared_join_edges,skip_stats
 
-def pack_current_qss_charts(charts, gutter=2, atlas_sizes=(512,1024,2048)):
-    ordered=sorted(charts,key=lambda r:(-r["height"],-r["width"],r["chart_id"]))
+def pack_current_qss_charts(charts, gutter=2, atlas_sizes=(512,1024,2048), reverse_chart_id=False):
+    ordered=sorted(
+        charts,
+        key=lambda r: (-r["height"], -r["width"], -r["chart_id"] if reverse_chart_id else r["chart_id"]),
+    )
     for scale in (2,1):
         for size in atlas_sizes:
             x=y=row_h=0
@@ -376,6 +379,14 @@ def current_qss_world_chart_report(parsed, target_face_id):
         px=rect[0]+pack["gutter"]+(((ws-chart["s_min"])/16)+0.5)*pack["luxel_scale"]-0.5
         py=pack["atlas_size"]-1-(rect[1]+pack["gutter"]+(((wt-chart["t_min"])/16)+0.5)*pack["luxel_scale"]-0.5)
         pixel=[px,py]
+    alternate_pack=pack_current_qss_charts(charts,reverse_chart_id=True)
+    alternate_rect=alternate_pack.get("placements",{}).get(chart_id)
+    alternate_pixel=None
+    if alternate_rect and point is not None:
+        ws,wt=dot(point,chart["axis_s"]),dot(point,chart["axis_t"])
+        ax=alternate_rect[0]+alternate_pack["gutter"]+(((ws-chart["s_min"])/16)+0.5)*alternate_pack["luxel_scale"]-0.5
+        ay=alternate_pack["atlas_size"]-1-(alternate_rect[1]+alternate_pack["gutter"]+(((wt-chart["t_min"])/16)+0.5)*alternate_pack["luxel_scale"]-0.5)
+        alternate_pixel=[ax,ay]
     member_summary = []
     for member_id in chart["face_ids"]:
         face = parsed["_all_faces"][int(member_id)]
@@ -405,7 +416,14 @@ def current_qss_world_chart_report(parsed, target_face_id):
         "atlas_size":pack.get("atlas_size"),"luxel_scale":pack.get("luxel_scale"),
         "chart_build_skip_stats":skip_stats,
         "atlas_rectangle":list(rect) if rect else None,"luxel_9_3_world_point":point,
-        "luxel_9_3_predicted_pixel":pixel,"shared_coplanar_join_edges":shared_edges,
+        "luxel_9_3_predicted_pixel":pixel,
+        "alternate_reverse_chart_id_pack":{
+            "atlas_size":alternate_pack.get("atlas_size"),
+            "luxel_scale":alternate_pack.get("luxel_scale"),
+            "atlas_rectangle":list(alternate_rect) if alternate_rect else None,
+            "luxel_9_3_predicted_pixel":alternate_pixel,
+        },
+        "shared_coplanar_join_edges":shared_edges,
     }
 
 def simulate_qss_atlas(faces, target_face=TARGET_FACE, atlas_sizes=(512, 1024, 2048), gutter=2):
