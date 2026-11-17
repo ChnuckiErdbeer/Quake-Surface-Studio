@@ -498,6 +498,22 @@ class EricwContributionGateTests(unittest.TestCase):
 
 
 class CyclesNativeFallbackSourceContractTests(unittest.TestCase):
+    def test_newly_imported_delay_zero_and_five_lights_install_quake_falloff(self):
+        addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
+        with open(addon_path, "r", encoding="utf-8") as handle:
+            source = handle.read()
+        import_start = source.index("def _import_bsp_entities(")
+        import_end = source.index("\\ndef ", import_start + 5)
+        importer = source[import_start:import_end]
+        self.assertIn("cycles_uses_ericw_falloff_correction(delay)", importer)
+        self.assertIn("allow_initial_import_tree=True", importer)
+
+        update_start = source.index("def _qss_update_cycles_delay_falloff(")
+        update_end = source.index("\\ndef ", update_start + 5)
+        updater = source[update_start:update_end]
+        self.assertIn("allow_initial_import_tree=False", updater)
+        self.assertIn("is_safe_to_replace_light_node_tree", updater)
+
     def test_blender_native_fallback_clears_only_qss_owned_light_graphs(self):
         addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
         with open(addon_path, "r", encoding="utf-8") as handle:
