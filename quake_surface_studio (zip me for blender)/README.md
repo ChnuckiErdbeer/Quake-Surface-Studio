@@ -1,3 +1,12 @@
+# SLOPGATE 0.21.22
+
+## 0.21.22 — Cycles-safe Quake spotlight edges
+
+- Quake spotlights with a zero `_softangle` now use a 0.01 Blender Spot Blend floor instead of an exact zero. This keeps Cycles' spotlight preparation finite while confining the fade to a very narrow edge band.
+- Explicit positive `_softangle` values retain their proportional mapping, subject only to the same non-zero safety floor.
+- The Quake reference cone calculation remains hard-edged; the floor is only the narrow Blender/Cycles representation used for imported spotlights.
+- This is a source-level correction with unit-test coverage. A fresh-import, full-map Blender 5.3 bake and in-game comparison are still required before calling the regression closed.
+
 # SLOPGATE 0.21.21
 
 ## 0.21.18 — large-map chart sampling performance
