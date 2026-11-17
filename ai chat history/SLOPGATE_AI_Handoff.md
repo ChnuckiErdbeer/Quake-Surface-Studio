@@ -1243,3 +1243,18 @@ Interpretation:
 This is a diagnostic approximation only, not the intended final Quake lighting model.
 
 **Status:** source commit created and verified on PR #5 branch. At handoff time, no CI result, 0.21.20 installer artifact, Blender runtime result, or PR merge has been confirmed. Do not give the user a download link until the package artifact is actually built and verified.
+
+
+## 2026-11-17 — 0.21.20 CI and installer verified
+
+The 0.21.20 diagnostic source commit `21344ec1cbbe60edf321958b9d358598bcfe01ed` triggered GitHub Actions run `43987390162`. Job `133718958318` completed successfully:
+- 300 standalone tests passed.
+- Python module compilation passed.
+- BSP export integrity checks passed.
+- Blender install package assembly and artifact upload passed.
+- Artifact: `Quake-Surface-Studio-v0.21.20-Blender-Install`, ID `14286680280`, size 313,031 bytes.
+- SHA-256: `a37d55487a010cf76da4d897b7989588dcdfa230997cb8cfd2120f4e88cdee75`.
+- Download: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43987390162/artifacts/14286680280
+- Workflow: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43987390162
+
+This confirms automated tests and package creation only. It is not a Blender 5.3 runtime bake test. The user must test e1m1 in Blender. 0.21.20 remains a diagnostic candidate, not an official release.
