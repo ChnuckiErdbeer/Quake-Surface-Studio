@@ -1625,3 +1625,62 @@ Do not call the regression closed until the fresh-import bake succeeds and the s
 - Installer page: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/44180237973/artifacts/14371921535
 
 These CI results validate the source tests and package, not Blender's actual Cycles runtime. The original rerelease E1M1 full-map bake and six-cone visual comparison remain the decisive user acceptance test.
+
+
+
+## 2026-11-17 — User confirms 0.21.22 E1M1 bake completes; residual brightness points to falloff mismatch
+
+### User runtime report
+
+The user reports that the original-map bake now **finishes** using SLOPGATE 0.21.22. This closes the immediate non-finite-luxel bake blocker for their test run. They also report:
+- Live preview lights still look very bright.
+- Baked lighting is somewhat too bright as well.
+- The excess is most noticeable when a light is close to a wall / receiving surface.
+- The user suspects the falloff curve differs.
+
+No new bake metrics, screenshots, Blender diagnostic text or in-engine comparison were included in this report. Do not invent a measured brightness ratio.
+
+### Source audit: yes, attenuation mismatch is a strong explanation
+
+The current production source is on `fix/0.21.17-world-aligned-lightmap-charts` at `8a138c4d66d6aa16878acd3bde41b9b3578abf29`. The relevant code is in `lighting.py` and `addon.py`.
+
+ericw-tools documents delay 0 as **linear attenuation**, the default; delay 2 is inverse-square. It also defines `_falloff` as a distance-to-zero setting for delay 0, while worldspawn `_dist` scales fade distance and `_range` scales brightness independently:
+- https://ericw-tools.readthedocs.io/en/latest/light.html
+
+SLOPGATE's `blender_live_light_preview_parameters()` explicitly uses native Blender inverse-square lamps as an approximation for delay 0, calibrated to match at the midpoint of the light's radius. Nearer than that reference point, an inverse-square curve rises much faster than Quake's linear curve. This naturally explains why the native live preview looks especially bright near a light and nearby wall. It is not a simple overall brightness multiplier problem.
+
+For Cycles, SLOPGATE has a custom distance correction graph for delays 0 and 5. It reconstructs ericw's linear (delay 0) and soft-inverse-square (delay 5) curves over Blender's inverse-square lamp. Other delay types use a native Blender fallback. The correction graph is only installed when the existing Light node tree is recognized as Blender's untouched default graph; custom/user trees are deliberately preserved.
+
+The previous 0.21.21 diagnostic run for the six Nightdive spotlights recorded:
+- `cycles_custom_active=False`
+- profile `user_nodes_preserved_native_fallback`
+- node summary `user-custom[Emission, Light Output]`
+
+Therefore those lights did not receive the intended exact Cycles falloff correction in that diagnostic run. The 0.21.22 change only altered the non-zero spotlight blend floor; it did not change the light-node classification or Cycles falloff setup. This makes native inverse-square fallback the leading explanation for the residual bright bake, but the same status must be checked in the user's current 0.21.22 file before calling it confirmed.
+
+Blender's Light Falloff node is documented as **Cycles Only**. Eevee ignores light shader node trees, so a Realtime/Eevee live preview cannot use SLOPGATE's exact Cycles node correction and remains an approximation:
+- https://docs.blender.org/manual/en/latest/render/shader_nodes/color/light_falloff.html
+- https://docs.blender.org/manual/en/5.4/render/cycles/light_settings.html
+
+### Do not "fix" this by lowering global brightness yet
+
+Reducing `_range`, the global light-energy slider or every lamp's energy would lower brightness at all distances. It would not repair the incorrect shape of an inverse-square curve when the intended curve is linear. It could make distant parts of E1M1 too dark while leaving the near-light imbalance in place.
+
+### Next controlled check
+
+On the 0.21.22 imported E1M1, inspect the six Nightdive spotlights (and representative ordinary delay-0 lights) in the current diagnostics:
+- `qss_cycles_falloff_active`
+- `qss_cycles_falloff_profile`
+- `qss_cycles_falloff_error`
+- `light_node_tree_qss_owned` / node-tree summary
+
+If the status is still `user_nodes_preserved_native_fallback`, fix the classification/installation path for newly created QSS lights without overwriting genuinely user-authored node trees. Then verify the Cycles graph is active and the brightness-vs-distance curve follows ericw's delay-0 profile. Keep the Eevee/Realtime limitation separate: exact custom light shader graphs are Cycles-only, so Eevee needs either an explicitly labelled approximation or a different preview strategy.
+
+The user should also identify whether the bright live preview was viewed in Realtime/Eevee or Cycles. That affects whether the custom falloff graph can be used at all.
+
+### Status
+
+- **Bake completion:** user-confirmed on 0.21.22.
+- **Original E1M1 brightness/falloff fidelity:** still under investigation.
+- **0.21.22 automated validation:** 312 tests, Python compilation, BSP export checks and installer packaging passed (workflow `44180237973`, artifact `14371921535`).
+- No new source-code change or Blender diagnostic run was performed in this brightness investigation. The two project records were updated with the user's bake success and the falloff analysis.
