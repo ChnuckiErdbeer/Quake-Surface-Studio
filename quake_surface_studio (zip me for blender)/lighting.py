@@ -295,19 +295,29 @@ def ericw_surface_angle(normal_dot_to_light: float, anglescale: float = 0.5,
     return max(0.0, (1.0 - scale) + scale * dot)
 
 
-def blender_spot_blend_from_ericw_angles(outer_angle: float, inner_angle: float) -> float:
-    """Map ericw's inner-cone angle to Blender's spot edge blend.
+# Cycles' spot-light kernel computes 1 / ((1 - cos(angle / 2)) * blend).
+# An exact zero therefore creates an infinite intermediate, which can turn a
+# luxel sampled on the cone boundary into NaN. Keep the transition confined to
+# the outermost 1% of a hard Quake cone instead of using Blender's much softer
+# 1.0 compatibility workaround.
+CYCLES_MIN_SPOT_BLEND = 0.01
 
-    ericw uses _softangle=0 as a disabled transition (a hard cone). Blender's
-    spot_blend=0 is also a hard edge. Positive inner angles retain the existing
-    proportional mapping, with larger inner cones producing a narrower blend.
+
+def blender_spot_blend_from_ericw_angles(outer_angle: float, inner_angle: float) -> float:
+    """Map ericw's inner-cone angle to a Cycles-safe Blender spot blend.
+
+    ericw uses _softangle=0 for a hard cone. Blender's exact hard edge is
+    represented by spot_blend=0, but Cycles divides by this value while
+    preparing a spotlight. The small positive floor avoids that singularity;
+    at the default 40-degree cone it affects only a very narrow rim. Explicit
+    positive _softangle values retain their proportional mapping.
     """
     import math
     try:
         outer = float(outer_angle)
         inner = float(inner_angle)
     except (TypeError, ValueError):
-        return 0.0
+        return CYCLES_MIN_SPOT_BLEND
     if not math.isfinite(outer):
         outer = 40.0
     if not math.isfinite(inner):
@@ -315,8 +325,8 @@ def blender_spot_blend_from_ericw_angles(outer_angle: float, inner_angle: float)
     outer = max(0.1, min(179.9, outer))
     inner = max(0.0, min(outer, inner))
     if inner <= 0.0:
-        return 0.0
-    return max(0.0, min(1.0, 1.0 - inner / outer))
+        return CYCLES_MIN_SPOT_BLEND
+    return max(CYCLES_MIN_SPOT_BLEND, min(1.0, 1.0 - inner / outer))
 
 
 def ericw_spot_factor(dot_light_to_sample: float, outer_angle: float = 40.0,
