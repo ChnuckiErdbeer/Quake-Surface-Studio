@@ -478,6 +478,67 @@ def compare_neighborhood(original, rebuilt, radius=128.0):
         })
     return target_results[:80]
 
+def spotlight_geometry_paths(parsed, sample=TARGET):
+    faces = parsed["_all_faces"]
+    results = []
+    for light in parsed["_entities"]:
+        if not str(light.get("classname", "")).lower().startswith("light"):
+            continue
+        raw_origin = light.get("origin", "")
+        try:
+            origin = tuple(float(value) for value in raw_origin.split()[:3])
+            if len(origin) != 3:
+                continue
+        except (TypeError, ValueError):
+            continue
+        color = light.get("_color", light.get("color", ""))
+        mangle = light.get("mangle", "")
+        delta = sub(origin, sample)
+        segment_length = length(delta)
+        if segment_length <= 1e-8:
+            continue
+        nearest = []
+        intersections = []
+        for face in faces:
+            polygon = face["polygon"]
+            if not polygon or len(polygon) < 3:
+                continue
+            distance_to_light = polygon_distance(origin, polygon)
+            if distance_to_light <= 192.0:
+                nearest.append({
+                    "face": face["index"], "texture": face["texture"],
+                    "distance": distance_to_light,
+                    "normal": face["normal"], "plane_dist": face["plane_dist"],
+                    "model_indices": face["model_indices"],
+                    "polygon": polygon,
+                })
+            normal = normalize(face["normal"])
+            denom = dot(normal, delta)
+            if abs(denom) <= 1e-10:
+                continue
+            t = (face["plane_dist"] - dot(normal, sample))/denom
+            if 1e-6 < t < 1.0-1e-6:
+                hit_point = add(sample, mul(delta, t))
+                polygon_dist = polygon_distance(hit_point, polygon)
+                if polygon_dist <= 0.05:
+                    intersections.append({
+                        "face": face["index"], "texture": face["texture"],
+                        "segment_t": t, "distance_from_sample": t*segment_length,
+                        "distance_to_light": (1.0-t)*segment_length,
+                        "hit_point": hit_point, "polygon_distance": polygon_dist,
+                        "normal": face["normal"], "model_indices": face["model_indices"],
+                    })
+        nearest.sort(key=lambda item: item["distance"])
+        intersections.sort(key=lambda item: item["segment_t"])
+        results.append({
+            "origin": origin, "distance_from_sample": segment_length,
+            "light": light.get("light"), "color": color, "mangle": mangle,
+            "delay": light.get("delay", ""), "nearest_surfaces": nearest[:8],
+            "segment_surface_intersections": intersections[:20],
+        })
+    results.sort(key=lambda item: item["distance_from_sample"])
+    return results[:20]
+
 def compare_entities(original, rebuilt):
     left, right = original["_entities"], rebuilt["_entities"]
     changes = []
@@ -523,6 +584,8 @@ def main():
         "original_face_5828_matches_in_rebuild": face_matches,
         "entity_comparison": compare_entities(original, rebuilt),
         "local_face_neighborhood_comparison": compare_neighborhood(original, rebuilt),
+        "original_spotlight_geometry_paths": spotlight_geometry_paths(original),
+        "rebuilt_spotlight_geometry_paths": spotlight_geometry_paths(rebuilt),
     }
     out = json.dumps(json_safe(report), indent=2, allow_nan=False)
     Path("e1m1-bsp-comparison.json").write_text(out, encoding="utf-8")
