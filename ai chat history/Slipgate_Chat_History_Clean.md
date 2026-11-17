@@ -21816,3 +21816,20 @@ The 0.21.20 diagnostic source commit `21344ec1cbbe60edf321958b9d358598bcfe01ed` 
 - Workflow: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43987390162
 
 This confirms automated tests and package creation only. It is not a Blender 5.3 runtime bake test. The user must test e1m1 in Blender. 0.21.20 remains a diagnostic candidate, not an official release.
+
+
+## 2026-11-17 — 0.21.20 e1m1 runtime test still fails
+
+**User report (verbatim)**
+
+> Cycles bake failed; atlas and light calibration restored: Cycles bake produced non-finite luxel luminance samples; baked=1/165763, source=0/165763, non-finite atlas RGB values=12, non-finite atlas pixels=4, first atlas pixel coordinates=[(1594, 2000), (1595, 2000), (1594, 2001), (1595, 2001)]. The atlas was restored. This is not a zero-light bake; inspect the offending Cycles light/shader samples.
+
+This is the same exact error and same four atlas pixels / single luxel as the 0.21.18 and 0.21.19 attempts. The user tested 0.21.20, whose source disables all custom Cycles light falloff graphs, including delay-5. Therefore the custom Quake Cycles falloff graph is no longer the leading suspect. However, the error dialog is intentionally generic and does not prove which fallback profile was actually used at render time; the new report fields were added specifically to verify that.
+
+**Current interpretation**
+- Same failure at same map sample; no improvement from disabling all custom Cycles light shader graphs.
+- The next investigation should move toward the offending face/material/UV, Cycles GPU bake path or another scene-level condition. Do not keep changing all light falloffs.
+- Need one final quick verification that 0.21.20 is actually active and that nearest lights show `cycles_profile=native_fallback`, `cycles_custom_active=False`, `use_light_nodes=False`. This is recorded by the new diagnostic fields in both `Last attempted lamp states` and `Non-finite luxel face/world/light matches`. The latest report from 0.21.19 is older and cannot verify the 0.21.20 runtime configuration.
+- Ask the user to save diagnostics now, after the failed bake; **no second bake is needed**. Ask for only these two output sections, not the full 12,000-line report. Keep the active e1m1 BSP selected and Object Mode.
+
+**No new code change/build/merge** was made in response to the latest identical popup. PR #5 remains open/draft at 0.21.20 source commit `21344ec1cbbe60edf321958b9d358598bcfe01ed`. The 0.21.20 CI run `43987390162` passed 300 tests, compile, BSP export-integrity and package assembly. Artifact ID `14286680280`, 313,031 bytes, SHA-256 `a37d55487a010cf76da4d897b7989588dcdfa230997cb8cfd2120f4e88cdee75`.
