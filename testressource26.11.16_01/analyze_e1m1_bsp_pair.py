@@ -189,7 +189,7 @@ def polygon_topology_metrics(polygon, normal):
         "winding_dot": float(winding_dot),
     }
 
-def simulate_qss_atlas(faces, atlas_sizes=(512, 1024, 2048), gutter=2):
+def simulate_qss_atlas(faces, target_face=TARGET_FACE, atlas_sizes=(512, 1024, 2048), gutter=2):
     # Mirrors addon.py::_pack_lightmap_rectangles ordering and scale fallback.
     records = []
     for face in faces:
@@ -220,7 +220,7 @@ def simulate_qss_atlas(faces, atlas_sizes=(512, 1024, 2048), gutter=2):
                 x += rw
                 row_h = max(row_h, rh)
             if not failed:
-                target = placements.get(TARGET_FACE)
+                target = placements.get(int(target_face))
                 near = []
                 if target:
                     tx, ty, tw, th = target
@@ -237,7 +237,7 @@ def simulate_qss_atlas(faces, atlas_sizes=(512, 1024, 2048), gutter=2):
                 return {
                     "atlas_size": atlas_size, "luxel_scale": scale, "gutter": gutter,
                     "lightmapped_face_count": len(placements),
-                    "target_face": TARGET_FACE,
+                    "target_face": int(target_face),
                     "target_rect": list(target) if target else None,
                     "target_chart_nearby_rectangles": near[:20],
                     "target_right_margin": atlas_size-(target[0]+target[2]) if target else None,
@@ -432,7 +432,7 @@ def parse_bsp(path):
             "winding_opposed_sample": [face["index"] for face in faces if face["polygon"] and face["topology"]["winding_dot"] < -1e-6][:50],
         },
     }
-    result["atlas_layout"] = simulate_qss_atlas(faces)
+    result["_atlas_layout"] = simulate_qss_atlas(faces, target_face=TARGET_FACE)
     result["_all_faces"] = faces
     result["_entities"] = entity_list
     result["_worldspawn_raw"] = worldspawn_raw
@@ -633,17 +633,29 @@ def main():
     original = parse_bsp(sys.argv[1])
     rebuilt = parse_bsp(sys.argv[3])
     face_matches = compare_faces(original, rebuilt)
+    rebuilt_target_face = (
+        int(face_matches[0]["face"])
+        if face_matches and face_matches[0].get("same_vertex_set")
+        and face_matches[0].get("source_centroid_to_candidate_polygon", 1.0) <= 1e-4
+        else None
+    )
+    original_atlas_layout = simulate_qss_atlas(original["_all_faces"], target_face=TARGET_FACE)
+    rebuilt_atlas_layout = (
+        simulate_qss_atlas(rebuilt["_all_faces"], target_face=rebuilt_target_face)
+        if rebuilt_target_face is not None else {"error": "No exact counterpart face was identified"}
+    )
     report = {
         "target_world_quake": TARGET,
-        "original": {k: v for k, v in original.items() if k not in ("_all_faces", "_entities", "_worldspawn_raw")},
+        "original": {k: v for k, v in original.items() if k not in ("_all_faces", "_entities", "_worldspawn_raw", "_atlas_layout")},
         "original_lit": lit_summary(sys.argv[2], original),
         "rebuilt": {k: v for k, v in rebuilt.items() if k not in ("_all_faces", "_entities")},
         "rebuilt_lit": lit_summary(sys.argv[4], rebuilt),
         "original_face_5828_matches_in_rebuild": face_matches,
         "entity_comparison": compare_entities(original, rebuilt),
         "local_face_neighborhood_comparison": compare_neighborhood(original, rebuilt),
-        "original_atlas_layout": original["atlas_layout"],
-        "rebuilt_atlas_layout": rebuilt["atlas_layout"],
+        "original_atlas_layout": original_atlas_layout,
+        "rebuilt_atlas_layout": rebuilt_atlas_layout,
+        "rebuilt_counterpart_face_id": rebuilt_target_face,
         "original_spotlight_geometry_paths": spotlight_geometry_paths(original),
         "rebuilt_spotlight_geometry_paths": spotlight_geometry_paths(rebuilt),
     }
