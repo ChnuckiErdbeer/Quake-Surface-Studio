@@ -3272,14 +3272,62 @@ def _qss_make_cycles_math_node(nodes, name, operation, location):
 
 
 def _qss_cycles_falloff_tree_is_owned(light_data):
-    """True only when every node in this light tree belongs to QSS."""
-    if int(light_data.get("qss_cycles_delay_falloff_version", 0)) != 1:
+    """True only when the complete existing light node tree is tagged as QSS-owned.
+
+    Do not rely on Light.use_nodes: Blender 5.1+ retains that property for
+    compatibility but always returns True and ignores assignments.
+    """
+    node_tree = getattr(light_data, "node_tree", None)
+    if node_tree is None:
+        return False
+    nodes = list(node_tree.nodes)
+    return bool(nodes) and all(
+        bool(node.get("qss_cycles_falloff_node", False)) for node in nodes
+    )
+
+
+def _qss_clear_owned_cycles_light_nodes(light_data):
+    """Remove only QSS's own custom light graph so Blender uses native falloff.
+
+    Clearing the actual graph is required on Blender 5.1+, where setting
+    Light.use_nodes=False no longer disables shader nodes. Any tree containing
+    an untagged/user-authored node is left untouched.
+    """
+    if not _qss_cycles_falloff_tree_is_owned(light_data):
         return False
     node_tree = getattr(light_data, "node_tree", None)
-    if node_tree is None or not node_tree.nodes:
+    if node_tree is None:
         return False
-    return all(bool(node.get("qss_cycles_falloff_node", False))
-               for node in node_tree.nodes)
+    node_tree.nodes.clear()
+    for key in (
+        "qss_cycles_delay_falloff_version",
+        "qss_cycles_delay_falloff_profile",
+    ):
+        if key in light_data:
+            del light_data[key]
+    try:
+        light_data.update_tag()
+    except Exception:
+        pass
+    return True
+
+
+def _qss_cycles_light_node_summary(light_data, limit=8):
+    """Describe the real light node tree; Light.use_nodes is not informative in Blender 5.3."""
+    node_tree = getattr(light_data, "node_tree", None)
+    if node_tree is None:
+        return "no-tree"
+    nodes = list(node_tree.nodes)
+    if not nodes:
+        return "empty"
+    entries = []
+    for node in nodes[:max(1, int(limit))]:
+        node_type = getattr(node, "bl_idname", getattr(node, "type", "NODE"))
+        marker = "+QSS" if bool(node.get("qss_cycles_falloff_node", False)) else ""
+        entries.append(f"{node.name}:{node_type}{marker}")
+    if len(nodes) > len(entries):
+        entries.append(f"...+{len(nodes) - len(entries)}")
+    return ",".join(entries)
 
 
 def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
@@ -3430,12 +3478,11 @@ def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
     light_data = light_obj.data
 
     if not lighting_utils.cycles_uses_ericw_falloff_correction(delay):
-        # Delay-0 lights use Blender's regular point-light falloff. The custom
-        # correction has produced a single non-finite luxel in the user's
-        # e1m1 bake, so remove only node graphs owned by this helper. Never
-        # touch a user-authored light node tree.
-        if _qss_cycles_falloff_tree_is_owned(light_data):
-            light_data.use_nodes = False
+        # This diagnostic build uses Blender's native light falloff. On
+        # Blender 5.1+ use_nodes=False is ignored, so remove only a fully
+        # QSS-owned graph. Never alter a user-authored light node tree.
+        cleared = _qss_clear_owned_cycles_light_nodes(light_data)
+        light_obj["qss_cycles_falloff_nodes_cleared"] = bool(cleared)
         light_obj["qss_cycles_falloff_active"] = False
         light_obj["qss_cycles_falloff_profile"] = (
             "native_fallback_delay0" if int(delay) == 0 else "native_fallback"
@@ -3515,8 +3562,7 @@ def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
         # Keep the existing native lamp usable if this Blender build cannot
         # construct the Cycles-specific node graph.
         try:
-            if _qss_cycles_falloff_tree_is_owned(light_data):
-                light_data.use_nodes = False
+            _qss_clear_owned_cycles_light_nodes(light_data)
         except Exception:
             pass
         light_obj["qss_cycles_falloff_active"] = False
@@ -3689,8 +3735,9 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
         collection.objects.link(light_obj)
         light_obj.location = _quake_to_blender_position(origin, unit_scale, flip_z)
         light_data.color = color_rgb  # ericw-tools _color is normalized RGB (0..1 or 0..255).
-        if hasattr(light_data, 'use_nodes'):
-            light_data.use_nodes = False
+        # Blender 5.1+ always uses Light node trees; use_nodes=False is ignored.
+        # A newly created light's default tree is harmless. The QSS fallback
+        # helper clears only old QSS-owned custom graphs when necessary.
         effective_intensity = intensity * world_range
         light_data.energy = lighting_utils.scaled_quake_light_energy(effective_intensity, energy_scale)
         wait = max(0.001, _parse_entity_float(entity, 'wait', 1.0))
@@ -3752,7 +3799,7 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
         light_obj['qss_quake_no_staticlight'] = bool(_parse_entity_float(entity, '_nostaticlight', 0.0) != 0.0)
         light_obj['qss_quake_world_dist'] = float(world_dist)
         light_obj['qss_quake_world_range'] = float(world_range)
-        light_obj['qss_quake_delay_note'] = 'Cycles uses a per-light shader correction for delay 0 and 5; Eevee keeps the native-lamp approximation. Delay 2 uses native inverse-square falloff. Quake Direct remains a separate exact direct-light path.'
+        light_obj['qss_quake_delay_note'] = 'This diagnostic build uses Blender-native Cycles falloff for all delays; exact Quake-style direct lighting remains available through the separate Quake Direct path.'
         light_count += 1
 
     # Worldspawn sunlight is a directional source in ericw-tools.
@@ -8066,7 +8113,8 @@ def _qss_describe_nonfinite_luxels(
             'falloff': float(light_obj.get('qss_quake_falloff', 0.0)),
             'cycles_active': bool(light_obj.get('qss_cycles_falloff_active', False)),
             'cycles_profile': str(light_obj.get('qss_cycles_falloff_profile', 'unknown')),
-            'light_nodes': bool(getattr(light_data, 'use_nodes', False)),
+            'light_node_tree': _qss_cycles_light_node_summary(light_data),
+            'light_node_tree_qss_owned': _qss_cycles_falloff_tree_is_owned(light_data),
             'spot_size': float(getattr(light_data, 'spot_size', 0.0)),
             'spot_blend': float(getattr(light_data, 'spot_blend', 0.0)),
             'energy': float(getattr(light_data, 'energy', 0.0)),
@@ -8098,7 +8146,8 @@ def _qss_describe_nonfinite_luxels(
                     f"falloff={light['falloff']:.6g} "
                     f"cycles_profile={light['cycles_profile']} "
                     f"cycles_custom_active={light['cycles_active']} "
-                    f"use_light_nodes={light['light_nodes']} "
+                    f"light_node_tree_qss_owned={light['light_node_tree_qss_owned']} "
+                    f"light_node_tree={light['light_node_tree']} "
                     f"spot_size={light['spot_size']:.6g} "
                     f"spot_blend={light['spot_blend']:.6g} "
                     f"energy={light['energy']:.6g}W"
@@ -11010,7 +11059,7 @@ def _qss_diagnostics_text(context, obj):
     for light_obj in active_map_objects:
         if light_obj.type != 'LIGHT' or light_obj.get('qss_light_role') not in {'quake_entity_light', 'quake_world_sunlight'}:
             continue
-        lines.append('  {} type={} color={} energy={:.6g} W style={} inferred={} value={} delay={} range={} manual_calibration={} cycles_profile={} cycles_custom_active={} use_light_nodes={} spot_size={:.6g} spot_blend={:.6g}'.format(
+        lines.append('  {} type={} color={} energy={:.6g} W style={} inferred={} value={} delay={} range={} manual_calibration={} cycles_profile={} cycles_custom_active={} light_node_tree_qss_owned={} light_node_tree={} spot_size={:.6g} spot_blend={:.6g}'.format(
             light_obj.name, light_obj.data.type, tuple(round(float(v), 4) for v in light_obj.data.color),
             float(light_obj.data.energy), light_obj.get('qss_quake_light_style', 0),
             light_obj.get('qss_quake_style_was_inferred', False), light_obj.get('qss_quake_light_value', ''),
@@ -11018,7 +11067,8 @@ def _qss_diagnostics_text(context, obj):
             light_obj.get('qss_manual_energy_calibration', 1.0),
             light_obj.get('qss_cycles_falloff_profile', 'unknown'),
             light_obj.get('qss_cycles_falloff_active', False),
-            bool(getattr(light_obj.data, 'use_nodes', False)),
+            _qss_cycles_falloff_tree_is_owned(light_obj.data),
+            _qss_cycles_light_node_summary(light_obj.data),
             float(getattr(light_obj.data, 'spot_size', 0.0)),
             float(getattr(light_obj.data, 'spot_blend', 0.0))))
         active_map_lights += 1
