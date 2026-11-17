@@ -1476,3 +1476,51 @@ Artifact 0.21.21 ID `14294590886` still reports one non-finite baked luxel out o
 
 No production source changes, new build, Blender bake, Ironwail test or PR merge occurred during this review. This entry records regression archaeology and the next controlled experiments only.
 
+
+
+## 2026-11-17 — Confirmed stock E1M1 bake regression depends on six Nightdive spotlights; exact 0.21.18 baseline
+
+### User-confirmed runtime evidence
+
+The user imported original, unrecompiled rerelease E1M1 in the current version, deleted the six Nightdive spotlights in Blender, and the Cycles bake completed. The user identifies **SLOPGATE-0.21.18-Large-Map-Bake-Performance.zip** as the last build that baked the stock/remaster E1M1 successfully.
+
+This is now the last-known-good build by user confirmation. The prior uncertainty about whether 0.21.16 was the baseline is superseded.
+
+### Build identity
+
+- Artifact ID `14188889199`, name `Quake-Surface-Studio-v0.21.18-Blender-Install`.
+- Workflow run `43783467279`, successful.
+- Exact source `7f182cf97cc1a3aa35c15408d429a478f87e08c2`.
+- Size 308,296 bytes; SHA-256 `18499457a52b39b232cce6c4f7567be6c7d028ca29fdcdc70de226ee4cf772e8`.
+- Critically, this build already contains the shared world-aligned chart system and 0.21.18 outward-rounded edge-fill correction. Those changes alone are therefore not sufficient to cause the regression.
+
+### Strongest newly identified regression candidate: spotlight edge softness
+
+In known-good 0.21.18, imported spotlight `spot_blend` was assigned by `1 - soft_angle / cone`. With the six Nightdive lights' default `_softangle=0`, Blender received `spot_blend=1.0`.
+
+After the known-good commit:
+- `98753c71756fcd7e039578764da56beb2dfbb92d` added a Quake-to-Blender mapping that intentionally maps ericw `_softangle=0` to Blender `spot_blend=0.0` (hard edge).
+- `fbd760c774464b3567786cf2e42fd9c52ee11430` applies this helper during BSP light import.
+- Test commit `4d5caaeb61c6158d7eff500ee6412d2414331d05` explicitly locks in the 40° / 0° → 0.0 mapping.
+- Nightdive entities 403–408 have no explicit `angle` or `_softangle`, so all six changed from Blender's fully softened edge in 0.21.18 to hard edges in the current source.
+- The bad face-5828 sample is near the cone edge of spotlight405. This is the clearest spotlight-specific behavioral change after the confirmed good build, and the leading candidate to test.
+
+Do not simply revert this as a final fix yet. The new value is intended to match ericw's hard cone; the real requirement is to make Cycles bake it safely without losing that light shape.
+
+### Other changes after the known-good commit
+
+The 21 commits from `7f182cf` to current `9e72bc5` also include HDR sample preservation, moving calibration after luxel reduction, changes to Cycles falloff distance math, disabling delay-0/all custom falloff for isolation, Blender 5.3 node-tree clearing/classification, and the attempted exact Quake delay-0/5 shader restore. These remain secondary checks. In the diagnostic report from artifact `14294590886`, all six lights were still classified `user_nodes_preserved_native_fallback`, with `cycles_custom_active=False` and `user-custom[Emission, Light Output]` node trees. This means the QSS custom Quake Cycles graph was not active for those lights in that tested build; it weakens that graph as the direct explanation for the result, without excluding other Blender node-tree interactions.
+
+The HDR/calibration changes do not directly alter spotlight geometry. The 0.21.18 chart/export changes were already present in the known-good build.
+
+### Next isolation test
+
+On a fresh import of original stock E1M1:
+1. Keep all six Nightdive lights.
+2. Change only Blender **Spot Shape → Blend** on lights 403–408 from 0.0 to 1.0, matching the known-good 0.21.18 import values.
+3. Bake once, with light energy, directions, atlas resolution and all other settings unchanged.
+
+If the bake succeeds, restore the hard edge one light at a time to isolate which spot(s) trigger the invalid Cycles sample. If it still fails, test the six lights individually / in small groups. Removing all six proves a group dependency, not that every member is independently causal.
+
+No source changes, tests, build, installer, Blender runtime bake, or PR merge were made. This remains an evidence-led isolation step; do not clamp or discard the bad luxel.
+
