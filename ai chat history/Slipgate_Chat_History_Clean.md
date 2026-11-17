@@ -22063,3 +22063,54 @@ Reviewed `SLOPGATE_AI_Handoff.md` and `SLOPGATE_Field_Notes.md`, plus the archiv
 - The immediate controlled runtime discriminator recorded in the handoff is to save a copy of the Blender project, rebuild the original E1M1 lightmap atlas at 2x using **Change Lightmap Resolution**, then bake once. This changes atlas packing/coordinates while leaving the map and lights unchanged. The new reverse-order analyzer calculation is an offline diagnostic addition; it is not itself a Blender runtime result.
 
 No production add-on code changed in this session. No tests, build, installer, Blender runtime test, Ironwail test or PR merge were performed. This entry records repository orientation only.
+
+
+## 2026-11-17 — User requests regression archaeology for original rerelease E1M1 bake
+
+### User request
+
+The user states that baking the original official Quake rerelease/remaster E1M1 now crashes, that earlier SLOPGATE releases did not have this problem, and that work on the same faces was ongoing while fixing lightmap edge artefacts. They request a full backward review of the conversation history and source changes, including the later decompile/recompile E1M1 comparison (whose rebuilt BSP baked successfully). They explicitly clarify that the empty `property 1` key in the recompiled map was created by them and must be ignored as a cause. The required outcome is that the original, unrecompiled rerelease E1M1 works; a recompiled substitute is not acceptable.
+
+### Historical version findings
+
+- 0.21.11 introduced the image undo journal and per-face lightmap gutters.
+- 0.21.12 introduced luxel-block centre canonicalization before gutter extension.
+- 0.21.13 added a half-luxel support rim, but the user's test on November 15 showed no visible improvement in either Ironwail or the Quake rerelease. This rim was confined to Enhanced BSPX `DECOUPLED_LM`; it did not change the classic BSP29 fallback.
+- 0.21.14 changed the supersampled luxel reduction from centre sampling to four quarter/three-quarter sub-luxel samples, intended to retain narrow spotlight coverage.
+- 0.21.15 corrected detached-face texture export and classic BSP29 face-local lightmap-grid alignment.
+- 0.21.16 added conservative reconciliation of matching luxels along shared coplanar BSP edges.
+- The major architectural change arrived in 0.21.17: connected coplanar faces were grouped into shared world-aligned lightmap charts for atlas import/baking, and classic BSP29 export was changed to sample each face's original classic luxel grid back out of those shared charts. This changed atlas construction, UV assignment, and the export sampling path together.
+- 0.21.18 then changed handling of outward-rounded classic face luxels that fall just outside the geometric polygon: fill them from that face's clamped source-grid edge. A follow-up explicitly constrained this extension to each face's own classic sample rectangle.
+- The first documented original E1M1 non-finite bake failure appears in the November 16 0.21.18 testing sequence. It is therefore a strong regression window, but the transcript does not provide an explicit user-confirmed, fully successful original rerelease E1M1 bake on a named 0.21.16 or 0.21.17 artifact.
+- The last explicit `Bake complete` log lines in the earlier archive are from November 10 / 0.20.2, but the user reported the resulting lightmaps looked black; this is not evidence of a problem-free remaster E1M1 bake. Do not mislabel it as the last good build.
+- Consequently, 0.21.16 is the last plausible pre-world-chart candidate baseline, not yet a proven last-known-good E1M1 bake. The exact last good artifact still needs confirmation from older runtime messages/artifact history. Do not invent a build ID.
+
+### High-value source changes identified
+
+1. **0.21.17 world-aligned chart integration (primary regression suspect).** Commit `02c43d1b0a24284c8a866c9de7dc452d4d787e90` changed `_build_lightmap_atlas`: classic face records were converted into shared chart records, packed by chart ID, written once per chart, and assigned new world-chart mesh attributes and UVs. Commit `367345e69aeb74dfd7a50721ca9ce39bdaf9b04f` changed `_patch_lightmap_lump` to reconstruct every classic face's expected sample positions and read them from the shared atlas using chart axes and offsets. This is the largest change to the exact import/bake/export path for the faces now involved. It deserves a controlled comparison against the pre-chart implementation.
+2. **0.21.18 outward-rounded edge fill (secondary suspect).** Commit `cc5381551b6bbd5a85a87fd3b1f96e62fc9170c7` stopped rejecting chart grid points merely because they lie outside the geometric polygon and instead clamps/resamples from source-grid edges. Commit `7f182cf97cc1a3aa35c15408d429a478f87e08c2` subsequently restricted samples to the face's own classic sample rectangle. The logic addresses genuine BSP29 partial edge luxels, but its effect on the failing face/chart should be tested separately.
+3. **0.21.14 quadrature (earlier sampling change).** Commit `7376984ec4c49e788b49edcfdcd1cd3bb640466c` changed reduction from the geometric centre to four sub-luxel samples. This could change the value at a hard spotlight edge, but it does not by itself explain why one output luxel becomes NaN. Keep it in the bisect range.
+4. **0.21.16 coplanar edge reconciliation.** Commit `15ff4802a32eaa64d83e2c42bcd33761bc124e94` reconciled shared-edge classic samples only for matching model/style/grid cases. This is also within the face-edge work and should be included in regression isolation.
+
+### What the original-vs-recompiled BSP comparison proves
+
+- Original face 5828 and rebuilt face 7612 are the same world-space wall polygon, with matching vertices, texture `tech07_2`, texinfo mapping, plane, styles, 11×15 luxel grid and area. The bad sample `(-80,640,96)` lies inside both.
+- Both BSPs have the same 428 entities and 252 light entities (apart from worldspawn differences); the six pale-blue Nightdive spotlights are present with matching origins, colors, intensities and directions. The nearest relevant light is light405 at `(-120,624,144)`.
+- Their world-aligned chart extents and dimensions match, but their absolute atlas rectangles differ: original `[1574,0,26,56]`, rebuilt `[530,142,26,56]`. The same world sample maps to original pixel centre `(1594.5,2000.5)` and rebuilt `(550.5,1858.5)`.
+- The rebuilt BSP has additional parser-flagged suspicious faces yet bakes; the original is structurally valid by the checks performed. The rebuilt worldspawn differs, but there is no evidence that this or the user's intentionally empty `property 1` key causes the bake difference. Explicitly ignore that key as a causal theory.
+- This evidence makes absolute atlas placement / UV sampling a real candidate, but does not prove it. Differences in chart membership/packing, face topology elsewhere in the scene, and Cycles scene/BVH ray interactions remain possible.
+
+### Current failure evidence
+
+The 0.21.21 artifact `14294590886` still fails on the original E1M1 with exactly one invalid baked luxel out of 165,763, zero invalid source luxels, and four adjacent non-finite atlas pixels at `(1594,2000)`, `(1595,2000)`, `(1594,2001)`, `(1595,2001)`. This maps to BSP face 5828, luxel (9,3), world position `(-80,640,96)`, near the hard cone edge of light405. The atlas transaction rolls back. The small `spottest02` succeeds but does not validate the original map.
+
+### Investigation plan — no production code change yet
+
+- Establish the actual last user-confirmed successful original rerelease E1M1 bake by searching the older transcript entries and artifact/run history. Until then label 0.21.16 as a candidate baseline only.
+- Perform a source-level bisect / feature-flag experiment between pre-world-chart and world-chart code, preserving the same original BSP, Blender version, light setup, Cycles settings and atlas resolution. The first controlled toggle should disable shared world-aligned charts and restore the prior face-local atlas import/export path; do not change lights at the same time.
+- Separately toggle the 0.21.18 outward-rounded edge-fill behavior and the 0.21.14 quadrature reduction, so their effects are not conflated.
+- Inspect face 5828's actual UVs and chart attributes in the original import, and compare the original/recompiled chart record, atlas rectangle, sample coordinate and contributing chart members. Check for overlapping chart cores, UV degeneracy, invalid interpolation neighbours, non-finite source values, and writes crossing face/core bounds.
+- Keep the original E1M1 BSP as the mandatory acceptance test. The recompiled BSP is a diagnostic control only.
+- Do not change the six spotlight energy/falloff, clamp the NaN, discard the luxel, or blame the empty `property 1` key without evidence. Keep the three acceptance criteria separate: successful finite original-map bake, correct Nightdive spotlight brightness, and engine-side face-edge filtering.
+- No new Blender bake, Ironwail test, add-on build, or production code modification was performed during this archaeology pass.
+
