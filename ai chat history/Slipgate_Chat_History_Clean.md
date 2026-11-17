@@ -21746,3 +21746,33 @@ The report's zero-length face attributes after failure should also be investigat
 The earlier report lists the face attributes and UV collections as zero entries after the failed bake. Source review shows the bake operator restores the user's original mode; if the user started in Edit Mode, SLOPGATE switches back to Edit Mode before returning. The diagnostics report reads the regular Mesh attribute/UV collections rather than the active Edit Mode BMesh data. The reported zero lengths may therefore be an Edit Mode reporting limitation, not deleted mesh data.
 
 Do not diagnose mesh metadata loss from that report alone. For the next diagnostics capture, switch the e1m1 BSP object to **Object Mode** after the failed bake, then run Save Lighting Diagnostics. This should let the report inspect the normal face attributes and UV layers. The face 5828 attribution itself was successfully produced during the bake and remains valid.
+
+
+## 2026-11-17 — 0.21.19 runtime test: spottest02 succeeds, e1m1 still fails
+
+**User test results**
+
+The user reports that e1m1 still produces the same error as before:
+`Cycles bake produced non-finite luxel luminance samples; baked=1/165763, source=0/165763, non-finite atlas RGB values=12, non-finite atlas pixels=4`, at atlas pixels `(1594,2000)`, `(1595,2000)`, `(1594,2001)`, `(1595,2001)`. The short popup is unchanged.
+
+The user also reports **spottest02 works** on the new candidate and supplies its diagnostics:
+- Blender 5.3.0, GPU bake, Cycles 4096 samples, two diffuse bounces.
+- 51 mesh faces, 36 light-receiving BSP faces; all 36 received light.
+- One imported spotlight only: `QSS_light_002`, value 300, delay 0, range 600.
+- Cycles operator FINISHED; bake time 2.22 s, total 2.83 s.
+- 3,858 luxels sampled; 3,845 lit; zero non-finite bake or source luxels; zero non-finite atlas pixels.
+- Raw bake mean 0.4274429424 versus source mean 0.02375913635. Source-match normalization 0.05558434586 yields final atlas mean 0.02375913636, and final max 0.936521.
+- Raw atlas peak was 16.84865 before normalization; successful normalization brings output to source mean.
+- This confirms 0.21.19 can complete a delay-0 spotlight bake on the small spottest02 map and calibrate it to the source lightmap average. It does not prove the e1m1 issue is fixed; e1m1 is still failing at the same reported luxel.
+
+**Interpretation**
+
+The e1m1 failure is now isolated to something about that map / its light or geometry setup rather than a universal failure of the 0.21.19 delay-0 path: spottest02 completes using one delay-0 spotlight. Do not infer the exact e1m1 cause yet. Need a fresh e1m1 Save Lighting Diagnostics report from 0.21.19 to see whether the same face/luxel and same nearest lights are still involved and inspect all active-map light data.
+
+The spottest02 diagnostic itself shows zero-length face attributes and UV collections. As already noted in the previous entry, the report may have been saved while the mesh was in Edit Mode. For future diagnostics, switch the active BSP mesh to **Object Mode** before saving the report. Do not assume metadata loss from the Edit Mode counts alone.
+
+**Next step**
+
+Ask the user for the full **e1m1** Save Lighting Diagnostics report immediately after the failed 0.21.19 bake, with the e1m1 BSP selected and in **Object Mode**. Include the full `IMPORTED LIGHTS (active BSP map only)` section and both non-finite attribution fields. We already have the prior map position (face 5828, -80/640/96) and three nearest lights from the old candidate, but need the new report to confirm whether this changed under 0.21.19.
+
+No new source commit or installer was created in response to this latest test report. No PR merge. PR #5 remains open/draft at 0.21.19 source commit `a781e3f43d24e42bb19145cda13da3973d5044cd`, with 300 CI tests and its artifact as recorded above.
