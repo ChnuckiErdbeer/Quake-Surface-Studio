@@ -47,10 +47,18 @@ class LightNodeTreeClassificationTests(unittest.TestCase):
         light, _tree, _emission, _output = self._default_tree()
         self.assertTrue(light_node_utils.is_default_light_node_tree(light))
 
-    def test_custom_emission_strength_is_preserved(self):
+    def test_initial_qss_import_may_replace_its_new_light_tree(self):
         light, _tree, emission, _output = self._default_tree()
         emission.inputs["Strength"].default_value = 2.0
         self.assertFalse(light_node_utils.is_default_light_node_tree(light))
+        self.assertTrue(light_node_utils.is_safe_to_replace_light_node_tree(
+            light, qss_created_by_current_import=True
+        ))
+
+    def test_existing_custom_tree_stays_protected_without_import_permission(self):
+        light, _tree, emission, _output = self._default_tree()
+        emission.inputs["Strength"].default_value = 2.0
+        self.assertFalse(light_node_utils.is_safe_to_replace_light_node_tree(light))
 
     def test_custom_emission_color_is_preserved(self):
         light, _tree, emission, _output = self._default_tree()
