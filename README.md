@@ -2,7 +2,7 @@
 
 ## Current development build
 
-SLOPGATE **0.21.20** — BSP29-only diagnostic development build.
+SLOPGATE **0.21.21** — BSP29-only diagnostic development build.
 
 This candidate temporarily uses Blender's native Cycles falloff for **all** imported Quake lights, including delay-5 lights. The goal is to isolate the one repeatable non-finite luxel still seen in e1m1 after delay-0 lights were switched to native falloff in 0.21.19. It is a diagnostic lighting approximation, not the intended final Quake light model. Quake Direct remains a separate path.
 
