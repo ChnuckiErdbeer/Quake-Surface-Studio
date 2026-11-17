@@ -1216,3 +1216,30 @@ Obtain a fresh full **e1m1** Save Lighting Diagnostics report immediately after 
 Compare with the previous 0.21.18 attribution: face 5828, luxel (9,3), map position (-80,640,96), nearest lights #405 (delay0/value1000), #330 (delay0/value200), #404 (delay0/value1000). Determine whether the same luxel and neighbours persist under 0.21.19 before changing more code.
 
 No further source change, new build, test run, or merge was made in this response. PR #5 remains open/draft at `a781e3f43d24e42bb19145cda13da3973d5044cd`; CI 300 tests succeeded. The 0.21.19 package link/digest are recorded above.
+
+
+## 2026-11-17 — e1m1 0.21.19 diagnostics and 0.21.20 isolation candidate
+
+The user supplied the full Object Mode report (12,659 lines / 850,149 characters) after the 0.21.19 e1m1 failure.
+
+- Failure remains exactly one bad baked luxel / 165,763, zero bad source luxels, four non-finite atlas pixels (1594,2000), (1595,2000), (1594,2001), (1595,2001), twelve non-finite RGB channel values.
+- Face/poly 5828, luxel (9,3), atlas sample (1594.5,2000.5), world position (-80,640,96).
+- Nearest lights: #405 spotlight delay 0 raw value 1000 at (-120,624,144); #330 point delay 0 raw value 200 at (-128,584,72); #404 spotlight delay 0 raw value 1000 at (-48,696,144). The imported-light summary lists #405/#404 at 40322.5 W, value 500, and #330 at 322.58 W, value 100. Raw attribution values and summary values come from distinct light properties.
+- Active map contains 252 imported lights. GPU bake 4096 samples, two diffuse bounces, 2048px atlas; 6605 mesh faces, 110 materials.
+- Object Mode report confirms the face attributes and UV layers exist. Earlier zero counts were an Edit Mode report limitation, not data loss.
+- 4,194,300 of 4,194,304 atlas pixels are finite; only the same four pixels are bad. Source mean 0.2898378. Raw bake mean NaN due to the single bad luxel; max finite channel 404.7033.
+- Viewport scene lights/world are enabled. Active map is e1m1.
+- User confirmed 0.21.19 works on spottest02, a small map with one delay-0 spotlight.
+
+### 0.21.20 diagnostic source commit
+
+Commit `21344ec1cbbe60edf321958b9d358598bcfe01ed` on PR #5 branch `fix/0.21.17-world-aligned-lightmap-charts`. Version synchronized to 0.21.20 in add-on metadata, package metadata and README.
+
+This candidate disables the remaining custom delay-5 Cycles light shader. All Quake lights use Blender-native Cycles falloff for one controlled isolation test. Quake Direct is unchanged. Diagnostics now record each light's Cycles profile, custom-node active state, node usage, spotlight size/blend, and energy, including nearest lights around bad luxels.
+
+Interpretation:
+- If e1m1 now bakes, investigate the delay-5 custom Cycles shader as the remaining cause.
+- If the same luxel still fails, custom Cycles light falloff graphs are ruled out and the investigation moves to face 5828, its material/UV data, or Cycles sampling.
+This is a diagnostic approximation only, not the intended final Quake lighting model.
+
+**Status:** source commit created and verified on PR #5 branch. At handoff time, no CI result, 0.21.20 installer artifact, Blender runtime result, or PR merge has been confirmed. Do not give the user a download link until the package artifact is actually built and verified.
