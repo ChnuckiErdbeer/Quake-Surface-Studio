@@ -22165,3 +22165,54 @@ On a fresh import of the original stock E1M1, retain all six Nightdive spotlight
 - Do not call the hard-edge mapping a final bug fix until this controlled test and the original E1M1 bake confirm it.
 
 No production source changes, new build, Blender bake by the assistant, or PR merge occurred in this response. Both project records are updated with the user's runtime evidence and this source comparison.
+
+
+## 2026-11-17 — Original rerelease E1M1 bake succeeds after restoring 0.21.18 spotlight Blend values
+
+### User runtime result
+
+The user applied the controlled test to the original, unrecompiled Quake rerelease E1M1: all six Nightdive spotlights were retained, but their Blender Spot Blend values were changed from the current importer's hard-edge value (0.0) to 1.0, matching the values produced by the known-good 0.21.18 importer for the default `_softangle=0`. The Full Map Cycles bake then completed successfully.
+
+User-provided exact report:
+
+```
+Bake complete (Full map. ) 252 lights, 110 materials, 5557/5631 faces lit,
+157570/165763 raw luxels lit, mean 0.2951, max 30.64, raw mean 3.122,
+source mean 0.2947, atlas scale 0.09441, 2 diffuse bounces;
+total 3 min 20.9 s (Cycles 3 min 9.2 s).
+Switches to Baked Lightmaps preview.
+```
+
+This is a user-confirmed successful bake of the original, unrecompiled rerelease E1M1 with all 252 lights present. It is not a test of the current unmodified importer: the six spotlight Blend values were manually changed for this run.
+
+### Regression conclusion updated
+
+This result strongly confirms that the hard-edged Blender spotlight configuration introduced after 0.21.18 is responsible for, or directly involved in, the non-finite luxel failure. Specifically:
+
+- Known-good 0.21.18 import code computed `spot_blend = 1 - soft_angle / cone`. For the six Nightdive spotlights, which omit `_softangle` and therefore use default zero, this yielded `spot_blend=1.0`.
+- Later commits `98753c7` / `fbd760c` intentionally changed the mapping so ericw `_softangle=0` gives Blender `spot_blend=0.0`, i.e. a hard edge.
+- Restoring only the six Blend values to 1.0 let the complete original-map bake finish, while retaining all six lights and the shared world-chart atlas.
+- Therefore shared world-aligned chart packing, the original BSP face 5828 geometry, or the presence of the six lights by themselves are not sufficient explanations for the failure. The spotlight edge configuration is now the primary regression cause/candidate, with very strong experimental evidence.
+
+Do not yet declare the product fix complete. The next engineering objective is to make Cycles bake safely while preserving the intended Quake/ericw hard cone as closely as possible. Blender's `spot_blend=1.0` is a successful compatibility workaround but may soften the light boundary relative to the original hard cone. Keep visual fidelity in the rerelease as a separate acceptance test.
+
+### Bake quality / interpretation
+
+- 252 lights present.
+- 5,557 / 5,631 faces lit.
+- 157,570 / 165,763 raw luxels lit.
+- mean baked brightness 0.2951; source mean 0.2947.
+- maximum 30.64; raw mean 3.122.
+- atlas match scale 0.09441; this is applied to the baked atlas as source matching and does not mean imported light energies were scaled down.
+- 2 diffuse bounces; total time 3m20.9s; Cycles time 3m9.2s.
+- Bake completed and switched to Baked Lightmaps preview. No claim is made yet about the exact appearance of the six cone boundaries in the Quake rerelease; visual comparison remains to be done.
+
+### Next steps
+
+1. Preserve the successful test settings as a reference and save the Blender file so the exact successful light values can be inspected.
+2. Develop a Cycles-safe spotlight treatment that does not produce NaN at the cone transition but retains the intended Quake hard cone for rendered/baked output. Do not blindly make every imported spotlight soft as the final fidelity solution.
+3. Test the six lights individually or in groups only if needed to confirm whether one light is sufficient to trigger the singularity; the all-six Blend change already isolates their shared edge configuration as the key variable.
+4. Re-import original E1M1 using the candidate code and run a full bake with all lights and no manual property edits. That is the final bake acceptance test.
+5. Compare spotlight boundary/brightness in the Quake rerelease and keep the lightmap edge-filtering acceptance criterion separate.
+
+No production source code, build or installer was changed in this session. This entry records the user's successful runtime test and updates the root-cause assessment only.
