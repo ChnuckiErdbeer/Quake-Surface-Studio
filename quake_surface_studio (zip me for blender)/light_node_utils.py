@@ -95,3 +95,16 @@ def is_default_light_node_tree(light_data):
     if bool(getattr(emission, "mute", False)) or bool(getattr(output, "mute", False)):
         return False
     return True
+  
+  
+def is_safe_to_replace_light_node_tree(light_data, qss_created_by_current_import=False):
+    """True when QSS may replace a light's current shader tree.
+
+    A light datablock created by the current BSP import is known to contain
+    Blender-generated starter nodes, not user-authored nodes. This one-shot
+    import permission is deliberately explicit; later updates must pass the
+    normal default-tree classifier so genuine user edits remain protected.
+    """
+    if qss_created_by_current_import:
+        return True
+    return is_default_light_node_tree(light_data)
