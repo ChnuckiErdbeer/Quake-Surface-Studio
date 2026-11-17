@@ -1399,3 +1399,42 @@ These may interact around the same lights/geometry but the source and acceptance
 - Absolute atlas placement differs: original chart rectangle `[1574,0,26,56]`, mapping the failed sample to pixel centre `(1594.5,2000.5)`—an exact match for the user's bake diagnostic. Rebuilt chart rectangle `[530,142,26,56]`, mapping the same world sample to `(550.5,1858.5)`. The chart-relative sample coordinate and face-local luxel remain equivalent. This makes atlas-coordinate-dependent Cycles rasterization/UV behaviour a candidate, but does not prove it is the cause; a global BVH/scene-interaction difference also remains possible.
 - Recommended discriminating test on the original BSP: use SLOPGATE's existing **Change Lightmap Resolution** operator to rebuild the working atlas at 2x (from the original BSP source) and then bake once. This changes atlas packing/image coordinates without moving lights or editing brushes. It discards generated/painted lightmaps, so preserve a copy of the .blend first if any painted/baked work must be kept. If the NaN disappears, investigate atlas placement/UV sampling; if the same world luxel still fails, shift focus to Cycles shading/geometry-ray interaction. This is a diagnostic test, not a workaround or verified fix.
 - No new add-on build/installer was produced, and no Blender runtime test was run by the assistant. Keep the three acceptance tracks separate: face-5828 non-finite luxel; Nightdive spotlight visual fidelity; original engine lightmap edge blur/clipping.
+
+
+## 2026-11-17 — Session orientation update: current branch tip and E1M1 chart-packing diagnostic
+
+This entry supplements, and where newer supersedes, the earlier November 17 status above. The live refs were checked during the orientation session.
+
+### Live repository / PR state
+
+- Maintained documentation branch `fix/v0.11.1-metadata-style-order-test`: `56628f7585a23e8bc6ca80b9e3bebf91628f99ac` (**Simulate alternate E1M1 chart packing order**, authored 2026-11-17 14:01:24 UTC).
+- PR #1 is open/draft, head `56628f7585a23e8bc6ca80b9e3bebf91628f99ac`.
+- PR #2 is open/draft, head `66767f0fe7d34db7a29204af1d13dc383ec300ce`, separate import-trace diagnostic.
+- PR #3 is open/draft, head `5ea9781e71ea64b9adb70e5ecbda7918e5d1fde9`.
+- PR #4 is open/draft, head `15ff4802a32eaa64d83e2c42bcd33761bc124e94`.
+- PR #5 is open/draft, head `9e72bc5a77b30322ab53b00be0ec139380ae45f4`, based on PR #4. Keep the #3 → #4 → #5 stack order; PR #2 remains independent.
+- No PR was merged during this review. The connector's PR metadata returned `mergeable=false` for #1–#3 and `mergeable=true` for #4–#5 at the time checked; do not treat this metadata as an approval or a merge result.
+
+### New forensic analyzer change on PR #1 documentation branch
+
+Commit `56628f7585a23e8bc6ca80b9e3bebf91628f99ac` changes only `testressource26.11.16_01/analyze_e1m1_bsp_pair.py`:
+- Adds an optional reverse-chart-ID ordering to the offline current-QSS chart packing simulation.
+- Reports an alternate atlas size, luxel scale, rectangle and predicted pixel coordinate for the known face-5828 sample, alongside the normal predicted coordinate.
+- This is a read-only diagnostic simulation. It does not change production add-on code or actual Blender atlas packing.
+- No PR-triggered workflow run was returned for this new commit. No result from running the analyzer on the E1M1 resource is recorded here. Do not claim the alternate arrangement eliminates the NaN until the analyzer output is actually inspected, and do not infer a Blender bake result from the simulation.
+
+The preceding commit `778113d9de2c77402926528c09aa9075f65c44d3` archived the original-vs-rebuilt Nightdive BSP forensic comparison. It found that original face 5828 and rebuilt face 7612 are the same world-space wall polygon, with the same texture, texinfo, plane, styles, 11×15 luxel grid and area; the exact failed world sample `(-80,640,96)` is inside both. Their world-aligned chart geometry/extents are equivalent, but the absolute atlas rectangles and resulting sample pixels differ. This makes atlas placement a testable variable, not a proven cause; global scene/BVH interaction remains another possibility.
+
+### Current defect and immediate user-side discriminator
+
+- Latest documented 0.21.21 artifact tested by the user: artifact `14294590886`, source commit `9e72bc5a77b30322ab53b00be0ec139380ae45f4`. The user's Blender 5.3 run still reproduced one non-finite baked luxel out of 165,763, with no bad source luxels. The four invalid atlas pixels map to BSP face 5828, luxel (9,3), Quake position `(-80,640,96)`.
+- `spottest02` succeeds on 0.21.19; that small one-light test does not validate the Nightdive E1M1 corner.
+- Spotlight 405 is one of six pale-blue Nightdive lights, all with hard 40° outer cones by ericw defaults. Keep three acceptance tracks separate: the face-5828 NaN; six blue spotlights appearing too bright in SLOPGATE compared with ericw; and classic in-game lightmap blur/clipping at face edges.
+- Recommended discriminating test remains: save a copy of the .blend; on the original E1M1 BSP, use **Change Lightmap Resolution** to rebuild the atlas at 2×, then bake once without changing map geometry or lights. This rebuild discards generated/painted lightmaps, so the copy is important. If the NaN disappears, investigate atlas UV/layout dependence; if it remains at the same world-space luxel, shift attention toward Cycles face-corner / scene interaction.
+- The new reverse-order packing simulation may help choose or interpret an alternate arrangement, but it is not a replacement for this controlled runtime test.
+
+### Work performed in this orientation session
+
+- Read this maintained handoff, the field notes, the archive introduction and latest November 17 archive entries; inspected the live branch head, the two newest relevant commits, current PR metadata, and the new analyzer diff.
+- The full archive and 14 supporting workflow PDFs were not exhaustively read in this orientation. Consult them when a specific detail requires deeper source/dialogue verification.
+- No add-on source was changed. No tests, builds, installer artifact, Blender bake, Ironwail launch, or PR merge were performed. The archive was appended with this session's orientation findings; this handoff update records the same state.
