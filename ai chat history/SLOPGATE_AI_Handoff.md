@@ -1438,3 +1438,41 @@ The preceding commit `778113d9de2c77402926528c09aa9075f65c44d3` archived the ori
 - Read this maintained handoff, the field notes, the archive introduction and latest November 17 archive entries; inspected the live branch head, the two newest relevant commits, current PR metadata, and the new analyzer diff.
 - The full archive and 14 supporting workflow PDFs were not exhaustively read in this orientation. Consult them when a specific detail requires deeper source/dialogue verification.
 - No add-on source was changed. No tests, builds, installer artifact, Blender bake, Ironwail launch, or PR merge were performed. The archive was appended with this session's orientation findings; this handoff update records the same state.
+
+
+## 2026-11-17 — Regression investigation requested: original rerelease E1M1 must bake
+
+The user has made the original, unrecompiled official Quake rerelease E1M1 a mandatory acceptance target. They report that older SLOPGATE releases baked it without the current crash, and request a backward investigation of changes made while fixing lightmap edge artefacts. The recompiled BSP is diagnostic evidence only; it is not an acceptable replacement. The user explicitly says the empty `property 1` key in the recompile was user-created and must be ignored as a cause.
+
+### Regression window and certainty
+
+- The earliest documented original E1M1 non-finite bake report in the current archive occurs in the 0.21.18 testing sequence on 2026-11-16.
+- 0.21.16 is the last plausible pre-world-chart baseline. The current transcript does **not** yet prove that a named 0.21.16 artifact was the last build on which the original rerelease E1M1 bake completed cleanly. Do not claim this is confirmed.
+- Earlier 0.20.2 `Bake complete` log lines are not a clean baseline: the user said the resulting lightmaps looked black. No build ID for a problem-free rerelease E1M1 bake has yet been established.
+- The 0.21.13 Enhanced-only half-luxel rim did not visibly improve edge artefacts in Ironwail or the Quake rerelease. It did not alter classic BSP29 fallback data.
+- 0.21.14 changed supersampled luxel reduction to four-point quadrature; 0.21.15 fixed detached-face texture export and classic grid alignment; 0.21.16 added conservative shared-coplanar-edge sample reconciliation.
+- 0.21.17 introduced shared world-aligned coplanar charts in atlas import/baking and changed classic BSP29 export to sample face-local grids back out of the shared charts. This is the primary regression suspect because it changed atlas layout, UV assignment and the classic export sampling path.
+- 0.21.18 added outward-rounded edge luxel filling by sampling the face's own source-grid edge, followed by a guard constraining the extension to the face's classic sample rectangle. This is a secondary suspect to isolate separately.
+
+### Original vs recompiled E1M1 facts
+
+- Original face 5828 and rebuilt face 7612 have the same world-space polygon, vertices, `tech07_2` texture, texinfo, plane, styles, 11×15 sample grid and area. The failed world sample is `(-80,640,96)` in both.
+- Both BSPs contain the same 428 entities and 252 lights apart from worldspawn differences; the Nightdive blue spotlights are present with matching light properties. Nearest is light405 at `(-120,624,144)`.
+- Their world-aligned chart extents match, but atlas rectangles differ: original `[1574,0,26,56]`, rebuilt `[530,142,26,56]`. The failed world sample maps to `(1594.5,2000.5)` in the original and `(550.5,1858.5)` in the rebuild.
+- Original BSP passed the structural checks recorded so far. Rebuild bakes despite more parser-flagged suspicious faces. There is no evidence that the different worldspawn or the intentionally empty `property 1` key explains the success; exclude that key from causal analysis.
+- Atlas packing/UV sampling is a testable hypothesis, not yet a proven root cause. Global Cycles scene/BVH interactions and other chart membership/topology differences remain possible.
+
+### Current observed failure
+
+Artifact 0.21.21 ID `14294590886` still reports one non-finite baked luxel out of 165,763, zero non-finite source luxels, and a four-pixel atlas block at `(1594,2000)` through `(1595,2001)`. Attribution: BSP face 5828, luxel (9,3), world `(-80,640,96)`, near light405's hard spotlight cone edge. The pre-bake atlas is restored. `spottest02` passing does not validate original E1M1.
+
+### Next engineering work
+
+1. Find the last user-confirmed good original rerelease E1M1 bake and its exact build/artifact ID from the older transcript and workflow artifacts. Until then, 0.21.16 is a candidate baseline only.
+2. Reproduce by bisecting the feature changes against the original BSP. First compare pre-0.21.17 face-local atlas import/export with shared world-aligned charts, changing no light settings. Then isolate 0.21.18 edge-fill and 0.21.14 quadrature separately.
+3. Inspect original face 5828's chart membership, UVs, chart attributes, atlas rectangle, sample interpolation neighbours, source samples and write bounds; compare those values to rebuilt face 7612.
+4. Keep original unrecompiled E1M1 as the required bake acceptance test. Recompiled E1M1 is a control only.
+5. Do not clamp/discard the invalid luxel, adjust spotlight energy to mask it, or blame `property 1`. Track finite original-map bake, spotlight brightness fidelity and in-engine edge filtering as separate acceptance criteria.
+
+No production source changes, new build, Blender bake, Ironwail test or PR merge occurred during this review. This entry records regression archaeology and the next controlled experiments only.
+
