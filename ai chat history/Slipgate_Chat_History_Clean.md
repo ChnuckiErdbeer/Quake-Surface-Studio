@@ -21833,3 +21833,36 @@ This is the same exact error and same four atlas pixels / single luxel as the 0.
 - Ask the user to save diagnostics now, after the failed bake; **no second bake is needed**. Ask for only these two output sections, not the full 12,000-line report. Keep the active e1m1 BSP selected and Object Mode.
 
 **No new code change/build/merge** was made in response to the latest identical popup. PR #5 remains open/draft at 0.21.20 source commit `21344ec1cbbe60edf321958b9d358598bcfe01ed`. The 0.21.20 CI run `43987390162` passed 300 tests, compile, BSP export-integrity and package assembly. Artifact ID `14286680280`, 313,031 bytes, SHA-256 `a37d55487a010cf76da4d897b7989588dcdfa230997cb8cfd2120f4e88cdee75`.
+
+
+## 2026-11-17 — User identifies spotlight 405; decompiled e1m1 MAP geometry inspected
+
+**User message (verbatim)**
+
+> I went into ironwail and went to position `-80, 640, 96`. The wall is direcly lit by a spotlight. qsslight 405. I put the decompiled map into the [testressource26.11.16_01](https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/tree/fix/v0.11.1-metadata-style-order-test/testressource26.11.16_01 "testressource26.11.16_01")
+
+**Source file inspected**
+
+`testressource26.11.16_01/e1m1.decompile.map` was read from docs branch `fix/v0.11.1-metadata-style-order-test`, blob `1cf32f62cb9dc977665e48eecfbcc6c9b5d7f49e`, 1,697,287 bytes / 24,864 lines.
+
+**Spotlight 405 in the decompiled MAP**
+- It is entity index 405 (the SLOPGATE importer names the imported light `QSS_light_405` from its BSP entity index).
+- Properties: `classname=light`, `light=1000`, `_color=181 238 255`, `mangle=0 -30 0`, `origin=-120 624 144`.
+- No explicit `angle` or `_softangle` is present. ericw-tools defaults the outer cone angle to 40 degrees and the soft inner angle to 0 (hard edge). The 0.21.20 report has the matching spotlight size 0.698132 radians (40 degrees) and blend 0.
+- The nearest other light entities are the previously reported point light at `(-128,584,72)`, value 200, and spotlight at `(-48,696,144)`, value 1000, mangle `270 330 0`.
+
+**Exact bad sample and MAP geometry**
+- The failed Cycles luxel remains face 5828, local luxel (9,3), at Quake coordinate `(-80,640,96)`.
+- In the decompiled MAP, this point lies exactly on the intersection of the two perpendicular brush-face planes `x=-80` and `y=640`. Both surface sides use texture `tech07_2`. The relevant brush records are near lines 20258 and 20325 in the decompiled file.
+- Thus the sample is on a geometric corner/brush boundary, not in the middle of a single broad wall face. This is the strongest new geometry clue so far.
+- Vector from spotlight 405 to the sample is `(40,16,-48)`, distance 64.4981 units. With mangle yaw 0 / pitch -30, the imported axis points approximately `(0.866, 0, -0.5)`; the sample direction is about 24.6 degrees off that axis. ericw source calculates the hard outer cutoff using half of the specified angle, so a default 40-degree cone has a 20-degree half-angle. The exact luxel centre therefore appears about 4.6 degrees outside the nominal 405 cone under the MAP's direction values, despite the surrounding wall being visibly illuminated in Ironwail. Treat this as a clue that the bad sample is near a hard spotlight boundary; do not contradict the user's observation that the wall region is lit. Another nearby light may also contribute at the exact sample centre.
+- The second nearby spotlight 404 has an axis and position that also put the exact sample near/outside its nominal 40-degree cone. This supports inspecting the hard-cone boundary rather than changing linear/quadratic falloff.
+
+**Cross-check against 0.21.20 diagnostics**
+- The 0.21.20 report records the nearest three lights as `cycles_profile=native_fallback_delay0`, `cycles_custom_active=False` and `spot_blend=0`. Therefore QSS's custom Cycles falloff correction is not marked active for the three lights at this sample.
+- The same report says `use_light_nodes=True`. This is a separate Blender state flag; the diagnostic did not dump actual light-node names or links. Do not overclaim that the Blender node tree itself is absent based only on `cycles_custom_active=False`. If needed, the next diagnostic should list actual node names and whether the output is QSS-owned.
+- The bake still fails at exactly one luxel and the same four atlas pixels on 0.21.20. The small spottest02 succeeds on 0.21.19.
+
+**Working conclusion / next development focus**
+
+Stop changing global light falloff. Focus on the single sample where a hard-edged spotlight's cutoff meets a perpendicular brush corner. Inspect how Cycles GPU baking shades that edge sample, whether face 5828's sample lies exactly on the polygon boundary, and whether a small controlled cone softness or a safe per-face edge-sample treatment changes the result. Do not ship a workaround that silently zeros the luxel or damages the classic Quake lightmap. No new source changes/build were made from this MAP review.
