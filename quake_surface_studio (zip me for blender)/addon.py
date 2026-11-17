@@ -29,7 +29,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils, image_undo
 
 
-ADDON_VERSION = (0, 21, 19)
+ADDON_VERSION = (0, 21, 20)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -8055,6 +8055,7 @@ def _qss_describe_nonfinite_luxels(
                 continue
         except (TypeError, ValueError, IndexError):
             continue
+        light_data = light_obj.data
         lights.append({
             'name': light_obj.name,
             'origin': origin,
@@ -8063,6 +8064,12 @@ def _qss_describe_nonfinite_luxels(
                                          light_obj.get('qss_quake_light_value', 0.0))),
             'wait': float(light_obj.get('qss_quake_wait', 1.0)),
             'falloff': float(light_obj.get('qss_quake_falloff', 0.0)),
+            'cycles_active': bool(light_obj.get('qss_cycles_falloff_active', False)),
+            'cycles_profile': str(light_obj.get('qss_cycles_falloff_profile', 'unknown')),
+            'light_nodes': bool(getattr(light_data, 'use_nodes', False)),
+            'spot_size': float(getattr(light_data, 'spot_size', 0.0)),
+            'spot_blend': float(getattr(light_data, 'spot_blend', 0.0)),
+            'energy': float(getattr(light_data, 'energy', 0.0)),
         })
     lines = []
     for match in matches[:8]:
@@ -8088,7 +8095,13 @@ def _qss_describe_nonfinite_luxels(
                     f"  nearest_light={light['name']} distance_qu={distance:.6g} "
                     f"origin={light['origin']} delay={light['delay']} "
                     f"value={light['value']:.6g} wait={light['wait']:.6g} "
-                    f"falloff={light['falloff']:.6g}"
+                    f"falloff={light['falloff']:.6g} "
+                    f"cycles_profile={light['cycles_profile']} "
+                    f"cycles_custom_active={light['cycles_active']} "
+                    f"use_light_nodes={light['light_nodes']} "
+                    f"spot_size={light['spot_size']:.6g} "
+                    f"spot_blend={light['spot_blend']:.6g} "
+                    f"energy={light['energy']:.6g}W"
                 )
     return '\\n'.join(lines) if lines else 'No BSP face/luxel centre matched the reported non-finite atlas pixels.'
 
@@ -10997,12 +11010,17 @@ def _qss_diagnostics_text(context, obj):
     for light_obj in active_map_objects:
         if light_obj.type != 'LIGHT' or light_obj.get('qss_light_role') not in {'quake_entity_light', 'quake_world_sunlight'}:
             continue
-        lines.append('  {} type={} color={} energy={:.6g} W style={} inferred={} value={} delay={} range={} manual_calibration={}'.format(
+        lines.append('  {} type={} color={} energy={:.6g} W style={} inferred={} value={} delay={} range={} manual_calibration={} cycles_profile={} cycles_custom_active={} use_light_nodes={} spot_size={:.6g} spot_blend={:.6g}'.format(
             light_obj.name, light_obj.data.type, tuple(round(float(v), 4) for v in light_obj.data.color),
             float(light_obj.data.energy), light_obj.get('qss_quake_light_style', 0),
             light_obj.get('qss_quake_style_was_inferred', False), light_obj.get('qss_quake_light_value', ''),
             light_obj.get('qss_quake_light_delay', 0), light_obj.get('qss_quake_range', ''),
-            light_obj.get('qss_manual_energy_calibration', 1.0)))
+            light_obj.get('qss_manual_energy_calibration', 1.0),
+            light_obj.get('qss_cycles_falloff_profile', 'unknown'),
+            light_obj.get('qss_cycles_falloff_active', False),
+            bool(getattr(light_obj.data, 'use_nodes', False)),
+            float(getattr(light_obj.data, 'spot_size', 0.0)),
+            float(getattr(light_obj.data, 'spot_blend', 0.0))))
         active_map_lights += 1
     lines.append(f'Active-map imported light count: {active_map_lights}')
     world = context.scene.world

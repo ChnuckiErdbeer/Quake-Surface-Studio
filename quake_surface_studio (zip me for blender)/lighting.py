@@ -207,17 +207,15 @@ def ericw_light_value(light_value: float, delay: int, distance: float,
 
 
 def cycles_uses_ericw_falloff_correction(delay: int) -> bool:
-    """Return whether Cycles should use the experimental ericw light shader.
+    """Return whether Cycles should use a QSS custom Quake falloff shader.
 
-    Delay-0 lights use Blender's native point-light falloff. The custom
-    delay-0 node graph is intentionally disabled because it has produced
-    non-finite lightmap samples in real BSP bakes. Delay 5 retains its
-    existing correction; all other delays use the native approximation.
+    Custom delay-0 falloff was disabled in 0.21.19 after a repeatable
+    non-finite e1m1 luxel. 0.21.20 also disables the remaining delay-5
+    shader so a large-map bake can confirm whether any custom light graph
+    causes the sample. All Quake lights use Blender's native Cycles falloff
+    in this diagnostic candidate. Quake Direct remains independent.
     """
-    try:
-        return int(delay) == 5
-    except (TypeError, ValueError, OverflowError):
-        return False
+    return False
 
 
 def ericw_cycles_light_falloff_correction(

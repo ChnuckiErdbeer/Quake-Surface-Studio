@@ -10,10 +10,10 @@ class CyclesFalloffPolicyTests(unittest.TestCase):
     def test_delay_zero_uses_native_blender_falloff(self):
         self.assertFalse(lighting.cycles_uses_ericw_falloff_correction(0))
 
-    def test_delay_five_keeps_its_existing_correction(self):
-        self.assertTrue(lighting.cycles_uses_ericw_falloff_correction(5))
+    def test_delay_five_uses_native_blender_falloff_during_nan_isolation(self):
+        self.assertFalse(lighting.cycles_uses_ericw_falloff_correction(5))
 
-    def test_other_delays_use_the_native_fallback(self):
+    def test_all_other_delays_use_the_native_fallback(self):
         for delay in (1, 2, 3, 4, 6, -1):
             self.assertFalse(lighting.cycles_uses_ericw_falloff_correction(delay))
 
