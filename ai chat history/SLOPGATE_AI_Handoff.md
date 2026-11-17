@@ -1684,3 +1684,69 @@ The user should also identify whether the bright live preview was viewed in Real
 - **Original E1M1 brightness/falloff fidelity:** still under investigation.
 - **0.21.22 automated validation:** 312 tests, Python compilation, BSP export checks and installer packaging passed (workflow `44180237973`, artifact `14371921535`).
 - No new source-code change or Blender diagnostic run was performed in this brightness investigation. The two project records were updated with the user's bake success and the falloff analysis.
+
+
+
+## 2026-11-17 — E1M1 0.21.22 diagnostics confirm inactive Cycles falloff; 0.21.23 import fix built
+
+### User-provided 0.21.22 diagnostics
+
+The user supplied a full diagnostics report from Blender 5.3.0 for the original E1M1 BSP. Key facts:
+
+- Preview mode: `realtime`; render engine: `BLENDER_EEVEE`.
+- RGB source: monochrome BSP lighting; BSPX lumps empty.
+- Light energy scale and source-match calibration both 1.0.
+- Bake completed: Cycles operator `FINISHED`, 0 non-finite luxels (and 0 non-finite source luxels).
+- Last bake mean values: raw mean `3.15409998`; source mean `0.29474011`; final atlas mean `0.29514125`; maximum `33.60558`; normalization `0.09344666`.
+- GPU, 4096 samples, 2 diffuse bounces, 2048-pixel atlas, 6,437 receiver faces; successful Cycles bake time 3m02.4s.
+- All 252 imported lights were listed. Representative delay-0 and delay-5 lights reported `cycles_profile=user_nodes_preserved_native_fallback`, `cycles_custom_active=False`, and `user-custom[Emission, Light Output]` node trees. The delay-3 entries showed the expected native fallback.
+- Last attempted lamp-state block was `n/a`; the imported-light listing above supplies the relevant current node-state evidence.
+- The report also showed missing/stale QSS face attributes: 0 entries for 6,605 mesh faces, and 0 entries for 31,052 UV loops. This is separate from the falloff issue. Use a clean fresh import for the next bake test and confirm the face attributes and UV maps are populated before baking/exporting.
+
+### Interpretation
+
+Two separate mismatches explain the reported brightness:
+
+1. The live preview is explicitly Eevee Realtime. Blender ignores light shader node trees in Eevee, so it uses Blender's native point/spot falloff rather than QSS's Cycles correction. This mode is intentionally fast but spatially approximate. Use the QSS **Cycles** preview mode to see the custom delay-0/5 attenuation; it is slower.
+2. In the Cycles bake, QSS's intended delay-0 and delay-5 correction graphs were not installed for any of the reported lights. The node classifier rejected Blender's generated starter graph as `user-custom`, and the safety check therefore preserved it instead of replacing it with the QSS graph. The diagnostics' `cycles_custom_active=False` confirms the correction was inactive.
+
+The global source-match pass did its job on the average: final atlas mean 0.295141 is within about 0.14% of source mean 0.294740. However, the raw bake mean was 3.1541 and was multiplied by 0.0934467. A matching average does not guarantee matching local brightness distribution; the maximum luxel remained 33.6056. The uncorrected native inverse-square falloff can create local hot spots near lights/walls even after the global average is normalized. Do not lower global energy/range as a first fix: that changes distant lighting too and does not fix the curve shape.
+
+Blender's 5.3 manual confirms light shader nodes are supported in Cycles and ignored by Eevee:
+- https://docs.blender.org/manual/en/5.3/render/cycles/light_settings.html
+- https://docs.blender.org/manual/en/latest/render/shader_nodes/output/light.html
+
+### Production source correction: SLOPGATE 0.21.23
+
+Production source branch: `fix/0.21.17-world-aligned-lightmap-charts`.
+Final source commit: `8cd21cc144687c0808c8639c8af07962e5351162`.
+
+- Added `light_node_utils.is_safe_to_replace_light_node_tree()` with an explicit one-time permission for a light datablock created by the current QSS import operation.
+- The importer now installs the Quake/Cycles correction graph for newly imported delay-0 (linear) and delay-5 (soft inverse-square) lights while it still knows the light datablock was just created by QSS. This safely bypasses the false `user-custom` classification of Blender's starter nodes.
+- That permission is not persistent. Later updates still require a fully QSS-owned node tree or a recognized untouched Blender default; user-edited light graphs remain protected.
+- Added tests for the explicit first-import permission, protection of an existing custom graph, and the import/update wiring.
+- Diagnostics now print `cycles_error` so the next report will reveal why a graph was not installed.
+- Lighting-mode descriptions now distinguish fast approximate Eevee Realtime from the slower Cycles preview, which can use the delay-0/5 correction graphs.
+- Updated the stale per-light diagnostic note to explain which delay modes are corrected.
+
+### CI and installer
+
+- Workflow run `44192399427`: **success**, exact final source commit `8cd21cc144687c0808c8639c8af07962e5351162`.
+- Python compilation passed.
+- Standalone suite: **314 tests passed**.
+- BSP export integrity checks passed.
+- Blender-ready install package assembled and uploaded.
+- Artifact: `Quake-Surface-Studio-v0.21.23-Blender-Install`, ID `14377536600`, size 317,905 bytes.
+- SHA-256: `3dde455049ce33ebfc8afc5c37205ab9df44ac283100932ef3518896920a5816`.
+- Run: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/44192399427
+- Installer: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/44192399427/artifacts/14377536600
+
+### Next acceptance test
+
+This is a source/CI-verified candidate, not yet a user-confirmed runtime fix. The user must:
+1. Install 0.21.23 and freshly re-import the original, unrecompiled E1M1 so the new light-node setup and face/UV attributes are rebuilt.
+2. Check diagnostics for delay-0/5 lights: `cycles_custom_active=True`, profile `ericw_delay0_linear` or `ericw_delay5_soft_inverse_square`, and empty `cycles_error`. Other delay types continue to use their documented fallback.
+3. Switch the QSS lighting mode to **Cycles** to compare the corrected live preview. Eevee Realtime remains an approximation and cannot use the Cycles light-node graph.
+4. Run a full-map Cycles bake with all 252 lights. Confirm finite luxels and compare the bright near-wall areas against the original rerelease.
+
+Do not claim that E1M1 brightness fidelity is solved until this fresh-import runtime test passes. The classic engine lightmap edge-filtering artefact remains a separate acceptance criterion.
