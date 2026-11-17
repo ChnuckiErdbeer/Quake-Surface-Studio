@@ -1307,3 +1307,38 @@ The 0.21.20 report marks the three nearest lights as `cycles_profile=native_fall
 - Inspect whether face 5828's lightmap UV sample maps exactly onto a polygon boundary and how Cycles GPU handles that sample.
 - A controlled test of a tiny spot-edge softness or an inward face-local sample offset may be considered, but preserve ericw/Quake lighting and classic BSP luxel placement in any final fix.
 - No new source changes or installer from this MAP inspection. PR #5 remains at 0.21.20 source commit `21344ec1cbbe60edf321958b9d358598bcfe01ed`, CI 300 tests, artifact `14286680280` as above.
+
+
+## 2026-11-17 — Six pale-blue e1m1 spotlights tie into original edge complaint and bake overbrightness
+
+The user clarified that spotlight 405 is one of the six pale-blue spotlights that originally caused concern. They say the six lights appear as subtle blue shimmers with ericw-tools, but looked far too bright in SLOPGATE's Cycles bake and were involved in the reported lightmap glitch.
+
+### Original complaint context (read from full archive)
+The 2026-11-13 report described that game engines blur low-resolution lightmaps; near BSP face boundaries this could produce harsh edges or abruptly cut a light spot off because the blur needs samples outside the face's own lightmap rectangle. This was recorded as **lightmap clipping after engine blur**, not simply a lack of soft luxel values.
+
+Historical edge work:
+- 0.21.13: half-luxel support rim for eligible Enhanced BSPX per-face lightmaps. The user reported no visible change in Ironwail or Quake 2021 rerelease; do not repeat/claim that Enhanced-only padding as a fix.
+- 0.21.14 candidate: four-point sub-luxel quadrature intended to retain narrow spotlight coverage near luxel-block edges. Runtime confirmation wasn't established in the archive.
+- The current classic BSP29 e1m1 problem needs its own investigation; BSPX-specific padding cannot be assumed to affect Ironwail classic output.
+
+### Six spotlight group in decompiled e1m1 MAP
+Entities 403–408 are the six pale-blue spotlights:
+- all have light=1000, _color=181 238 255, and mangle;
+- no explicit angle or _softangle, so ericw defaults: 40-degree outer cone, zero softness (hard edge);
+- entity 405 is at (-120,624,144), mangle (0,-30,0), the light the user sees illuminating the current wall;
+- others: #403 (80,696,144), #404 (-48,696,144), #406 (-120,504,144), #407 (-216,1688,-16), #408 (472,1688,-16).
+One additional similar directed blue 1000-value light exists at entity 427 elsewhere and is outside the 403–408 cluster.
+
+### Do not conflate three observed issues
+1. **Engine blur/face-boundary clipping:** the original light spot is abruptly cut at BSP face edges after game lightmap filtering.
+2. **Blue-light overbrightness:** these six lights are subtle blue shimmers in ericw, but too bright in SLOPGATE's Cycles bake.
+3. **Current NaN:** one invalid Cycles luxel at face 5828 and (-80,640,96), exactly at the intersection of planes x=-80/y=640 on two tech07_2 faces, near the hard cone boundary of #405. 0.21.20 disabling all QSS custom Cycles falloff did not change this failure.
+
+These may interact around the same lights/geometry but the source and acceptance tests differ. A fix to one must not be assumed to fix the others.
+
+### Current investigation constraints
+- Stop repeating Enhanced-only edge padding or modifying global light falloff without evidence.
+- Inspect the six light entities' effective energy/falloff and compare their baked contributions to ericw. The 0.21.20 report shows the nearest delay-0 lights have cycles_custom_active=False and cycles_profile=native_fallback_delay0, but also says use_light_nodes=True; actual Blender node names/links have not been inspected. Don't claim the light node trees are absent until verified.
+- Independently investigate the face-corner luxel / Cycles GPU issue causing the unchanged NaN.
+- Any blue brightness correction must be checked with side-by-side lightmap images, not a global brightness slider guess.
+- No source, test, installer or merge changes were made for this clarification. Current candidate is still 0.21.20 on open/draft PR #5; see preceding entries for commit, CI and artifact details.
