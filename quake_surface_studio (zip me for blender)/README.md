@@ -1,4 +1,4 @@
-# SLOPGATE 0.21.18
+# SLOPGATE 0.21.21
 
 ## 0.21.18 — large-map chart sampling performance
 
