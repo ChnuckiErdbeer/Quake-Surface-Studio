@@ -355,9 +355,28 @@ def current_qss_world_chart_report(parsed, target_face_id):
         px=rect[0]+pack["gutter"]+(((ws-chart["s_min"])/16)+0.5)*pack["luxel_scale"]-0.5
         py=pack["atlas_size"]-1-(rect[1]+pack["gutter"]+(((wt-chart["t_min"])/16)+0.5)*pack["luxel_scale"]-0.5)
         pixel=[px,py]
+    member_summary = []
+    for member_id in chart["face_ids"]:
+        face = parsed["_all_faces"][int(member_id)]
+        polygon_chart = [
+            [dot(point,chart["axis_s"]),dot(point,chart["axis_t"])]
+            for point in face["polygon"]
+        ]
+        member_summary.append({
+            "face":int(member_id),"texture":face["texture"],"numedges":face["numedges"],
+            "area":face["area"],"styles":face["styles"],"lightofs":face["lightofs"],
+            "extents":face["extents"],"texinfo_vectors":face["texinfo_vectors"],
+            "polygon_world":face["polygon"],"polygon_chart":polygon_chart,
+            "topology":face["topology"],
+            "chart_bbox":[
+                min(p[0] for p in polygon_chart),max(p[0] for p in polygon_chart),
+                min(p[1] for p in polygon_chart),max(p[1] for p in polygon_chart),
+            ] if polygon_chart else None,
+        })
     return {
         "target_face":int(target_face_id),"chart_id":chart_id,"chart_face_count":len(chart["face_ids"]),
-        "chart_face_ids":chart["face_ids"],"chart_model_id":chart["model_id"],"chart_styles":chart["styles"],
+        "chart_face_ids":chart["face_ids"],"chart_members":member_summary,
+        "chart_model_id":chart["model_id"],"chart_styles":chart["styles"],
         "chart_plane_normal":chart["normal"],"chart_plane_distance":chart["distance"],
         "chart_axis_s":chart["axis_s"],"chart_axis_t":chart["axis_t"],
         "chart_world_extents":[chart["s_min"],chart["s_max"],chart["t_min"],chart["t_max"]],
