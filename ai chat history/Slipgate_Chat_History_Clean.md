@@ -22004,3 +22004,26 @@ PR #5 branch fix/0.21.17-world-aligned-lightmap-charts at pre-fix source 21344ec
 - If the same error then occurs, do not run another bake. Select e1m1 in Object Mode, click Save Lighting Diagnostics, and provide only the Non-finite luxel face/world/light matches section for the nearest lights. The decisive fields are light_node_tree (expected qss[...] for delay 0) and light_node_tree_qss_owned=True for the relevant QSS correction; if not, we know the intended correction did not install. Also inspect cycles_profile and cycles_custom_active.
 - If latest-build diagnostics confirm QSS graphs are active and the same luxel remains non-finite, move away from changing general light attenuation. Focus on the exact face 5828 corner luxel and Cycles GPU treatment; preserve rollback.
 
+
+## 2026-11-17 — Nightdive spotlight diagnostics after latest 0.21.21 test
+
+The user confirmed the repeated non-finite Cycles bake error occurred with the newer artifact 14294590886 (run 44005701116, source commit 9e72bc5...). The previous/older artifact was 14293447941. Latest-build retest therefore reproduces the failure; do not ask the user to repeat the same bake.
+
+**Bake failure mapping**
+- Blender 5.3.0; preview engine EEVEE; attempted bake Cycles GPU, 4096 samples, 2 diffuse bounces, 2048 atlas, 6437 receiver faces.
+- 165,763 sampled luxels; 1 non-finite luxel; 0 non-finite source luxels. Four adjacent atlas pixels / 12 RGB values are invalid; atlas and calibration were rolled back.
+- Bad sample maps to BSP face 5828, luxel (9,3), world Quake coordinate (-80,640,96). Nearest lights: QSS_light_405 at 64.4981 Quake units (origin -120,624,144), QSS_light_330 at 77.5629, QSS_light_404 at 80.399. Nearest-light ranking is proximity evidence, not proof that 405 alone caused the invalid value.
+
+**Nightdive-added group**
+- Six matching pale-blue lights QSS_light_403..408 are imported as SPOT: color (0.7098,0.9333,1.0), delay 0, raw value 1000 / effective imported display value 500, range 1000, spot_size 0.698132 rad (~40 degrees), spot_blend 0.
+- The QSS importer recognizes spot entities from mangle/target or spot classnames; derives direction from the entity and applies Blender light rotation; reads angle/_cone and _softangle; stores qss_quake_direction. Diagnostics supplied here do not print the actual direction vector, so correct orientation is not yet independently verified.
+
+**Critical Blender 5.3 node classification finding**
+- For all six Nightdive spotlights, diagnostics report cycles_custom_active=False, light_node_tree_qss_owned=False, cycles_profile=user_nodes_preserved_native_fallback, and a two-node Emission -> Light Output graph classified as user-custom.
+- This is not solely a blue-tint issue: an ordinary white point light QSS_light_164 is also classified user-custom. The current light_node_utils.py matcher is strict: white Emission Color, Strength 1.0, expected output target, one expected link, and no muted nodes. The diagnostics do not expose the actual Emission socket values, target, link count, or mute state, so the precise rejected condition is unknown.
+- Source: light_node_utils.py on fix/0.21.17-world-aligned-lightmap-charts; importer in addon.py around the light entity creation block.
+- Conclusion: the 0.21.21 change did not activate its intended Cycles correction on these imported light trees. This may explain why the new correction is absent, but it does not yet prove that the node-classification issue is the direct cause of the face-5828 NaN.
+
+**Next engineering step**
+- Do not request another bake yet. Improve default light-node recognition conservatively (recognize Blender-generated nodes whose settings match the Light datablock, while preserving genuinely custom graphs) and/or add detailed node signatures to diagnostics: Emission Color, Strength, output target, link count/socket names, and mute flags.
+- Keep three acceptance tracks separate: face-5828 non-finite luxel; fidelity of the six blue Nightdive spotlights; and original engine lightmap edge clipping. No claim of a fix until Blender 5.3 bake and Ironwail visual comparison are verified.
