@@ -809,6 +809,240 @@ def json_safe(value):
         return [json_safe(v) for v in value]
     return value
 
+
+def world_plane_frame(plane, side=0):
+    """Match lightmap_export.world_plane_frame for a classic Quake BSP plane."""
+    sign = -1.0 if int(side) else 1.0
+    normal = [float(plane[i]) * sign for i in range(3)]
+    distance = float(plane[3]) * sign
+    magnitude = math.sqrt(sum(value * value for value in normal))
+    if not math.isfinite(magnitude) or magnitude <= 1e-12 or not math.isfinite(distance):
+        raise ValueError("BSP plane normal and distance must be finite and non-zero")
+    normal = [value / magnitude for value in normal]
+    distance /= magnitude
+    major = max(range(3), key=lambda index: (abs(normal[index]), -index))
+    if normal[major] < 0.0:
+        normal = [-value for value in normal]
+        distance = -distance
+    axes = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    projected = []
+    for axis_index, reference in enumerate(axes):
+        projection = sum(normal[i] * reference[i] for i in range(3))
+        tangent = tuple(reference[i] - normal[i] * projection for i in range(3))
+        projected.append((sum(value * value for value in tangent), -axis_index, tangent))
+    tangent_sq, _order, tangent = max(projected, key=lambda value: (value[0], value[1]))
+    if tangent_sq <= 1e-12:
+        raise ValueError("Could not construct a stable plane tangent")
+    inv_length = 1.0 / math.sqrt(tangent_sq)
+    axis_s = tuple(value * inv_length for value in tangent)
+    axis_t = (
+        normal[1] * axis_s[2] - normal[2] * axis_s[1],
+        normal[2] * axis_s[0] - normal[0] * axis_s[2],
+        normal[0] * axis_s[1] - normal[1] * axis_s[0],
+    )
+    return {"normal": tuple(normal), "distance": distance,
+            "axis_s": axis_s, "axis_t": axis_t}
+
+
+def world_chart_diagnostic(parsed, target_face_id, target_position=TARGET,
+                            gutter=2, max_atlas_size=2048):
+    """Mirror the current QSS coplanar-chart grouping and rectangle packer."""
+    faces = parsed["_all_faces"]
+    planes = parsed["_planes"]
+    surfedges = parsed["_surfedges"]
+    records_by_face, keys, frames, edge_users = {}, {}, {}, {}
+    face_model_ids = []
+    for face in faces:
+        models = face.get("model_indices") or []
+        face_model_ids.append(int(models[0]) if models else -1)
+
+    for face in faces:
+        face_id = int(face["index"])
+        first_edge, edge_count = int(face["firstedge"]), int(face["numedges"])
+        plane_id = int(face["plane_index"])
+        if (face["lightofs"] < 0 or not face["styles"] or not face["extents"]
+                or first_edge < 0 or edge_count < 3
+                or first_edge + edge_count > len(surfedges)
+                or plane_id < 0 or plane_id >= len(planes)
+                or len(face["polygon"]) < 3):
+            continue
+        try:
+            frame = world_plane_frame(planes[plane_id], int(face["side"]))
+        except ValueError:
+            continue
+        plane_key = tuple(round(value / 1e-4) for value in (
+            *frame["normal"], frame["distance"]
+        ))
+        keys[face_id] = (
+            face_model_ids[face_id],
+            tuple(int(value) for value in face["styles"]),
+            plane_key,
+        )
+        records_by_face[face_id] = face
+        frames[face_id] = frame
+        for signed_edge in surfedges[first_edge:first_edge + edge_count]:
+            edge_id = abs(int(signed_edge))
+            edge_users.setdefault(edge_id, []).append(face_id)
+
+    parent = {face_id: face_id for face_id in records_by_face}
+
+    def find(face_id):
+        while parent[face_id] != face_id:
+            parent[face_id] = parent[parent[face_id]]
+            face_id = parent[face_id]
+        return face_id
+
+    for users in edge_users.values():
+        if len(users) == 2 and keys[users[0]] == keys[users[1]]:
+            root_a, root_b = find(users[0]), find(users[1])
+            if root_a != root_b:
+                parent[max(root_a, root_b)] = min(root_a, root_b)
+
+    components = {}
+    for face_id in records_by_face:
+        components.setdefault(find(face_id), []).append(face_id)
+
+    charts, face_to_chart = [], {}
+    for chart_index, root in enumerate(sorted(components)):
+        member_ids = sorted(components[root])
+        frame = frames[member_ids[0]]
+        projected = [
+            (dot(point, frame["axis_s"]), dot(point, frame["axis_t"]))
+            for face_id in member_ids for point in records_by_face[face_id]["polygon"]
+        ]
+        s_min = math.floor(min(point[0] for point in projected) / 16.0 + 1e-7) * 16.0
+        t_min = math.floor(min(point[1] for point in projected) / 16.0 + 1e-7) * 16.0
+        s_max = math.ceil(max(point[0] for point in projected) / 16.0 - 1e-7) * 16.0
+        t_max = math.ceil(max(point[1] for point in projected) / 16.0 - 1e-7) * 16.0
+        chart_id = len(faces) + chart_index
+        chart = {
+            "chart_id": chart_id, "face_ids": tuple(member_ids),
+            "model_id": face_model_ids[member_ids[0]],
+            "styles": tuple(int(value) for value in records_by_face[member_ids[0]]["styles"]),
+            "normal": frame["normal"], "distance": frame["distance"],
+            "axis_s": frame["axis_s"], "axis_t": frame["axis_t"],
+            "s_min": float(s_min), "t_min": float(t_min),
+            "width": int((s_max - s_min) // 16 + 1),
+            "height": int((t_max - t_min) // 16 + 1),
+        }
+        charts.append(chart)
+        for face_id in member_ids:
+            face_to_chart[face_id] = chart_id
+
+    chart_records = [
+        {"face_id": chart["chart_id"], "width": chart["width"], "height": chart["height"]}
+        for chart in charts
+    ]
+    ordered = sorted(chart_records, key=lambda item: (-item["height"], -item["width"], item["face_id"]))
+    packed_result = None
+    for scale in (2, 1):
+        for atlas_size in (512, 1024, 2048):
+            if atlas_size > int(max_atlas_size):
+                continue
+            x = y = row_h = 0
+            placements = {}
+            failed = False
+            for rec in ordered:
+                rw = rec["width"] * scale + 2 * gutter
+                rh = rec["height"] * scale + 2 * gutter
+                if rw > atlas_size or rh > atlas_size:
+                    failed = True
+                    break
+                if x + rw > atlas_size:
+                    x = 0
+                    y += row_h
+                    row_h = 0
+                if y + rh > atlas_size:
+                    failed = True
+                    break
+                placements[rec["face_id"]] = (x, y, rw, rh)
+                x += rw
+                row_h = max(row_h, rh)
+            if not failed:
+                packed_result = (atlas_size, scale, placements)
+                break
+        if packed_result is not None:
+            break
+    if packed_result is None:
+        return {"error": "QSS world-chart packer failed"}
+
+    if target_face_id not in face_to_chart:
+        return {"error": "target face is not in a classic lightmapped chart",
+                "target_face": target_face_id,
+                "chart_count": len(charts),
+                "lightmapped_face_count": len(records_by_face)}
+    chart_id = face_to_chart[target_face_id]
+    chart = next(item for item in charts if item["chart_id"] == chart_id)
+    atlas_size, scale, placements = packed_result
+    ax, ay, rw, rh = placements[chart_id]
+    position = tuple(float(value) for value in target_position)
+    world_s, world_t = dot(position, chart["axis_s"]), dot(position, chart["axis_t"])
+    luxel_s = (world_s - chart["s_min"]) / 16.0
+    luxel_t = (world_t - chart["t_min"]) / 16.0
+    origin_x, origin_y = ax + gutter, ay + gutter
+    pixel_x = origin_x + (luxel_s + 0.5) * scale - 0.5
+    pixel_top_y = origin_y + (luxel_t + 0.5) * scale - 0.5
+    pixel_y_bottom_up = atlas_size - 1.0 - pixel_top_y
+
+    target_face = records_by_face[target_face_id]
+    texinfo = target_face["texinfo_vectors"]
+    source_s = dot(position, texinfo[0][:3]) + texinfo[0][3]
+    source_t = dot(position, texinfo[1][:3]) + texinfo[1][3]
+    classic_luxel_s = (source_s - target_face["extents"]["s"][0]) / 16.0
+    classic_luxel_t = (source_t - target_face["extents"]["t"][0]) / 16.0
+
+    contributors = []
+    for face_id in chart["face_ids"]:
+        face = records_by_face[face_id]
+        tex = face["texinfo_vectors"]
+        src_s = dot(position, tex[0][:3]) + tex[0][3]
+        src_t = dot(position, tex[1][:3]) + tex[1][3]
+        src_x = (src_s - face["extents"]["s"][0]) / 16.0
+        src_y = (src_t - face["extents"]["t"][0]) / 16.0
+        width, height = face["extents"]["luxel_dimensions"]
+        if (-1e-6 <= src_x <= width - 1 + 1e-6
+                and -1e-6 <= src_y <= height - 1 + 1e-6):
+            contributors.append({
+                "face": face_id, "texture": face["texture"],
+                "source_luxel": [src_x, src_y],
+                "grid_dimensions": [width, height],
+                "polygon_distance": face["target_polygon_distance"],
+            })
+
+    member_preview = []
+    for face_id in chart["face_ids"][:100]:
+        face = records_by_face[face_id]
+        member_preview.append({
+            "face": face_id, "texture": face["texture"],
+            "dimensions": face["extents"]["luxel_dimensions"],
+            "polygon_distance_to_target": face["target_polygon_distance"],
+        })
+    return {
+        "target_face": target_face_id,
+        "chart_id": chart_id,
+        "chart_face_count": len(chart["face_ids"]),
+        "chart_face_ids_truncated": len(chart["face_ids"]) > len(member_preview),
+        "chart_face_ids_preview": member_preview,
+        "chart_dimensions": [chart["width"], chart["height"]],
+        "chart_bounds_st": [chart["s_min"], chart["s_min"] + 16 * (chart["width"] - 1),
+                            chart["t_min"], chart["t_min"] + 16 * (chart["height"] - 1)],
+        "chart_basis": {"normal": chart["normal"], "distance": chart["distance"],
+                        "axis_s": chart["axis_s"], "axis_t": chart["axis_t"]},
+        "atlas_size": atlas_size, "luxel_scale": scale, "gutter": gutter,
+        "atlas_rectangle_with_gutter": [ax, ay, rw, rh],
+        "sample_world": list(position),
+        "sample_world_chart_st": [world_s, world_t],
+        "sample_chart_luxel": [luxel_s, luxel_t],
+        "sample_original_face_luxel": [classic_luxel_s, classic_luxel_t],
+        "sample_atlas_pixel_center_bottom_up": [pixel_x, pixel_y_bottom_up],
+        "sample_atlas_pixels_floor": [math.floor(pixel_x), math.floor(pixel_y_bottom_up)],
+        "sample_contribution_count": len(contributors),
+        "sample_contributors": contributors[:20],
+        "chart_count": len(charts),
+        "lightmapped_face_count": len(records_by_face),
+    }
+
+
 def main():
     if len(sys.argv) != 5:
         raise SystemExit("usage: analyze_e1m1_bsp_pair.py ORIGINAL.bsp ORIGINAL.lit REBUILT.bsp REBUILT.lit")
@@ -830,7 +1064,7 @@ def main():
         "target_world_quake": TARGET,
         "original": {k: v for k, v in original.items() if k not in ("_all_faces", "_entities", "_worldspawn_raw", "_atlas_layout")},
         "original_lit": lit_summary(sys.argv[2], original),
-        "rebuilt": {k: v for k, v in rebuilt.items() if k not in ("_all_faces", "_entities")},
+        "rebuilt": {k: v for k, v in rebuilt.items() if k not in ("_all_faces", "_entities", "_planes", "_edges", "_surfedges")},
         "rebuilt_lit": lit_summary(sys.argv[4], rebuilt),
         "original_face_5828_matches_in_rebuild": face_matches,
         "entity_comparison": compare_entities(original, rebuilt),
