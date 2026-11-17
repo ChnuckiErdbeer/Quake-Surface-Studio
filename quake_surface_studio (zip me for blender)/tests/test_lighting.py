@@ -503,13 +503,13 @@ class CyclesNativeFallbackSourceContractTests(unittest.TestCase):
         with open(addon_path, "r", encoding="utf-8") as handle:
             source = handle.read()
         import_start = source.index("def _import_bsp_entities(")
-        import_end = source.index("\\ndef ", import_start + 5)
+        import_end = source.index("\ndef ", import_start + 5)
         importer = source[import_start:import_end]
         self.assertIn("cycles_uses_ericw_falloff_correction(delay)", importer)
         self.assertIn("allow_initial_import_tree=True", importer)
 
         update_start = source.index("def _qss_update_cycles_delay_falloff(")
-        update_end = source.index("\\ndef ", update_start + 5)
+        update_end = source.index("\ndef ", update_start + 5)
         updater = source[update_start:update_end]
         self.assertIn("allow_initial_import_tree=False", updater)
         self.assertIn("is_safe_to_replace_light_node_tree", updater)
