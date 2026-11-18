@@ -10816,9 +10816,13 @@ def _qss_map_light_updates(context, obj, source_text):
 
 def _qss_prepare_companion_map_export(context, obj, output_bsp):
     """Prepare a separate companion MAP, refusing stale or unowned overwrites."""
-    source_map = os.path.abspath(str(obj.get("qss_source_map_path", "") or ""))
-    if not source_map:
+    source_map_raw = str(obj.get("qss_source_map_path", "") or "").strip()
+    # An absent companion path means MAP synchronization is not configured.
+    # Check this before abspath(): abspath("") resolves to Blender's working
+    # directory and would otherwise be mistaken for a missing .map file.
+    if not source_map_raw:
         return None
+    source_map = os.path.abspath(source_map_raw)
     if not os.path.isfile(source_map):
         raise map_sync.MapSyncError(f"Linked companion MAP is missing: {source_map}")
     with open(source_map, "r", encoding="latin1", newline="") as handle:

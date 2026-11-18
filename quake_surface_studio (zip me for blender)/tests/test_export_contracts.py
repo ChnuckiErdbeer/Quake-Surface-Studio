@@ -48,6 +48,17 @@ class EnhancedBSPExportContractTests(unittest.TestCase):
         self.assertIn("world_chart_grid_positions(", context)
         self.assertIn("sample_rgb_from_world_chart_positions(", context)
 
+    def test_missing_companion_map_link_is_not_resolved_to_blender_working_directory(self):
+        function = _find_function(ADDON_TREE, "_qss_prepare_companion_map_export")
+        context = _source_for(function)
+
+        raw_check = 'source_map_raw = str(obj.get("qss_source_map_path", "") or "").strip()'
+        empty_return = 'if not source_map_raw:\\n        return None'
+        self.assertIn(raw_check, context)
+        self.assertIn(empty_return, repr(context))
+        self.assertLess(context.index("if not source_map_raw:"), context.index("os.path.abspath(source_map_raw)"))
+        self.assertNotIn('os.path.abspath(str(obj.get("qss_source_map_path", "") or ""))', context)
+
     def test_companion_map_preparation_and_write_errors_do_not_abort_bsp_export(self):
         operator_class = next(
             node for node in ADDON_TREE.body
