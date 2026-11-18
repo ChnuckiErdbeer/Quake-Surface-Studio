@@ -1750,3 +1750,66 @@ This is a source/CI-verified candidate, not yet a user-confirmed runtime fix. Th
 4. Run a full-map Cycles bake with all 252 lights. Confirm finite luxels and compare the bright near-wall areas against the original rerelease.
 
 Do not claim that E1M1 brightness fidelity is solved until this fresh-import runtime test passes. The classic engine lightmap edge-filtering artefact remains a separate acceptance criterion.
+
+
+## 2026-11-18 — E1M1 screenshot/diagnostics review and flat-face edge-fade investigation
+
+User added `screens and diagnostics/v.0.21.21` on the documentation branch (the actual directory name includes the leading dot after `v`). Contents:
+- `screenshots_v2.21.21.ora` — 24,305,689 bytes
+- `phonglike_lighting_example_ironwail.png` — 234,779 bytes
+- `v2.21.12_diagnostics.txt` — 972,623 bytes
+
+The GitHub file connector can read the text diagnostics and the standalone PNG (the PNG was visually inspected), but could not return the 24.3 MB binary OpenRaster file. The ORA was not inspected layer-by-layer in this session. User should attach that ORA directly in chat before any claim is made about comparing all embedded screenshot layers. Do not describe this review as a complete comparison of every screenshot.
+
+### Diagnostic findings
+
+The report is for Blender 5.3.0 and object `e1m1.bsp_QSS`.
+- Active preview mode at capture: `source`; render engine: `CYCLES`.
+- Source BSPX lump list is empty.
+- Light energy scale and source-match calibration are both 1.0.
+- Last bake completed: 165,763 sampled luxels; Cycles operator `FINISHED`; zero non-finite baked or source luxels.
+- Raw bake mean 0.3433270291; source mean 0.2947401109; final atlas mean 0.2950881173; normalization 0.8584821057; maximum sampled luxel 202.4475658.
+- GPU, 4096 samples, 2 diffuse bounces, 2048px atlas, 6,437 receiver faces; bake total 2m19.0s / Cycles operator 2m03.3s.
+- Atlas diagnostic max channel 241.6353; face coverage reports 5,531 lit and 100 dark faces out of 5,631 faces in the bake sample set.
+- Mesh metadata is healthy in this capture: all 6,605 faces have each QSS face-domain attribute; both texture and lightmap UV maps have 31,052 entries for 31,052 loops.
+- Last BSP export took 25.07s, almost all in lightmap patching, but the diagnostic does not record the exact exported path or the export format. It also does not identify whether the exported file was opened by Ironwail.
+- Preview mode `source` is significant: `_patch_lightmap_lump()` chooses the original/source lightmap when that mode is active, and the baked atlas only when mode `baked` is active. The diagnostic shows the currently selected mode, not a guaranteed snapshot of the mode at the exact time of the last export. Therefore the Ironwail image might be showing source lighting rather than the Cycles bake; this needs explicit checking.
+
+### Cycles light-node installation status
+
+The diagnostic includes 252 imported light states:
+- 232 delay-0 lights use `ericw_delay0_linear`, with `cycles_custom_active=True`, QSS-owned node graphs and empty `cycles_error`.
+- 16 delay-5 lights use `ericw_delay5_soft_inverse_square`, also active and QSS-owned with empty `cycles_error`.
+- 4 delay-3 lights use `native_fallback`, with correction inactive as expected for the current supported correction set.
+
+This confirms the earlier 0.21.23 fresh-import node-installation defect is not present in this capture. Do not attribute the current differences to missing delay-0/5 correction nodes.
+
+The final mean is within about 0.12% of the source mean, but that is only a global statistic. It does not prove that each face or each local light gradient matches. The high sampled maximum (202.45) and raw atlas maximum (241.64) remain worth inspecting spatially once the screenshot layers are available.
+
+### Visual observation from the accessible PNG
+
+The single standalone Ironwail screenshot (700x500) shows broad, smooth brightness gradients on large grey planar wall faces, with some areas appearing brighter toward the middle and darker toward adjoining vertical boundaries. This is visually reminiscent of Phong shading, but the image alone cannot establish the cause or even prove that the falloff is an unintended edge-only artifact. The other variants are inside the uninspected ORA.
+
+The current importer does not set BSP mesh polygons to smooth shading (no explicit `use_smooth` / `shade_smooth` setup was found in the import path), so this is not presently evidence of Blender smooth vertex normals. Once written to a BSP and displayed by Ironwail, the gradient must be coming from the exported lightmap samples or the engine's lightmap sampling/filtering, not Blender's viewport normal interpolation. Avoid calling it a confirmed Phong/normal bug.
+
+### Source audit relevant to edge fade
+
+Current production source branch: `fix/0.21.17-world-aligned-lightmap-charts`, head at review time: `8cd21cc144687c0808c8639c8af07962e5351162`.
+
+Relevant code:
+- `lightmap_export.py`: `world_plane_frame()`, `build_coplanar_face_charts()`, `resample_coplanar_chart_sources()`, `world_chart_pixel_coordinates()`, `sample_rgb_from_world_chart_positions()`, and `sample_classic_face_grid_from_world_chart()`.
+- `addon.py`: `_build_lightmap_atlas()` assembles world-aligned coplanar charts, maps the actual BSP face vertices into the lightmap UV atlas, runs the Cycles bake, collapses supersampled blocks, and fills atlas gutters. `_patch_lightmap_lump()` converts atlas pixels back into classic BSP face luxel grids through bilinear sampling.
+- Enhanced BSPX export uses `_build_enhanced_lightmap_payload()`, which calls `add_half_luxel_edge_padding()` and writes a `SLPG_LMPAD` marker. This half-luxel rim is not applied to the classic BSP29 fallback branch. The `AUTO` export option chooses Enhanced for upscaled lightmaps, sub-16-unit decoupled luxel spacing, or a source BSP that already contains `DECOUPLED_LM`; otherwise it selects Classic. The diagnostics do not record the final selected export mode, so the engine screenshot's precise path remains unknown.
+- Tests in `tests/test_lightmap_export.py` cover bilinear sampling, chart alignment, edge padding values and projection offsets. They are pure helper tests; they do not verify a full Blender Cycles bake of a real BSP followed by a render in Ironwail.
+
+The flat-face edge fade is therefore not yet diagnosed. Plausible areas to isolate are (1) whether the Ironwail export was made from `source` or `baked` preview mode, (2) whether Ironwail received the Classic or Enhanced BSP output, and (3) the atlas/face-boundary sampling and filtering path. The existing half-luxel support code makes the Classic-versus-Enhanced comparison particularly important, but it is not proof that this is the cause.
+
+### Next controlled comparison
+
+1. Attach `screenshots_v2.21.21.ora` directly in chat so each layer can be read and labelled variants can be compared fairly.
+2. Confirm the last export was performed while QSS preview mode was explicitly `baked`, not `source`.
+3. Export **Both** Classic and Enhanced variants from that same baked atlas; load each exact output file in Ironwail and compare the same player-start view. Keep the filenames distinct and record which one is open.
+4. Include a lightmap-only screenshot for each BSP output and a textured screenshot for each. If edge fade appears only in one format, use that to isolate export/engine filtering from the bake.
+5. Keep the light-node correction validation separate: this report already confirms the delay-0/5 nodes are installed. Do not change the falloff formulas or add another broad intensity multiplier based on the screenshot alone.
+
+No source code was changed and no new Blender runtime bake or Ironwail runtime test was performed during this review. Treat all edge-fade explanations as hypotheses until the ORA layers and exact exported BSP variants are compared.
