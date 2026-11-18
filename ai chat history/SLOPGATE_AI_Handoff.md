@@ -1893,3 +1893,76 @@ Do not conflate this visual issue with the Enhanced-export exception: the latter
 5. Report whether the planar edge fade differs between Classic and Enhanced. Do not change light falloff or apply another global brightness adjustment before this comparison.
 
 No Blender runtime export or Ironwail runtime validation was performed by the assistant during this session.
+
+
+## 2026-11-18 — full cropped JPG comparison at E1M1 info_player_start; branch inventory
+
+User added 14 cropped JPEG files to `screens and diagnostics/v.0.21.21/` on this docs branch. User confirms all screenshots are captured at the E1M1 `info_player_start` viewpoint, corresponding to the first in-game frame. The layer names were matched against the ORA `stack.xml` previously read:
+- layer0: Blender EricW/source, textured + lightmap
+- layer1: Blender Eevee preview, textured + lightmap
+- layer2: Blender Cycles preview, textured + lightmap
+- layer3: Blender Cycles bake, textured + lightmap
+- layer4: Ironwail Cycles-bake BSP, textured + lightmap
+- layer5: Ironwail Cycles-bake BSP, lightmap only
+- layer6: Ironwail EricW reference, lightmap only
+- layer7: Ironwail EricW reference, textured + lightmap
+- layer8: Ironwail fullbright/textures only
+- layer9: Blender texture-only
+- layer10: Blender Cycles preview, lightmap only
+- layer11: Blender Eevee preview, lightmap only
+- layer12: Blender EricW/source, lightmap only
+- layer13: Blender Cycles bake, lightmap only
+
+All 14 cropped JPGs were successfully opened and visually reviewed. The common player-start location is a strong comparison control; however screenshots from Blender and Ironwail use different application viewports/capture dimensions, so they are compared by corresponding surfaces/landmarks, not exact pixel registration. Their on-screen add-on label reads 0.21.21. Do not treat these images as a test of the later 0.21.24 Enhanced-export repair.
+
+### Visual findings
+
+**Textured views**
+- Blender EricW/source (layer0) appears very dark overall in this viewport.
+- Eevee preview (layer1) is visibly brighter, particularly around the inner arch and doorway side faces; it spreads a strong light contribution across nearby surfaces. This is consistent with Eevee being an approximation, not a Quake/EricW reference.
+- Cycles live preview (layer2) is notably darker than the other rendered views, with localized brightness around the inner arch but much of the corridor nearly black.
+- Blender Cycles bake (layer3) shows very bright vertical/angled regions around the inner doorway and comparatively dark foreground/floor and deeper corridor.
+- Ironwail Cycles-bake output (layer4) has more readable illumination in the deeper corridor and floor than the Blender baked viewport image. That is a real visual difference worth explaining, but screen/view-transform differences mean it cannot yet be read as a direct raw-value comparison.
+- Ironwail EricW (layer7) provides the game-engine reference; compared with layer4, the spatial distribution is not identical. The difference is local, not just a uniform gain change.
+- Fullbright (layer8) and Blender texture-only (layer9) are helpful albedo references but are not lighting comparisons.
+
+**Lightmap-only views — primary evidence**
+- Ironwail Cycles-bake lightmap (layer5) shows a broad, smoothly filtered light pool on the floor and illuminated inner-arch surfaces. The field falls off over distance; the darkest values remain on surfaces farther from the light sources.
+- Ironwail EricW reference lightmap (layer6) also shows broad smooth gradients over the floor and planar surfaces. The bright pool and falloff pattern are similar in broad structure but not identical in extent/intensity. Therefore smooth gradients across flat faces are not unique to SLOPGATE's Cycles bake.
+- Blender EricW/source lightmap (layer12) looks much more visibly patchy/blocky than its Ironwail counterpart. The likely explanation is different display/filtering of the low-resolution luxel field, including the engine's interpolation, rather than changed geometry normals.
+- Blender Eevee preview lightmap (layer11) is close to washed out in the central lit region and shows different hard/dark transition areas.
+- Blender Cycles preview lightmap (layer10) is also very bright/washed out compared with its textured counterpart. Do not assume that untextured white-surface preview values have a one-to-one visual match with the final engine's lightmap display.
+- Blender Cycles baked lightmap (layer13) contains large broad brightness regions and visible face/wire overlays. The overlays and viewport representation make it a poor standalone visual substitute for the exported Ironwail lightmap-only view, but the same broad light distribution is evident.
+
+### Updated interpretation of the alleged “Phong-like” edge fade
+
+The cropped JPGs do **not** show a clear, narrow dark halo that consistently tracks every polygon boundary. Instead, the clearest pattern is broad continuous brightness variation tied to the illuminated areas. Importantly, the Ironwail EricW lightmap-only reference (layer6) shows similar smooth gradients on flat surfaces. This means the fade is not, by itself, proof of a SLOPGATE edge bug or Phong/normal interpolation.
+
+A flat BSP face can have changing luxel values and the engine interpolates between them. This creates a smooth light gradient on a planar surface without changing its normal. The EricW layer demonstrates this kind of smooth field exists in the reference too. Current best interpretation: much of the visible effect is expected lightmap spatial variation/filtering, not geometry smoothing. A narrower fade exactly at face perimeters or an obvious dark seam remains worth testing, but it is not established by these screenshots.
+
+### Remaining lighting mismatch
+
+The screenshots suggest:
+- Eevee preview is too generous/uneven in the highlighted portal region compared with the EricW reference.
+- Cycles live preview and Cycles bake are visibly different from one another.
+- Blender baked viewport and Ironwail baked output are also visibly different; engine interpolation/display transform and export sampling remain possible causes.
+- Ironwail Cycles bake and EricW have broadly similar light-pool structure, but the local distribution differs. This agrees with diagnostics: source mean 0.2947401109 and final atlas mean 0.2950881173 are within about 0.12%, while max sampled luxel is 202.4476. Global mean calibration does not ensure local spatial match. Raw bake mean was 0.3433270291, atlas-match normalization 0.8584821057, all 165,763 samples finite, 6,437 receiver faces, 4096 samples, GPU, two diffuse bounces and 2048 atlas.
+- Source-mesh face attributes and both UV maps were populated in the diagnostic.
+- Diagnostic light states: 232 delay-0 lights and 16 delay-5 lights had active QSS Cycles correction profiles; 4 delay-3 lights used native fallback. The report's preview mode says `source`; the screenshots separately show several preview modes. Do not infer that the last export was definitely source or baked solely from that one diagnostic field.
+
+The images do not justify changing the global energy scale or falloff curves. The average already matches closely; any further global multiplier would affect all regions and likely worsen already-bright local areas. 0.21.24 Enhanced export repair has not been runtime-tested yet and concerns export correctness, not this brightness comparison.
+
+### Branch inventory / current working-branch guidance
+
+Repository currently has nine named branches:
+- `fix/0.21.17-world-aligned-lightmap-charts`: active production add-on source, currently 0.21.24, head `d27e7be286829a019badb556b6c4c30c0c4c2eb4`. This is the branch to use for the latest add-on work/installer.
+- `fix/v0.11.1-metadata-style-order-test`: current handoff/history, diagnostic and new cropped-JPG branch, head at review time `80380186b9046a7bc7f08857d5cb262cfabb284e`.
+- `main`: default branch but still add-on version 0.11.0 at review time; it is not the current production source. Do not assume downloading from default `main` gives the newest add-on.
+- `ChnuckiErdBeer-patch-1`: contains the original extracted ORA and individual extracted PNG layers.
+- `feature/0.21.11-undo-lightmap-edges`, `feature/0.21.12-coplanar-edge-preview-brightness`, `fix/0.21.15-bsp-import-array-trace`, `fix/0.21.15-classic-face-local-lightmap-alignment`, and `fix/0.21.16-coplanar-edge-luxel-stitch`: older development/experiment branches created to isolate specific features or regressions. Several are historical milestones/ancestors of the production source; others have small divergent commits and should be reviewed before deletion. Branches are lightweight reference points, not multiple installed add-ons.
+
+Practical simplification: two branches matter for current work — production source and docs/handoff. Keep historical branches until their unique commits are audited; do not delete or merge them blindly. After the user accepts 0.21.24, consider merging/synchronizing the production source into `main` so the GitHub default branch no longer advertises the old 0.11.0 snapshot.
+
+### Next useful runtime comparison
+
+After the user tests 0.21.24, export Classic and Enhanced from the same explicitly selected Baked preview, load each exact output in Ironwail, and compare with the EricW map at the same info_player_start viewpoint. This isolates the new Enhanced edge-support path from the classic fallback. Do not change light intensity before that controlled comparison.
