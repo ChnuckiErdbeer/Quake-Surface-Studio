@@ -2481,6 +2481,7 @@ def _build_enhanced_lightmap_payload(
     faces = parsed.faces()
     texinfos = parsed.texinfos()
     vertices = parsed.vertices()
+    planes = parsed.planes()
     image_size = int(image.size[0])
     image_pixels = pixels
     face_records = {}
@@ -2540,6 +2541,30 @@ def _build_enhanced_lightmap_payload(
         record = None
         poly_index = polygons_by_face.get(face_id)
         if poly_index is not None and has_attr.data[poly_index].value:
+            face_info = {
+                "world_chart": bool(face_attrs["qss_lm_world_chart"].data[poly_index].value)
+            }
+            if face_info["world_chart"]:
+                plane_id = int(face[0])
+                if plane_id < 0 or plane_id >= len(planes):
+                    raise bsp.BSPError(
+                        f"Face {face_id} has an invalid BSP plane for world-chart export."
+                    )
+                plane = planes[plane_id]
+                plane_sign = -1.0 if int(face[1]) else 1.0
+                face_info.update({
+                    "texinfo": tuple(float(value) for value in texinfos[texinfo_id][:8]),
+                    "plane_normal": tuple(float(plane[i]) * plane_sign for i in range(3)),
+                    "plane_distance": float(plane[3]) * plane_sign,
+                    "chart_axis_s": tuple(
+                        float(value) for value in face_attrs["qss_lm_chart_axis_s"].data[poly_index].vector
+                    ),
+                    "chart_axis_t": tuple(
+                        float(value) for value in face_attrs["qss_lm_chart_axis_t"].data[poly_index].vector
+                    ),
+                    "chart_s_min": float(face_attrs["qss_lm_chart_s_min"].data[poly_index].value),
+                    "chart_t_min": float(face_attrs["qss_lm_chart_t_min"].data[poly_index].value),
+                })
             stored_width = int(w_attr.data[poly_index].value)
             stored_height = int(h_attr.data[poly_index].value)
             if (stored_width, stored_height) != (base_width, base_height):
@@ -10893,7 +10918,14 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
             if not output:
                 raise OSError("Choose an output BSP filename.")
             os.makedirs(os.path.dirname(output) or os.getcwd(), exist_ok=True)
-            prepared_map = _qss_prepare_companion_map_export(context, obj, output)
+            prepared_map = None
+            map_sync_warning = ""
+            try:
+                prepared_map = _qss_prepare_companion_map_export(context, obj, output)
+            except (map_sync.MapSyncError, OSError, UnicodeError) as map_exc:
+                map_sync_warning = str(map_exc)
+                obj["qss_map_sync_status"] = "UNAVAILABLE"
+                obj["qss_map_sync_error"] = map_sync_warning
             if mode == "BOTH":
                 root, ext = os.path.splitext(output)
                 ext = ext or ".bsp"
@@ -10925,8 +10957,19 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
                 summary = f"Exported {os.path.basename(result[0])} ({mode})"
             obj["qss_last_export_path"] = chosen
             obj["qss_last_export_mode"] = mode
-            map_output_path = _qss_commit_companion_map_export(obj, prepared_map)
+            try:
+                map_output_path = _qss_commit_companion_map_export(obj, prepared_map)
+            except (map_sync.MapSyncError, OSError, UnicodeError) as map_exc:
+                map_output_path = ""
+                map_sync_warning = str(map_exc)
+                obj["qss_map_sync_status"] = "UNAVAILABLE"
+                obj["qss_map_sync_error"] = map_sync_warning
             detail = ""
+            if map_sync_warning:
+                detail += (
+                    " | Companion MAP was not updated (BSP export succeeded): "
+                    + map_sync_warning
+                )
             if map_output_path:
                 detail += (
                     f" | companion MAP {os.path.basename(map_output_path)} "

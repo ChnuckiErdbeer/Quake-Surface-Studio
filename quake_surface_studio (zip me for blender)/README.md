@@ -1,3 +1,12 @@
+# SLOPGATE 0.21.24
+
+## 0.21.24 — Repair Enhanced BSPX export and make companion MAP sync optional
+
+- Enhanced BSPX export now builds the world-chart sampling context from the current face's QSS attributes and original BSP plane/texinfo. This removes the undefined `face_info` reference that stopped Enhanced exports on world-chart faces.
+- A missing, changed, ambiguous or unwritable companion MAP is now reported as a sidecar warning. Classic/Enhanced BSP export continues; SLOPGATE still refuses to overwrite an unverified MAP.
+- Added standalone export-contract tests for world-chart metadata and non-blocking companion MAP handling.
+- CI validates Python compilation and the standalone suite. A real Blender export and Ironwail comparison are still required.
+
 # SLOPGATE 0.21.23
 
 ## 0.21.23 — Install Quake falloff correction on newly imported lights
