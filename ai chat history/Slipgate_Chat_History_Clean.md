@@ -22289,3 +22289,24 @@ Source branch `fix/0.21.17-world-aligned-lightmap-charts`, final commit `8cd21cc
 - Installer: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/44192399427/artifacts/14377536600
 
 This is not yet a proven brightness fix. Acceptance: install 0.21.23, freshly re-import original unrecompiled E1M1, confirm delay-0/5 diagnostics show `cycles_custom_active=True`, proper `ericw_delay0_linear` / `ericw_delay5_soft_inverse_square` profiles and empty `cycles_error`; switch to Cycles preview; then run a full-map bake with all lights and inspect near-wall hot spots. Eevee Realtime remains a native-falloff approximation. Keep classic engine edge filtering separate. No 0.21.23 Blender runtime test has yet been performed by the assistant.
+
+
+## 2026-11-18 — E1M1 lightmap screenshots and flat-face edge fade
+
+User added three items under `screens and diagnostics/v.0.21.21` (actual directory name: `v.0.21.21`): a 24,305,689-byte OpenRaster project, an Ironwail screenshot `phonglike_lighting_example_ironwail.png`, and a 972,623-byte text diagnostics file `v2.21.12_diagnostics.txt`. The GitHub connector allowed visual inspection of the standalone PNG and full reading of the diagnostics, but not the large binary ORA. Therefore the ORA layers and the full screenshot comparison were not completed; user needs to attach the ORA directly in chat.
+
+Diagnostics: Blender 5.3.0, `e1m1.bsp_QSS`; preview mode `source`, render engine `CYCLES`; source BSPX lumps empty. Last bake completed with 165,763 samples, `FINISHED`, zero non-finite baked/source luxels. Raw bake mean 0.3433270291; source mean 0.2947401109; final atlas mean 0.2950881173 (about 0.12% above source); max sampled luxel 202.4475658; normalization 0.8584821057. GPU, 4096 samples, 2 diffuse bounces, 2048px atlas, 6,437 receiver faces; bake 2m19.0s. Atlas max channel 241.6353; 5,531 of 5,631 sampled faces lit, 100 dark. Mesh attributes are all populated for 6,605 faces and both UV maps for 31,052 loops. The last BSP export took 25.07s, but diagnostics do not record the output path or export format.
+
+The current diagnostic lists 252 lights: 232 delay-0 with active `ericw_delay0_linear` Cycles nodes, 16 delay-5 with active `ericw_delay5_soft_inverse_square` nodes, and 4 delay-3 native fallback. All corrected nodes are QSS-owned and report empty `cycles_error`. Thus the earlier 0.21.23 node-installation failure is not present in this run. Source-matched average does not imply spatial match; the high local maximum needs visual comparison.
+
+The diagnostic says preview mode `source`. Export code uses the selected preview layer: `source` writes the original source lighting; `baked` writes the Cycles atlas. The report does not say whether mode changed before the last export, so the Ironwail screenshot may be showing source rather than baked lighting. This is an important controlled variable to verify.
+
+The visible standalone Ironwail PNG shows broad, smooth brightness variation over large planar grey wall faces. It looks somewhat Phong-like, but is not proof of a normal-shading problem. The importer does not explicitly mark BSP polygons smooth; after BSP export and rendering in Ironwail, brightness variation should be traced to lightmap samples or engine filtering, not assumed to be Blender vertex-normal smoothing.
+
+Source audit on production head `8cd21cc144687c0808c8639c8af07962e5351162`:
+- World-aligned charts are built/resampled in `lightmap_export.py`; atlas UVs, bake, gutter fill and BSP export sampling are in `addon.py`.
+- Enhanced BSPX export adds half-luxel edge padding through `add_half_luxel_edge_padding()`; classic BSP29 fallback does not use that rim.
+- AUTO selects Enhanced for upscaled or decoupled lightmaps or when source BSPX already has `DECOUPLED_LM`; otherwise it selects Classic. This diagnostic records empty source BSPX but not the actual last export mode.
+- Unit tests cover pure chart and half-luxel-padding helpers, not full Blender bake-to-Ironwail output.
+
+The edge-fade cause remains unconfirmed. Need isolate source-vs-baked preview mode, Classic-vs-Enhanced output, and atlas/face-boundary interpolation separately. Next controlled test: user attaches the ORA directly; export Both variants from the same explicitly selected `baked` atlas; load each named file in Ironwail and compare the same lightmap-only and textured view. No source code change or new Blender/Ironwail runtime test was made in this review. Do not change light-falloff formulas or apply global intensity compensation based on the current evidence alone.
