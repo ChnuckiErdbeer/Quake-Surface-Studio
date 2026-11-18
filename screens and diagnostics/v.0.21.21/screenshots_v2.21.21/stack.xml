@@ -1,0 +1,18 @@
+<image w="1875" version="0.0.1" yres="72" h="958" xres="72">
+ <stack name="root" x="0" y="0" visibility="visible" isolation="isolate" opacity="1" composite-op="svg:src-over">
+  <layer name="blender cylces_bake lightmap" x="0" src="data/layer13.png" y="0" visibility="visible" selected="true" opacity="1" composite-op="svg:src-over"/>
+  <layer name="blender ericw lightmap" x="0" src="data/layer12.png" y="0" visibility="visible" opacity="1" composite-op="svg:src-over"/>
+  <layer name="blender eevee_preview lightmap" x="0" src="data/layer11.png" y="0" visibility="visible" opacity="1" composite-op="svg:src-over"/>
+  <layer name="blender cycles_preview lightmap" x="0" src="data/layer10.png" y="0" visibility="visible" opacity="1" composite-op="svg:src-over"/>
+  <layer name="blender ericw textures" x="0" src="data/layer9.png" y="0" visibility="visible" opacity="1" composite-op="svg:src-over"/>
+  <layer name="ironwail fullbright" x="0" src="data/layer8.png" y="0" visibility="visible" opacity="1" composite-op="svg:src-over"/>
+  <layer name="ironwail ericw lightmap+textures" x="0" src="data/layer7.png" y="0" visibility="visible" opacity="1" composite-op="svg:src-over"/>
+  <layer name="ironwail ericw lightmap" x="0" src="data/layer6.png" y="0" visibility="visible" opacity="1" composite-op="svg:src-over"/>
+  <layer name="Ironwail cycles_bake lightmap" x="0" src="data/layer5.png" y="0" visibility="visible" opacity="1" composite-op="svg:src-over"/>
+  <layer name="Ironwail cycles_bake lightmap+textures" x="0" src="data/layer4.png" y="0" visibility="visible" opacity="1" composite-op="svg:src-over"/>
+  <layer name="blender cycles_bake lightmap+textures" x="0" src="data/layer3.png" y="0" visibility="visible" opacity="1" composite-op="svg:src-over"/>
+  <layer name="blender cycles_preview lightmap+texture" x="0" src="data/layer2.png" y="0" visibility="visible" opacity="1" composite-op="svg:src-over"/>
+  <layer name="blender eevee_preview lightmap+texture" x="0" src="data/layer1.png" y="0" visibility="visible" opacity="1" composite-op="svg:src-over"/>
+  <layer name="blender ericw lightmap+texture" x="0" src="data/layer0.png" y="0" visibility="visible" opacity="1" composite-op="svg:src-over"/>
+ </stack>
+</image>
