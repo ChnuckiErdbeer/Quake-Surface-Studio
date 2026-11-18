@@ -22310,3 +22310,37 @@ Source audit on production head `8cd21cc144687c0808c8639c8af07962e5351162`:
 - Unit tests cover pure chart and half-luxel-padding helpers, not full Blender bake-to-Ironwail output.
 
 The edge-fade cause remains unconfirmed. Need isolate source-vs-baked preview mode, Classic-vs-Enhanced output, and atlas/face-boundary interpolation separately. Next controlled test: user attaches the ORA directly; export Both variants from the same explicitly selected `baked` atlas; load each named file in Ironwail and compare the same lightmap-only and textured view. No source code change or new Blender/Ironwail runtime test was made in this review. Do not change light-falloff formulas or apply global intensity compensation based on the current evidence alone.
+
+
+## 2026-11-18 — User-reported Enhanced export and companion MAP failures; SLOPGATE 0.21.24
+
+User reported export messages:
+- `Linked companion MAP is missing: /app/blender`
+- Enhanced export failed with `name 'face_info' is not defined`.
+
+Root causes confirmed in source:
+1. `_qss_prepare_companion_map_export()` called `os.path.abspath("")` for an empty `qss_source_map_path`; that resolved to Blender's working directory `/app/blender`, which was then mistaken for a missing MAP.
+2. `_build_enhanced_lightmap_payload()` referenced `face_info` in its world-chart sampling path without defining that local variable.
+
+Production branch `fix/0.21.17-world-aligned-lightmap-charts` updated to SLOPGATE 0.21.24, final commit `d27e7be286829a019badb556b6c4c30c0c4c2eb4`.
+
+Changes:
+- Enhanced export constructs `face_info` per face from QSS face attributes and source BSP texinfo/plane, including world-chart flag, oriented plane, chart S/T axes and chart origin. This supports the subsequent classic luxel-grid-to-world-chart sampling.
+- Missing/stale/unreadable/ambiguous/unwritable companion MAP is now a non-blocking sidecar condition: BSP export proceeds, MAP condition is reported as a warning, and verified-overwrite safeguards remain.
+- Empty/unconfigured companion MAP is checked before `os.path.abspath()` and returns None, so it cannot become `/app/blender`.
+- Added `tests/test_export_contracts.py` for face_info initialization, MAP error isolation and empty MAP path handling.
+- Add-on version and README bumped to 0.21.24.
+
+CI run `44232978822` succeeded on exact commit `d27e7be286829a019badb556b6c4c30c0c4c2eb4`: compilation passed; **317 tests passed**; Blender add-on artifact packaged successfully. Artifact `Quake-Surface-Studio-v0.21.24-Blender-Install`, ID `14396470461`, 319,967 bytes, SHA-256 `8a4c4dec82249f9382d5dddbc9bbe2b430144f39f2ecd88a80aebdb2bf30ab8b`. Links:
+- Run: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/44232978822
+- Installer: https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/44232978822/artifacts/14396470461
+
+This is CI/source validation only. No Blender runtime Enhanced export or Ironwail load was performed.
+
+### Extracted ORA assets discovered
+
+The extracted screenshot layer directory is on branch `ChnuckiErdBeer-patch-1`, commit `f78d9e9c6f788bd634a5119c1be2caf0e842e60a`, not the documentation branch. Its `stack.xml` identifies 14 layers, including Blender Ericw/Eevee/Cycles preview/Cycles bake, Ironwail Ericw/Cycles bake and fullbright variants. Direct inspection was possible for layer5 (Ironwail Cycles-bake lightmap only), layer11 (Blender Eevee-preview lightmap only), layer12 (Blender Ericw lightmap only), the thumbnail and standalone Ironwail example. Most other PNGs are too large for the GitHub connector's binary-image response limit; notably layers 0, 2, 3, 4, 6, 10 and 13 are identified by label but their pixels have not been reviewed.
+
+Visible images show broad continuous brightness changes on planar faces. This is not sufficient to diagnose Phong shading: flat faces legitimately carry varying lightmap values, and the engine interpolates those samples. The lightmap-only Ironwail capture contains the gradient, which points toward baked/exported luxels and/or engine lightmap interpolation, not texture or vertex-normal shading. The accessible Eevee and Ericw previews differ noticeably in brightness distribution; Eevee is only an approximation. Full layer-by-layer comparison remains incomplete until the larger PNGs are attached directly to chat. The exact flat-face edge-fade cause is still open.
+
+Next user test on 0.21.24: install the artifact, run Enhanced export with no companion MAP linked, verify no `/app/blender` message and no `face_info` exception, load the exact Enhanced BSP in Ironwail, then compare Enhanced and Classic exported from the same explicitly selected `baked` preview. Check whether the fade differs. Do not change falloff or global intensity until that is known.
