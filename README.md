@@ -1,11 +1,13 @@
-# Quake-Surface-Studio
+# SLOPGATE
 
 ## Current development build
 
-SLOPGATE **0.21.16** — BSP29-only development build.
+SLOPGATE **0.21.21** — BSP29 lighting investigation build.
 
-Classic BSP29 export now reconciles matching lightmap samples only along shared coplanar BSP edges, and only when both faces belong to the same model, use identical light styles, and their classic 16-unit luxel grids intersect at the same world-space positions. Non-coplanar joins, differently styled surfaces, unaligned grids, corners and face interiors are left unchanged. Both RGB QLIT and monochrome classic fallback samples are updated.
+This candidate fixes Blender 5.3 light-node handling. Blender creates a default light-node setup automatically, and SLOPGATE previously treated that untouched setup as if the user had customized it. It therefore skipped installing the Quake-style Cycles falloff correction, leaving delay-0 and delay-5 lights much brighter near their sources than ericw's intended curves.
 
-The detached-face local-texture export correction from 0.21.15 is retained. The earlier 0.21.13 half-luxel rim remains limited to Enhanced BSPX DECOUPLED_LM; it does not change the classic BSP29 fallback.
+SLOPGATE now recognizes only Blender's untouched default light graph as safe to replace. It installs the Quake delay-0 linear and delay-5 soft inverse-square corrections, while preserving genuinely customized light-node graphs. The distance calculation also uses a guarded reciprocal and bounded values to avoid invalid math at extreme distances.
 
-Python tests and package assembly are checked in GitHub Actions. Blender 5.3 export/bake and Ironwail/Quake rerelease comparisons are not claimed as runtime-tested until performed.
+The e1m1 one-luxel bake failure is **not yet confirmed fixed**. This candidate is the first one intended to exercise the actual Quake Cycles falloff graphs on Blender 5.3; the earlier 0.21.20 native-falloff test did not isolate the graph behavior for already-imported lights. We still need a Blender 5.3 runtime bake to confirm the result.
+
+The world-aligned coplanar lightmap charts, detached-face local-texture export correction, classic BSP29 seam handling, HDR calibration and large-map sampling improvements are retained. Automated tests and package assembly run in GitHub Actions; CI does not replace Blender 5.3 bake or Ironwail runtime testing.

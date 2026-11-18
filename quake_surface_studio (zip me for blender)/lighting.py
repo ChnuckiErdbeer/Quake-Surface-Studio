@@ -206,6 +206,18 @@ def ericw_light_value(light_value: float, delay: int, distance: float,
     return min(0.0, light + value)
 
 
+def cycles_uses_ericw_falloff_correction(delay: int) -> bool:
+    """Return whether Cycles applies the exact Quake attenuation correction.
+
+    ericw delay 0 (linear) and delay 5 (soft inverse-square) have dedicated
+    Cycles node graphs. Other Quake delay types retain their native fallback.
+    """
+    try:
+        return int(delay) in {0, 5}
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def ericw_cycles_light_falloff_correction(
     delay: int,
     distance: float,
@@ -221,9 +233,9 @@ def ericw_cycles_light_falloff_correction(
       * delay 0: the midpoint of its finite linear radius (energy = I*R^2/8)
       * delay 5: the ericw 128/(wait*world_dist) reference distance (energy = I*R^2/4)
 
-    Cycles' Light Falloff node exposes both 1/d and 1/d^2. Their ratio recovers
-    distance, allowing the light shader to multiply the native inverse-square
-    result by this correction. Distances and radius are in Quake map units.
+    Cycles' Light Falloff node exposes a Linear (1/d) output. The node graph
+    takes its reciprocal with a safe floor, avoiding an Inf/Inf distance
+    calculation at the light origin. Distances and radius are in Quake map units.
     The return value is a dimensionless multiplier; other delays are unchanged.
     """
     import math
@@ -281,6 +293,40 @@ def ericw_surface_angle(normal_dot_to_light: float, anglescale: float = 0.5,
         return 0.0
     scale = max(0.0, min(1.0, float(anglescale)))
     return max(0.0, (1.0 - scale) + scale * dot)
+
+
+# Cycles' spot-light kernel computes 1 / ((1 - cos(angle / 2)) * blend).
+# An exact zero therefore creates an infinite intermediate, which can turn a
+# luxel sampled on the cone boundary into NaN. Keep the transition confined to
+# the outermost 1% of a hard Quake cone instead of using Blender's much softer
+# 1.0 compatibility workaround.
+CYCLES_MIN_SPOT_BLEND = 0.01
+
+
+def blender_spot_blend_from_ericw_angles(outer_angle: float, inner_angle: float) -> float:
+    """Map ericw's inner-cone angle to a Cycles-safe Blender spot blend.
+
+    ericw uses _softangle=0 for a hard cone. Blender's exact hard edge is
+    represented by spot_blend=0, but Cycles divides by this value while
+    preparing a spotlight. The small positive floor avoids that singularity;
+    at the default 40-degree cone it affects only a very narrow rim. Explicit
+    positive _softangle values retain their proportional mapping.
+    """
+    import math
+    try:
+        outer = float(outer_angle)
+        inner = float(inner_angle)
+    except (TypeError, ValueError):
+        return CYCLES_MIN_SPOT_BLEND
+    if not math.isfinite(outer):
+        outer = 40.0
+    if not math.isfinite(inner):
+        inner = 0.0
+    outer = max(0.1, min(179.9, outer))
+    inner = max(0.0, min(outer, inner))
+    if inner <= 0.0:
+        return CYCLES_MIN_SPOT_BLEND
+    return max(CYCLES_MIN_SPOT_BLEND, min(1.0, 1.0 - inner / outer))
 
 
 def ericw_spot_factor(dot_light_to_sample: float, outer_angle: float = 40.0,

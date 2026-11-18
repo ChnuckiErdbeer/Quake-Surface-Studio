@@ -1,4 +1,52 @@
-# SLOPGATE 0.21.16
+# SLOPGATE 0.21.24
+
+## 0.21.24 — Repair Enhanced BSPX export and make companion MAP sync optional
+
+- Enhanced BSPX export now builds the world-chart sampling context from the current face's QSS attributes and original BSP plane/texinfo. This removes the undefined `face_info` reference that stopped Enhanced exports on world-chart faces.
+- A missing, changed, ambiguous or unwritable companion MAP is now reported as a sidecar warning. Classic/Enhanced BSP export continues; SLOPGATE still refuses to overwrite an unverified MAP.
+- Added standalone export-contract tests for world-chart metadata and non-blocking companion MAP handling.
+- CI validates Python compilation and the standalone suite. A real Blender export and Ironwail comparison are still required.
+
+# SLOPGATE 0.21.23
+
+## 0.21.23 — Install Quake falloff correction on newly imported lights
+
+- Freshly imported QSS light datablocks now receive the Cycles Quake falloff graph for ericw delay 0 (linear) and delay 5 (soft inverse-square), even when Blender's generated starter node tree does not match the strict existing default-tree classifier.
+- The one-time permission to replace Blender's starter nodes applies only during the import operation that created the light. Later updates still require a QSS-owned graph or a recognized untouched Blender default, preserving genuinely user-edited light-node trees.
+- Diagnostics now report the reason a Quake falloff graph could not be installed.
+- The lighting-mode descriptions distinguish the fast Eevee approximation from the slower Cycles preview, which can use the Quake delay-0/5 corrections.
+- Fresh import, full-map Cycles bake and brightness comparison on the original rerelease E1M1 are still required before declaring falloff fidelity fixed.
+
+# SLOPGATE 0.21.22
+
+## 0.21.22 — Cycles-safe Quake spotlight edges
+
+- Quake spotlights with a zero `_softangle` now use a 0.01 Blender Spot Blend floor instead of an exact zero. This keeps Cycles' spotlight preparation finite while confining the fade to a very narrow edge band.
+- Explicit positive `_softangle` values retain their proportional mapping, subject only to the same non-zero safety floor.
+- The Quake reference cone calculation remains hard-edged; the floor is only the narrow Blender/Cycles representation used for imported spotlights.
+- This is a source-level correction with unit-test coverage. A fresh-import, full-map Blender 5.3 bake and in-game comparison are still required before calling the regression closed.
+
+# SLOPGATE 0.21.21
+
+## 0.21.18 — large-map chart sampling performance
+
+- Cache source BSP face, plane, edge, vertex, texinfo and resolved light-style metadata once per bake/diagnostic pass. Avoids rebuilding full-map arrays and resolving all face styles for every single face, which caused near-quadratic work on large maps.
+- Reuse the same parsed source cache for post-Cycles luxel statistics, face-coverage validation and source-lightmap comparison.
+- Reuse the same precomputed face metadata in the Quake direct-light bake path.
+- Add an affine world-chart sampling fast path: solve a face's texinfo/plane mapping once, then step pixel coordinates across its classic luxel grid without allocating an XYZ tuple for every sample.
+- Add regression coverage comparing the affine sampler with the previous XYZ reference sampler.
+- This is a performance correction; Blender 5.3 and Ironwail runtime validation remain required. The residual edge artefact is not yet claimed fixed.
+
+## 0.21.17 — world-aligned coplanar lightmap charts
+
+- Connected coplanar BSP29 faces with matching model ownership and resolved light styles share a deterministic world-plane luxel lattice for the Blender lightmap atlas.
+- Cycles UV assignment now maps face vertices into shared chart coordinates rather than restarting the texinfo-derived lightmap grid independently on each face.
+- Original per-face BSP29 texture projections and sample extents are retained; classic export samples those required face-local grids from the shared chart, so no nonstandard BSP29 fields are introduced.
+- Quake direct-light baking and Enhanced BSPX export read chart-space pixels. Partial bake scopes expand to all faces belonging to a shared chart.
+- Faces that are not eligible for a shared classic chart retain the existing independent atlas path.
+- Automated tests and Blender 5.3 / Ironwail runtime validation are required before the edge artefact can be declared fixed.
+
+## 0.21.16 — coplanar BSP lightmap edge reconciliation
 
 ## 0.21.16 — coplanar BSP lightmap edge reconciliation
 

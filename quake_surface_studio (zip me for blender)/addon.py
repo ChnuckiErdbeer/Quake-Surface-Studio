@@ -25,11 +25,11 @@ from bpy.props import StringProperty, FloatProperty, FloatVectorProperty, BoolPr
 from bpy.types import Operator, Panel, Menu
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
-from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_export as lightmap_export_utils, map_sync, surface_policy
+from . import bsp, color, lighting as lighting_utils, light_node_utils, material_utils, lightmap_export as lightmap_export_utils, map_sync, surface_policy
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils, image_undo
 
 
-ADDON_VERSION = (0, 21, 16)
+ADDON_VERSION = (0, 21, 21)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -2106,6 +2106,9 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
             'samples': combined_mono,
             'samples_rgb': combined_rgb,
             'decoupled_lmvecs': lmvecs,
+            'positions': tuple(tuple(float(value) for value in point) for point in positions_lookup[face_id]),
+            'texinfo': tuple(float(value) for value in texinfos[texinfo_id][:8]),
+            'styles': tuple(int(value) for value in active_styles),
         })
 
     # Diagnose colour/brightness after summing every active face style.
@@ -2133,7 +2136,46 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
 
     resolution = material_utils.validate_lightmap_resolution(resolution)
     max_base_size = material_utils.MAX_LIGHTMAP_IMAGE_SIZE // resolution
-    packed = _pack_lightmap_rectangles(records, max_atlas_size=max_base_size)
+
+    # A classic face's local texinfo projection is retained for BSP29 export,
+    # but connected coplanar faces share one deterministic world-plane chart
+    # while Blender rasterizes and bakes the lightmap atlas.
+    classic_records = [rec for rec in records if rec['decoupled_lmvecs'] is None]
+    decoupled_records = [rec for rec in records if rec['decoupled_lmvecs'] is not None]
+    try:
+        charts, face_to_chart, chart_face_records = lightmap_export_utils.build_coplanar_face_charts(
+            classic_records, faces, parsed.planes(), parsed.edges(), parsed.surfedges(),
+            parsed.face_model_ids(),
+        )
+        chart_pack_records = []
+        chart_by_id = {}
+        for chart in charts:
+            chart_samples, chart_valid = lightmap_export_utils.resample_coplanar_chart_sources(
+                chart, chart_face_records
+            )
+            chart_record = {
+                'face_id': chart['chart_id'],
+                'width': chart['width'],
+                'height': chart['height'],
+                'samples_rgb': chart_samples,
+                'valid': chart_valid,
+                'world_chart': chart,
+            }
+            chart_pack_records.append(chart_record)
+            chart_by_id[chart['chart_id']] = chart_record
+    except (KeyError, TypeError, ValueError) as exc:
+        raise bsp.BSPError(f"Could not construct world-aligned lightmap charts: {exc}") from exc
+
+    pack_records = list(chart_pack_records)
+    pack_records.extend({
+        'face_id': rec['face_id'],
+        'width': rec['width'],
+        'height': rec['height'],
+        'samples_rgb': rec['samples_rgb'],
+        'valid': None,
+        'world_chart': None,
+    } for rec in decoupled_records)
+    packed = _pack_lightmap_rectangles(pack_records, max_atlas_size=max_base_size)
     if packed is None:
         obj['qss_lightmap_image_name'] = ''
         obj['qss_lightmap_faces'] = 0
@@ -2144,14 +2186,18 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
     image_size = material_utils.lightmap_resolution_dimensions(atlas_size, resolution)
     rgba = array.array('f', [1.0]) * (image_size * image_size * 4)  # white = unlightmapped
     record_by_face = {r['face_id']: r for r in records}
-    for rec in records:
-        x0, y0 = placements[rec['face_id']]
-        x0 = (x0 + gutter) * resolution
-        y0 = (y0 + gutter) * resolution
-        effective_scale = scale * resolution
-        for sy in range(rec['height']):
-            for sx in range(rec['width']):
-                sample_rgb = rec['samples_rgb'][sy * rec['width'] + sx]
+    effective_scale = scale * resolution
+
+    def _write_chart_record(pack_record):
+        ax, ay = placements[pack_record['face_id']]
+        x0, y0 = (ax + gutter) * resolution, (ay + gutter) * resolution
+        valid = pack_record['valid']
+        for sy in range(pack_record['height']):
+            for sx in range(pack_record['width']):
+                sample_index = sy * pack_record['width'] + sx
+                if valid is not None and not valid[sample_index]:
+                    continue
+                sample_rgb = pack_record['samples_rgb'][sample_index]
                 values = tuple(channel / 255.0 for channel in sample_rgb)
                 for dy in range(effective_scale):
                     top_y = y0 + sy * effective_scale + dy
@@ -2159,17 +2205,25 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
                     for dx in range(effective_scale):
                         px = x0 + sx * effective_scale + dx
                         index = (bottom_y * image_size + px) * 4
-                        rgba[index] = values[0]
-                        rgba[index + 1] = values[1]
-                        rgba[index + 2] = values[2]
-                        rgba[index + 3] = 1.0
+                        rgba[index:index + 4] = array.array('f', (*values, 1.0))
 
+    for chart_record in chart_pack_records:
+        _write_chart_record(chart_record)
+    for face_record in decoupled_records:
+        _write_chart_record({
+            'face_id': face_record['face_id'],
+            'width': face_record['width'],
+            'height': face_record['height'],
+            'samples_rgb': face_record['samples_rgb'],
+            'valid': None,
+        })
+
+    # Reserve/dilate once per shared chart, not once per member face.
     core_rectangles = []
-    effective_scale = scale * resolution
-    for rec in records:
-        ax, ay = placements[rec['face_id']]
-        core_width = rec['width'] * effective_scale
-        core_height = rec['height'] * effective_scale
+    for pack_record in pack_records:
+        ax, ay = placements[pack_record['face_id']]
+        core_width = pack_record['width'] * effective_scale
+        core_height = pack_record['height'] * effective_scale
         core_x = (ax + gutter) * resolution
         core_top_y = (ay + gutter) * resolution
         core_bottom_y = image_size - core_top_y - core_height
@@ -2198,11 +2252,28 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
     # Create the independent lightmap UV layer and face-domain export metadata.
     lm_uv = mesh.uv_layers.new(name='Quake_Lightmap_UV')
     white_uv = (0.5 / atlas_size, 1.0 - 0.5 / atlas_size)
+    # Remove previous chart attributes when rebuilding the atlas in-place.
+    chart_attribute_names = (
+        'qss_lm_world_chart', 'qss_lm_chart_s_min', 'qss_lm_chart_t_min',
+        'qss_lm_chart_axis_s', 'qss_lm_chart_axis_t',
+        'qss_lm_chart_width', 'qss_lm_chart_height',
+    )
+    for attribute_name in chart_attribute_names:
+        old_attribute = mesh.attributes.get(attribute_name)
+        if old_attribute is not None:
+            mesh.attributes.remove(old_attribute)
     has_attr = mesh.attributes.new(name='qss_lm_has_data', type='BOOLEAN', domain='FACE')
     x_attr = mesh.attributes.new(name='qss_lm_atlas_x', type='INT', domain='FACE')
     y_attr = mesh.attributes.new(name='qss_lm_atlas_y', type='INT', domain='FACE')
     w_attr = mesh.attributes.new(name='qss_lm_sample_w', type='INT', domain='FACE')
     h_attr = mesh.attributes.new(name='qss_lm_sample_h', type='INT', domain='FACE')
+    world_chart_attr = mesh.attributes.new(name='qss_lm_world_chart', type='BOOLEAN', domain='FACE')
+    chart_s_min_attr = mesh.attributes.new(name='qss_lm_chart_s_min', type='FLOAT', domain='FACE')
+    chart_t_min_attr = mesh.attributes.new(name='qss_lm_chart_t_min', type='FLOAT', domain='FACE')
+    chart_axis_s_attr = mesh.attributes.new(name='qss_lm_chart_axis_s', type='FLOAT_VECTOR', domain='FACE')
+    chart_axis_t_attr = mesh.attributes.new(name='qss_lm_chart_axis_t', type='FLOAT_VECTOR', domain='FACE')
+    chart_width_attr = mesh.attributes.new(name='qss_lm_chart_width', type='INT', domain='FACE')
+    chart_height_attr = mesh.attributes.new(name='qss_lm_chart_height', type='INT', domain='FACE')
     for poly_index, poly in enumerate(mesh.polygons):
         face_id = face_ids[poly_index]
         rec = record_by_face.get(face_id)
@@ -2211,40 +2282,76 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
         # Blender operators or if a future importer inserts non-face geometry.
         loop_indices = tuple(poly.loop_indices)
         if rec:
-            ax, ay = placements[face_id]
-            has_attr.data[poly_index].value = True
-            x_attr.data[poly_index].value = ax
-            y_attr.data[poly_index].value = ay
-            w_attr.data[poly_index].value = rec['width']
-            h_attr.data[poly_index].value = rec['height']
+            chart_id = face_to_chart.get(face_id)
+            if chart_id is not None:
+                chart = chart_by_id[chart_id]['world_chart']
+                ax, ay = placements[chart_id]
+                has_attr.data[poly_index].value = True
+                x_attr.data[poly_index].value = ax
+                y_attr.data[poly_index].value = ay
+                w_attr.data[poly_index].value = rec['width']
+                h_attr.data[poly_index].value = rec['height']
+                world_chart_attr.data[poly_index].value = True
+                chart_s_min_attr.data[poly_index].value = chart['s_min']
+                chart_t_min_attr.data[poly_index].value = chart['t_min']
+                chart_axis_s_attr.data[poly_index].vector = chart['axis_s']
+                chart_axis_t_attr.data[poly_index].vector = chart['axis_t']
+                chart_width_attr.data[poly_index].value = chart['width']
+                chart_height_attr.data[poly_index].value = chart['height']
+            else:
+                ax, ay = placements[face_id]
+                has_attr.data[poly_index].value = True
+                x_attr.data[poly_index].value = ax
+                y_attr.data[poly_index].value = ay
+                w_attr.data[poly_index].value = rec['width']
+                h_attr.data[poly_index].value = rec['height']
+                world_chart_attr.data[poly_index].value = False
+                chart_s_min_attr.data[poly_index].value = 0.0
+                chart_t_min_attr.data[poly_index].value = 0.0
+                chart_axis_s_attr.data[poly_index].vector = (1.0, 0.0, 0.0)
+                chart_axis_t_attr.data[poly_index].vector = (0.0, 1.0, 0.0)
+                chart_width_attr.data[poly_index].value = rec['width']
+                chart_height_attr.data[poly_index].value = rec['height']
             positions = positions_by_face[poly_index]
-            texinfo = texinfos[rec['texinfo_id']]
             if len(loop_indices) != len(positions):
                 raise bsp.BSPError(
                     f"Face {face_id} has {len(loop_indices)} Blender loops but {len(positions)} source vertices."
                 )
             for local_index, loop_index in enumerate(loop_indices):
                 p = positions[local_index]
-                if rec.get('decoupled_lmvecs') is not None:
+                if chart_id is not None:
+                    world_s = sum(p[i] * chart['axis_s'][i] for i in range(3))
+                    world_t = sum(p[i] * chart['axis_t'][i] for i in range(3))
+                    pixel_x, pixel_y = lightmap_export_utils.world_chart_pixel_coordinates(
+                        world_s, world_t, ax, ay, chart['s_min'], chart['t_min'],
+                        gutter, scale, resolution, image_size,
+                    )
+                    lm_uv.data[loop_index].uv = (
+                        (pixel_x + 0.5) / image_size,
+                        (pixel_y + 0.5) / image_size,
+                    )
+                else:
                     lmvecs = rec['decoupled_lmvecs']
                     lm_s = p[0] * lmvecs[0] + p[1] * lmvecs[1] + p[2] * lmvecs[2] + lmvecs[3]
                     lm_t = p[0] * lmvecs[4] + p[1] * lmvecs[5] + p[2] * lmvecs[6] + lmvecs[7]
                     lm_s = min(max(lm_s, 0.0), rec['width'] - 1.0)
                     lm_t = min(max(lm_t, 0.0), rec['height'] - 1.0)
-                else:
-                    s = p[0] * texinfo[0] + p[1] * texinfo[1] + p[2] * texinfo[2] + texinfo[3]
-                    t = p[0] * texinfo[4] + p[1] * texinfo[5] + p[2] * texinfo[6] + texinfo[7]
-                    lm_s = (s - rec['s_min']) / 16.0
-                    lm_t = (t - rec['t_min']) / 16.0
-                pixel_x = ax + gutter + (lm_s + 0.5) * scale
-                pixel_y = ay + gutter + (lm_t + 0.5) * scale
-                lm_uv.data[loop_index].uv = (pixel_x / atlas_size, 1.0 - pixel_y / atlas_size)
+                    pixel_x = (ax + gutter) * resolution + (lm_s + 0.5) * scale * resolution
+                    pixel_y = (ay + gutter) * resolution + (lm_t + 0.5) * scale * resolution
+                    lm_uv.data[loop_index].uv = (pixel_x / image_size, 1.0 - pixel_y / image_size)
         else:
             has_attr.data[poly_index].value = False
             x_attr.data[poly_index].value = 0
             y_attr.data[poly_index].value = 0
             w_attr.data[poly_index].value = 0
             h_attr.data[poly_index].value = 0
+            world_chart_attr.data[poly_index].value = False
+            chart_s_min_attr.data[poly_index].value = 0.0
+            chart_t_min_attr.data[poly_index].value = 0.0
+            chart_axis_s_attr.data[poly_index].vector = (1.0, 0.0, 0.0)
+            chart_axis_t_attr.data[poly_index].vector = (0.0, 1.0, 0.0)
+            chart_width_attr.data[poly_index].value = 0
+            chart_height_attr.data[poly_index].value = 0
             for loop_index in loop_indices:
                 lm_uv.data[loop_index].uv = white_uv
 
@@ -2268,6 +2375,8 @@ def _build_lightmap_atlas(obj, mesh, parsed, face_ids, texinfo_ids, positions_by
     obj['qss_lightmap_scale'] = scale
     obj['qss_lightmap_resolution'] = resolution
     obj['qss_lightmap_gutter'] = gutter
+    obj['qss_lightmap_chart_version'] = 1
+    obj['qss_lightmap_world_chart_count'] = int(len(charts))
     # Keep a packed immutable source snapshot so a bake or paint session can
     # always be reset to the exact imported BSP lightmaps.
     original_backup = _make_image_snapshot(image, 'QSS_OriginalBSP')
@@ -2372,6 +2481,7 @@ def _build_enhanced_lightmap_payload(
     faces = parsed.faces()
     texinfos = parsed.texinfos()
     vertices = parsed.vertices()
+    planes = parsed.planes()
     image_size = int(image.size[0])
     image_pixels = pixels
     face_records = {}
@@ -2431,6 +2541,30 @@ def _build_enhanced_lightmap_payload(
         record = None
         poly_index = polygons_by_face.get(face_id)
         if poly_index is not None and has_attr.data[poly_index].value:
+            face_info = {
+                "world_chart": bool(face_attrs["qss_lm_world_chart"].data[poly_index].value)
+            }
+            if face_info["world_chart"]:
+                plane_id = int(face[0])
+                if plane_id < 0 or plane_id >= len(planes):
+                    raise bsp.BSPError(
+                        f"Face {face_id} has an invalid BSP plane for world-chart export."
+                    )
+                plane = planes[plane_id]
+                plane_sign = -1.0 if int(face[1]) else 1.0
+                face_info.update({
+                    "texinfo": tuple(float(value) for value in texinfos[texinfo_id][:8]),
+                    "plane_normal": tuple(float(plane[i]) * plane_sign for i in range(3)),
+                    "plane_distance": float(plane[3]) * plane_sign,
+                    "chart_axis_s": tuple(
+                        float(value) for value in face_attrs["qss_lm_chart_axis_s"].data[poly_index].vector
+                    ),
+                    "chart_axis_t": tuple(
+                        float(value) for value in face_attrs["qss_lm_chart_axis_t"].data[poly_index].vector
+                    ),
+                    "chart_s_min": float(face_attrs["qss_lm_chart_s_min"].data[poly_index].value),
+                    "chart_t_min": float(face_attrs["qss_lm_chart_t_min"].data[poly_index].value),
+                })
             stored_width = int(w_attr.data[poly_index].value)
             stored_height = int(h_attr.data[poly_index].value)
             if (stored_width, stored_height) != (base_width, base_height):
@@ -2482,15 +2616,32 @@ def _build_enhanced_lightmap_payload(
                     shift, s_min, t_min, width, height = lightmap_export_utils.choose_luxel_grid(
                         s_values, t_values, resolution
                     )
-                    rgb_samples = lightmap_export_utils.sample_face_rgb_from_atlas(
-                        image_pixels, image_size, resolution,
-                        int(x_attr.data[poly_index].value),
-                        int(y_attr.data[poly_index].value),
-                        int(base_gutter), int(base_pixel_scale),
-                        int(base_s_min), int(base_t_min),
-                        int(s_min), int(t_min), int(width), int(height),
-                        1 << shift,
-                    )
+                    if bool(face_info.get('world_chart', False)):
+                        sample_s = [float(s_min) + sx * float(1 << shift) for sx in range(width)]
+                        sample_t = [float(t_min) + sy * float(1 << shift) for sy in range(height)]
+                        sample_positions = lightmap_export_utils.world_chart_grid_positions(
+                            face_info['texinfo'], face_info['plane_normal'],
+                            face_info['plane_distance'], sample_s, sample_t,
+                        )
+                        rgb_samples = lightmap_export_utils.sample_rgb_from_world_chart_positions(
+                            image_pixels, image_size, resolution,
+                            int(x_attr.data[poly_index].value),
+                            int(y_attr.data[poly_index].value),
+                            int(base_gutter), int(base_pixel_scale),
+                            sample_positions, face_info['chart_axis_s'],
+                            face_info['chart_axis_t'], face_info['chart_s_min'],
+                            face_info['chart_t_min'],
+                        )
+                    else:
+                        rgb_samples = lightmap_export_utils.sample_face_rgb_from_atlas(
+                            image_pixels, image_size, resolution,
+                            int(x_attr.data[poly_index].value),
+                            int(y_attr.data[poly_index].value),
+                            int(base_gutter), int(base_pixel_scale),
+                            int(base_s_min), int(base_t_min),
+                            int(s_min), int(t_min), int(width), int(height),
+                            1 << shift,
+                        )
                     record = {
                         'shift': shift,
                         'width': width,
@@ -2738,7 +2889,9 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None, ou
     mesh = obj.data
     face_attrs = _qss_validate_face_domain_attributes(
         mesh, ('qss_bsp_face_id', 'qss_lm_has_data', 'qss_lm_atlas_x',
-               'qss_lm_atlas_y', 'qss_lm_sample_w', 'qss_lm_sample_h'),
+               'qss_lm_atlas_y', 'qss_lm_sample_w', 'qss_lm_sample_h',
+               'qss_lm_world_chart', 'qss_lm_chart_s_min', 'qss_lm_chart_t_min',
+               'qss_lm_chart_axis_s', 'qss_lm_chart_axis_t'),
         'export the lightmap'
     )
     face_attr = face_attrs['qss_bsp_face_id']
@@ -2747,6 +2900,11 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None, ou
     y_attr = face_attrs['qss_lm_atlas_y']
     w_attr = face_attrs['qss_lm_sample_w']
     h_attr = face_attrs['qss_lm_sample_h']
+    world_chart_attr = face_attrs['qss_lm_world_chart']
+    chart_s_min_attr = face_attrs['qss_lm_chart_s_min']
+    chart_t_min_attr = face_attrs['qss_lm_chart_t_min']
+    chart_axis_s_attr = face_attrs['qss_lm_chart_axis_s']
+    chart_axis_t_attr = face_attrs['qss_lm_chart_axis_t']
     size = int(image.size[0])
     if image.size[0] != image.size[1]:
         raise bsp.BSPError("Lightmap atlas must remain square; do not resize it in the Image Editor.")
@@ -2804,6 +2962,60 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None, ou
         atlas_x = int(x_attr.data[poly_index].value) * resolution + gutter
         atlas_y = int(y_attr.data[poly_index].value) * resolution + gutter
         block_size = sample_w * sample_h
+        style_count = sum(1 for style in styles if style != 255)
+        if bool(world_chart_attr.data[poly_index].value):
+            texinfo_id = int(face[4])
+            if texinfo_id < 0 or texinfo_id >= len(texinfos):
+                raise bsp.BSPError(f"Face {face_id} has invalid texinfo for world-chart export.")
+            vertex_ids = parsed.face_vertex_indices(face)
+            if len(vertex_ids) < 3 or any(index < 0 or index >= len(vertices) for index in vertex_ids):
+                raise bsp.BSPError(f"Face {face_id} has invalid vertices for world-chart export.")
+            positions = [vertices[index] for index in vertex_ids]
+            s_min, t_min, extent_s, extent_t, _svec, _tvec = _calc_face_lightmap_extents(
+                positions, texinfos[texinfo_id]
+            )
+            expected_w, expected_h = (extent_s >> 4) + 1, (extent_t >> 4) + 1
+            if (sample_w, sample_h) != (expected_w, expected_h):
+                raise bsp.BSPError(
+                    f"Face {face_id} classic sample dimensions {sample_w}x{sample_h} "
+                    f"do not match its BSP29 extents {expected_w}x{expected_h}."
+                )
+            plane = parsed.planes()[int(face[0])]
+            plane_sign = -1.0 if int(face[1]) else 1.0
+            plane_normal = tuple(float(plane[i]) * plane_sign for i in range(3))
+            plane_distance = float(plane[3]) * plane_sign
+            texinfo = texinfos[texinfo_id]
+            sample_s = [float(s_min) + sx * 16.0 for sx in range(sample_w)]
+            sample_t = [float(t_min) + sy * 16.0 for sy in range(sample_h)]
+            sample_positions = lightmap_export_utils.world_chart_grid_positions(
+                texinfo[:8], plane_normal, plane_distance, sample_s, sample_t
+            )
+            rgb_data = lightmap_export_utils.sample_rgb_from_world_chart_positions(
+                px, size, resolution,
+                int(x_attr.data[poly_index].value),
+                int(y_attr.data[poly_index].value),
+                int(obj.get('qss_lightmap_gutter', 2)),
+                int(obj.get('qss_lightmap_scale', 1)),
+                sample_positions,
+                tuple(float(value) for value in chart_axis_s_attr.data[poly_index].vector),
+                tuple(float(value) for value in chart_axis_t_attr.data[poly_index].vector),
+                float(chart_s_min_attr.data[poly_index].value),
+                float(chart_t_min_attr.data[poly_index].value),
+            )
+            for sample_index in range(block_size):
+                rgb = rgb_data[sample_index * 3:sample_index * 3 + 3]
+                lit_rgb[(light_offset + sample_index) * 3:(light_offset + sample_index) * 3 + 3] = rgb
+                mono = int(round(0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]))
+                lighting[light_offset + sample_index] = max(0, min(255, mono))
+            for layer_index in range(1, style_count):
+                layer_start = light_offset + layer_index * block_size
+                layer_end = layer_start + block_size
+                if layer_end <= len(lighting):
+                    lighting[layer_start:layer_end] = bytes(block_size)
+                rgb_start, rgb_end = layer_start * 3, layer_end * 3
+                if rgb_end <= len(lit_rgb):
+                    lit_rgb[rgb_start:rgb_end] = bytes(block_size * 3)
+            continue
         style_count = sum(1 for style in styles if style != 255)
         if sample_w <= 0 or sample_h <= 0 or light_offset + block_size * style_count > len(lighting):
             raise bsp.BSPError(f"Face {face_id} has invalid lightmap sample bounds.")
@@ -3085,37 +3297,89 @@ def _qss_make_cycles_math_node(nodes, name, operation, location):
 
 
 def _qss_cycles_falloff_tree_is_owned(light_data):
-    """True only when every node in this light tree belongs to QSS."""
-    if int(light_data.get("qss_cycles_delay_falloff_version", 0)) != 1:
+    """True only when the complete existing light node tree is tagged as QSS-owned.
+
+    Do not rely on Light.use_nodes: Blender 5.1+ retains that property for
+    compatibility but always returns True and ignores assignments.
+    """
+    node_tree = getattr(light_data, "node_tree", None)
+    if node_tree is None:
+        return False
+    nodes = list(node_tree.nodes)
+    return bool(nodes) and all(
+        bool(node.get("qss_cycles_falloff_node", False)) for node in nodes
+    )
+
+
+def _qss_clear_owned_cycles_light_nodes(light_data):
+    """Remove only QSS's own custom light graph so Blender uses native falloff.
+
+    Clearing the actual graph is required on Blender 5.1+, where setting
+    Light.use_nodes=False no longer disables shader nodes. Any tree containing
+    an untagged/user-authored node is left untouched.
+    """
+    if not _qss_cycles_falloff_tree_is_owned(light_data):
         return False
     node_tree = getattr(light_data, "node_tree", None)
-    if node_tree is None or not node_tree.nodes:
+    if node_tree is None:
         return False
-    return all(bool(node.get("qss_cycles_falloff_node", False))
-               for node in node_tree.nodes)
+    node_tree.nodes.clear()
+    for key in (
+        "qss_cycles_delay_falloff_version",
+        "qss_cycles_delay_falloff_profile",
+    ):
+        if key in light_data:
+            del light_data[key]
+    try:
+        light_data.update_tag()
+    except Exception:
+        pass
+    return True
 
 
-def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
-    """Build a Cycles-only multiplier that converts the base point falloff.
+def _qss_cycles_light_node_summary(light_data, limit=8):
+    """Describe the actual node graph; the Blender 5.3 use_nodes flag is not useful."""
+    node_tree = getattr(light_data, "node_tree", None)
+    if node_tree is None:
+        return "native-no-tree"
+    nodes = list(node_tree.nodes)
+    if not nodes:
+        return "native-empty"
+    if _qss_cycles_falloff_tree_is_owned(light_data):
+        kind = "qss"
+    elif light_node_utils.is_default_light_node_tree(light_data):
+        kind = "blender-default"
+    else:
+        kind = "user-custom"
+    entries = []
+    for node in nodes[:max(1, int(limit))]:
+        node_type = getattr(node, "bl_idname", getattr(node, "type", "NODE"))
+        marker = "+QSS" if bool(node.get("qss_cycles_falloff_node", False)) else ""
+        entries.append(f"{node.name}:{node_type}{marker}")
+    if len(nodes) > len(entries):
+        entries.append(f"...+{len(nodes) - len(entries)}")
+    return f"{kind}[{','.join(entries)}]"
 
-    The standard QSS lamp energy is already calibrated at one reference point.
-    With Smooth=0, the Light Falloff node's Quadratic output is Strength and
-    Linear is Strength multiplied by ray length, so Linear/Quadratic recovers
-    the shading-point distance.
-    The math nodes then apply the exact ratio between that inverse-square base
-    and ericw delay 0 or delay 5. Eevee ignores this light node tree and retains
-    the ordinary lamp-energy approximation.
+def _qss_build_cycles_delay_falloff_nodes(light_data, delay, allow_initial_import_tree=False):
+    """Build a Cycles multiplier that restores ericw falloff over Blender's inverse-square lamps.
+
+    Blender 5.3 creates a simple Emission-to-Light-Output tree by default and
+    reports Light.use_nodes=True even for that untouched default. That tree is
+    safe for QSS to replace; a genuinely edited user tree is not. The distance
+    probe uses the Light Falloff node's Linear output (proportional to 1/d),
+    then takes its reciprocal. The input floor and distance caps keep the math
+    finite at the source and far outside the Quake light radius.
     """
-    # Never clear a node graph that did not originate from this helper.
-    # Fresh imported QSS lights have nodes disabled; an existing enabled tree
-    # that is not fully QSS-owned belongs to the user.
     existing_tree = getattr(light_data, "node_tree", None)
-    if (bool(light_data.use_nodes) and existing_tree is not None
-            and len(existing_tree.nodes) > 0
-            and not _qss_cycles_falloff_tree_is_owned(light_data)):
+    if (existing_tree is not None and len(existing_tree.nodes) > 0
+            and not _qss_cycles_falloff_tree_is_owned(light_data)
+            and not light_node_utils.is_safe_to_replace_light_node_tree(
+                light_data, qss_created_by_current_import=allow_initial_import_tree
+            )):
         raise RuntimeError("Existing user-authored light nodes were preserved; QSS Cycles falloff was not installed")
 
-    light_data.use_nodes = True
+    if hasattr(light_data, "use_nodes") and not bool(light_data.use_nodes):
+        light_data.use_nodes = True
     node_tree = getattr(light_data, "node_tree", None)
     if node_tree is None:
         raise RuntimeError("Blender did not create a node tree for this light")
@@ -3132,76 +3396,91 @@ def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
     falloff.inputs["Strength"].default_value = 1.0
     falloff.inputs["Smooth"].default_value = 0.0
 
-    safe_quadratic = _qss_make_cycles_math_node(
-        nodes, "QSS_SafeQuadratic", "MAXIMUM", (-680, -40)
+    safe_linear = _qss_make_cycles_math_node(
+        nodes, "QSS_SafeLinear", "MAXIMUM", (-680, -40)
     )
-    safe_quadratic.inputs[1].default_value = 1e-20
+    safe_linear.inputs[1].default_value = 1e-20
 
     distance_m = _qss_make_cycles_math_node(
         nodes, "QSS_DistanceMeters", "DIVIDE", (-460, 120)
     )
+    distance_m.inputs[0].default_value = 1.0
     distance_quake = _qss_make_cycles_math_node(
         nodes, "QSS_DistanceQuakeUnits", "DIVIDE", (-240, 120)
     )
+    capped_distance_quake = _qss_make_cycles_math_node(
+        nodes, "QSS_CappedDistanceQuakeUnits", "MINIMUM", (-20, 120)
+    )
+    capped_distance_quake.inputs[1].default_value = 1e9
 
-    links.new(falloff.outputs["Quadratic"], safe_quadratic.inputs[0])
-    links.new(falloff.outputs["Linear"], distance_m.inputs[0])
-    links.new(safe_quadratic.outputs[0], distance_m.inputs[1])
+    links.new(falloff.outputs["Linear"], safe_linear.inputs[0])
+    links.new(safe_linear.outputs[0], distance_m.inputs[1])
     links.new(distance_m.outputs[0], distance_quake.inputs[0])
+    links.new(distance_quake.outputs[0], capped_distance_quake.inputs[0])
 
     if int(delay) == 0:
         normalized = _qss_make_cycles_math_node(
-            nodes, "QSS_NormalizedRadius", "DIVIDE", (0, 180)
+            nodes, "QSS_NormalizedRadius", "DIVIDE", (0, 220)
         )
+        nonnegative = _qss_make_cycles_math_node(
+            nodes, "QSS_NonnegativeRadius", "MAXIMUM", (220, 220)
+        )
+        nonnegative.inputs[1].default_value = 0.0
+        clamped = _qss_make_cycles_math_node(
+            nodes, "QSS_ClampedRadius", "MINIMUM", (440, 220)
+        )
+        clamped.inputs[1].default_value = 1.0
         one_minus = _qss_make_cycles_math_node(
-            nodes, "QSS_OneMinusRadius", "SUBTRACT", (220, 180)
+            nodes, "QSS_OneMinusRadius", "SUBTRACT", (660, 220)
         )
-        positive_remainder = _qss_make_cycles_math_node(
-            nodes, "QSS_PositiveRemainder", "MAXIMUM", (440, 180)
-        )
-        positive_remainder.inputs[1].default_value = 0.0
+        one_minus.inputs[0].default_value = 1.0
         normalized_squared = _qss_make_cycles_math_node(
-            nodes, "QSS_NormalizedRadiusSquared", "MULTIPLY", (220, -80)
+            nodes, "QSS_NormalizedRadiusSquared", "MULTIPLY", (220, -40)
         )
         times_eight = _qss_make_cycles_math_node(
-            nodes, "QSS_DelayZeroScale", "MULTIPLY", (440, -80)
+            nodes, "QSS_DelayZeroScale", "MULTIPLY", (440, -40)
         )
         times_eight.inputs[1].default_value = 8.0
         correction = _qss_make_cycles_math_node(
-            nodes, "QSS_EricwCorrection", "MULTIPLY", (660, 100)
+            nodes, "QSS_EricwCorrection", "MULTIPLY", (880, 180)
         )
 
-        links.new(distance_quake.outputs[0], normalized.inputs[0])
-        links.new(normalized.outputs[0], one_minus.inputs[1])
-        one_minus.inputs[0].default_value = 1.0
-        links.new(one_minus.outputs[0], positive_remainder.inputs[0])
-        links.new(normalized.outputs[0], normalized_squared.inputs[0])
-        links.new(normalized.outputs[0], normalized_squared.inputs[1])
+        links.new(capped_distance_quake.outputs[0], normalized.inputs[0])
+        links.new(normalized.outputs[0], nonnegative.inputs[0])
+        links.new(nonnegative.outputs[0], clamped.inputs[0])
+        links.new(clamped.outputs[0], one_minus.inputs[1])
+        links.new(clamped.outputs[0], normalized_squared.inputs[0])
+        links.new(clamped.outputs[0], normalized_squared.inputs[1])
         links.new(normalized_squared.outputs[0], times_eight.inputs[0])
         links.new(times_eight.outputs[0], correction.inputs[0])
-        links.new(positive_remainder.outputs[0], correction.inputs[1])
+        links.new(one_minus.outputs[0], correction.inputs[1])
     elif int(delay) == 5:
         scaled_distance = _qss_make_cycles_math_node(
             nodes, "QSS_WaitScaledDistance", "MULTIPLY", (0, 180)
         )
+        capped_scaled_distance = _qss_make_cycles_math_node(
+            nodes, "QSS_CappedWaitScaledDistance", "MINIMUM", (220, 180)
+        )
+        capped_scaled_distance.inputs[1].default_value = 1e12
         shifted_distance = _qss_make_cycles_math_node(
-            nodes, "QSS_ShiftedDistance", "ADD", (220, 180)
+            nodes, "QSS_ShiftedDistance", "ADD", (440, 180)
         )
         shifted_distance.inputs[1].default_value = lighting_utils.ERICW_LIGHT_SCALE
         shift_ratio = _qss_make_cycles_math_node(
-            nodes, "QSS_ShiftRatio", "DIVIDE", (440, 180)
+            nodes, "QSS_ShiftRatio", "DIVIDE", (660, 180)
         )
         shift_ratio_squared = _qss_make_cycles_math_node(
-            nodes, "QSS_ShiftRatioSquared", "MULTIPLY", (660, 180)
+            nodes, "QSS_ShiftRatioSquared", "MULTIPLY", (880, 180)
         )
         times_four = _qss_make_cycles_math_node(
-            nodes, "QSS_DelayFiveScale", "MULTIPLY", (880, 180)
+            nodes, "QSS_DelayFiveScale", "MULTIPLY", (1100, 180)
         )
         times_four.inputs[1].default_value = 4.0
 
-        links.new(distance_quake.outputs[0], scaled_distance.inputs[0])
-        links.new(scaled_distance.outputs[0], shifted_distance.inputs[0])
-        links.new(scaled_distance.outputs[0], shift_ratio.inputs[0])
+        links.new(capped_distance_quake.outputs[0], scaled_distance.inputs[0])
+        links.new(scaled_distance.outputs[0], capped_scaled_distance.inputs[0])
+        links.new(capped_scaled_distance.outputs[0], shifted_distance.inputs[0])
+        links.new(capped_scaled_distance.outputs[0], shift_ratio.inputs[0])
         links.new(shifted_distance.outputs[0], shift_ratio.inputs[1])
         links.new(shift_ratio.outputs[0], shift_ratio_squared.inputs[0])
         links.new(shift_ratio.outputs[0], shift_ratio_squared.inputs[1])
@@ -3233,18 +3512,21 @@ def _qss_build_cycles_delay_falloff_nodes(light_data, delay):
     return node_tree
 
 
-def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
-    """Enable/update the Cycles correction for ericw delay 0 and delay 5 only."""
+def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value, allow_initial_import_tree=False):
+    """Enable ericw-style Cycles falloff for supported delay-0 and delay-5 lights."""
     light_data = light_obj.data
-    marker = int(light_data.get("qss_cycles_delay_falloff_version", 0))
 
-    if int(delay) not in {0, 5}:
-        # Do not disturb unrelated or user-authored light node trees. Only
-        # disable a complete node tree installed by this SLOPGATE helper.
-        if _qss_cycles_falloff_tree_is_owned(light_data):
-            light_data.use_nodes = False
+    if not lighting_utils.cycles_uses_ericw_falloff_correction(delay):
+        # This diagnostic build uses Blender's native light falloff. On
+        # Blender 5.1+ use_nodes=False is ignored, so remove only a fully
+        # QSS-owned graph. Never alter a user-authored light node tree.
+        cleared = _qss_clear_owned_cycles_light_nodes(light_data)
+        light_obj["qss_cycles_falloff_nodes_cleared"] = bool(cleared)
         light_obj["qss_cycles_falloff_active"] = False
-        light_obj["qss_cycles_falloff_profile"] = "native_fallback"
+        light_obj["qss_cycles_falloff_profile"] = (
+            "native_fallback_delay0" if int(delay) == 0 else "native_fallback"
+        )
+        light_obj["qss_cycles_falloff_error"] = ""
         return False
 
     if not hasattr(light_data, "use_nodes"):
@@ -3253,15 +3535,20 @@ def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
         return False
 
     existing_tree = getattr(light_data, "node_tree", None)
-    if (bool(light_data.use_nodes) and existing_tree is not None
-            and len(existing_tree.nodes) > 0
-            and not _qss_cycles_falloff_tree_is_owned(light_data)):
+    if (existing_tree is not None and len(existing_tree.nodes) > 0
+            and not _qss_cycles_falloff_tree_is_owned(light_data)
+            and not light_node_utils.is_safe_to_replace_light_node_tree(
+                light_data, qss_created_by_current_import=allow_initial_import_tree
+            )):
         light_obj["qss_cycles_falloff_active"] = False
         light_obj["qss_cycles_falloff_profile"] = "user_nodes_preserved_native_fallback"
         light_obj["qss_cycles_falloff_error"] = (
-            "Existing user-authored light nodes were left untouched; this light uses native falloff"
+            "User-custom light nodes were left untouched; QSS Quake falloff was not applied"
         )
         return False
+
+    if not bool(light_data.use_nodes):
+        light_data.use_nodes = True
 
     world_dist = max(1e-6, float(light_obj.get("qss_quake_world_dist", 1.0)))
     wait = max(1e-6, float(light_obj.get("qss_quake_wait", 1.0)))
@@ -3271,21 +3558,21 @@ def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
     falloff = max(0.0, float(light_obj.get("qss_quake_falloff", 0.0)))
 
     try:
-        node_tree = getattr(light_data, "node_tree", None) if light_data.use_nodes else None
+        node_tree = getattr(light_data, "node_tree", None)
         required = {
-            "QSS_Ericw_LightFalloff", "QSS_SafeQuadratic",
+            "QSS_Ericw_LightFalloff", "QSS_SafeLinear",
             "QSS_DistanceMeters", "QSS_DistanceQuakeUnits",
-            "QSS_Ericw_Emission", "QSS_Ericw_LightOutput",
+            "QSS_CappedDistanceQuakeUnits", "QSS_Ericw_Emission",
+            "QSS_Ericw_LightOutput",
         }
         if int(light_data.get("qss_cycles_delay_falloff_version", 0)) != 1 or int(
             light_data.get("qss_cycles_delay_falloff_profile", -1)
         ) != int(delay) or node_tree is None or not required.issubset(
             {node.name for node in node_tree.nodes}
         ):
-            node_tree = _qss_build_cycles_delay_falloff_nodes(light_data, int(delay))
-        else:
-            light_data.use_nodes = True
-
+            node_tree = _qss_build_cycles_delay_falloff_nodes(
+                light_data, int(delay), allow_initial_import_tree=allow_initial_import_tree
+            )
         nodes = node_tree.nodes
         by_name = {node.name: node for node in nodes}
         by_name["QSS_Ericw_LightFalloff"].inputs["Strength"].default_value = 1.0
@@ -3319,8 +3606,7 @@ def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value):
         # Keep the existing native lamp usable if this Blender build cannot
         # construct the Cycles-specific node graph.
         try:
-            if _qss_cycles_falloff_tree_is_owned(light_data):
-                light_data.use_nodes = False
+            _qss_clear_owned_cycles_light_nodes(light_data)
         except Exception:
             pass
         light_obj["qss_cycles_falloff_active"] = False
@@ -3493,8 +3779,9 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
         collection.objects.link(light_obj)
         light_obj.location = _quake_to_blender_position(origin, unit_scale, flip_z)
         light_data.color = color_rgb  # ericw-tools _color is normalized RGB (0..1 or 0..255).
-        if hasattr(light_data, 'use_nodes'):
-            light_data.use_nodes = False
+        # Blender 5.1+ always uses Light node trees; use_nodes=False is ignored.
+        # A newly created light's default tree is harmless. The QSS fallback
+        # helper clears only old QSS-owned custom graphs when necessary.
         effective_intensity = intensity * world_range
         light_data.energy = lighting_utils.scaled_quake_light_energy(effective_intensity, energy_scale)
         wait = max(0.001, _parse_entity_float(entity, 'wait', 1.0))
@@ -3513,7 +3800,9 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
             cone = _parse_entity_float(entity, 'angle', _parse_entity_float(entity, '_cone', 40.0))
             soft_angle = _parse_entity_float(entity, '_softangle', 0.0)
             light_data.spot_size = math.radians(max(1.0, min(179.0, cone)))
-            light_data.spot_blend = max(0.0, min(1.0, 1.0 - max(0.0, soft_angle) / max(0.1, cone)))
+            light_data.spot_blend = lighting_utils.blender_spot_blend_from_ericw_angles(
+                cone, soft_angle
+            )
             direction = _entity_spot_direction(entity, targets)
             raw_direction = tuple(float(v) for v in direction.normalized())
             if flip_z:
@@ -3529,7 +3818,8 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
         light_obj['qss_quake_world_dist'] = float(world_dist)
         light_obj['qss_quake_anglescale'] = float(anglescale)
         light_obj['qss_applied_energy_scale'] = energy_scale
-        light_obj['qss_quake_light_delay'] = int(_parse_entity_float(entity, 'delay', 0))
+        delay = int(_parse_entity_float(entity, 'delay', 0))
+        light_obj['qss_quake_light_delay'] = delay
         light_obj['qss_quake_light_style'] = int(light_style)
         light_obj['qss_quake_style_was_inferred'] = bool(style_inferred)
         light_obj['qss_quake_color'] = list(color_rgb)
@@ -3554,7 +3844,19 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
         light_obj['qss_quake_no_staticlight'] = bool(_parse_entity_float(entity, '_nostaticlight', 0.0) != 0.0)
         light_obj['qss_quake_world_dist'] = float(world_dist)
         light_obj['qss_quake_world_range'] = float(world_range)
-        light_obj['qss_quake_delay_note'] = 'Cycles uses a per-light shader correction for delay 0 and 5; Eevee keeps the native-lamp approximation. Delay 2 uses native inverse-square falloff. Quake Direct remains a separate exact direct-light path.'
+        light_obj['qss_quake_delay_note'] = (
+            'Cycles applies Quake delay-0 and delay-5 falloff corrections when the '
+            'QSS light graph is active; other delays use the native fallback. '
+            'Eevee realtime preview always uses Blender-native falloff.'
+        )
+        # This light datablock was just created by this import operation. Allow
+        # QSS to replace Blender's starter Emission -> Light Output nodes once.
+        # Subsequent updates use the normal ownership/default-tree checks, so
+        # user-edited light graphs are still preserved.
+        if lighting_utils.cycles_uses_ericw_falloff_correction(delay):
+            _qss_update_cycles_delay_falloff(
+                light_obj, delay, intensity, allow_initial_import_tree=True
+            )
         light_count += 1
 
     # Worldspawn sunlight is a directional source in ericw-tools.
@@ -4314,6 +4616,9 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
         raise bsp.BSPError(f"Unknown lightmap export mode: {lightmap_export_mode}")
     if obj.get('qss_object_role') != 'quake_bsp29':
         raise bsp.BSPError("Active object is not a Quake Surface Studio BSP29 import.")
+    export_started_at = time.perf_counter()
+    export_stage_timings = {}
+    stage_started_at = export_started_at
     source_path = obj.get('qss_source_path', '')
     if not source_path or not os.path.isfile(source_path):
         raise bsp.BSPError("The original BSP path is unavailable. Keep the original BSP at its import location.")
@@ -4326,6 +4631,8 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
             "Could not find gfx/palette.lmp. Re-import with the Quake game directory, "
             "or place palette.lmp in the game's gfx folder."
         )
+    export_stage_timings['source_parse_and_palette'] = time.perf_counter() - stage_started_at
+    stage_started_at = time.perf_counter()
 
     mesh = obj.data
     face_attr = mesh.attributes.get('qss_bsp_face_id')
@@ -4423,6 +4730,8 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
                 except Exception:
                     pass
 
+    export_stage_timings['texture_and_image_processing'] = time.perf_counter() - stage_started_at
+    stage_started_at = time.perf_counter()
     for texture_id, (_, replacement) in replacements.items():
         entries[texture_id] = replacement
     if len(entries) > bsp.MAX_CLASSIC_TEXTURES:
@@ -4492,6 +4801,8 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
         new_faces_lump = bsp.replace_face_texinfo(new_faces_lump, face_id, variant_cache[key])
         changed_face_assignments += 1
 
+    export_stage_timings['face_texinfo_remap'] = time.perf_counter() - stage_started_at
+    stage_started_at = time.perf_counter()
     new_lumps = list(parsed.lumps)
     new_lumps[bsp.LUMP_TEXTURES] = bsp.build_texture_lump(entries)
     new_lumps[bsp.LUMP_TEXINFO] = new_texinfo_lump
@@ -4503,6 +4814,8 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
     )
     new_lumps[bsp.LUMP_LIGHTING] = lighting_lump
     new_lumps[bsp.LUMP_FACES] = new_faces_lump
+    export_stage_timings['lightmap_patch'] = time.perf_counter() - stage_started_at
+    stage_started_at = time.perf_counter()
     new_bspx_lumps = dict(parsed.bspx_lumps)
     if lightmap_export_mode == 'ENHANCED':
         for obsolete_name in ('LMSHIFT', 'LMOFFSET', 'LMSTYLE16'):
@@ -4523,6 +4836,10 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
         lit_output_path = os.path.splitext(output_path)[0] + '.lit'
         with open(lit_output_path, 'wb') as f:
             f.write(lit_file_data)
+    export_stage_timings['serialize_and_write'] = time.perf_counter() - stage_started_at
+    export_stage_timings['total'] = time.perf_counter() - export_started_at
+    obj['qss_last_export_stage_timings'] = str(export_stage_timings)
+    obj['qss_last_export_duration_seconds'] = float(export_stage_timings['total'])
     return output_path, len(entries), changed_face_assignments, len(replacements), palette_origin, lit_output_path
 
 
@@ -7453,12 +7770,56 @@ class QSS_OT_preview_bsp_lightmaps(Operator):
             return {'CANCELLED'}
 
 
-def _lightmap_sample_luminances(obj, image, face_indices=None):
+
+def _qss_world_chart_face_rgb_samples(
+    obj, image, pixels, poly_index, parsed=None, source_cache=None,
+    preserve_float=False,
+):
+    """Read a face's original BSP luxels from its shared world chart.
+
+    The default return remains clamped RGB bytes for BSP export. Bake
+    calibration can request linear floats so HDR Cycles samples are not clipped
+    before the source-match factor is calculated.
+    """
+    mesh = obj.data
+    world_attr = mesh.attributes.get('qss_lm_world_chart')
+    if world_attr is None or poly_index >= len(world_attr.data) or not world_attr.data[poly_index].value:
+        return None
+    source_path = bpy.path.abspath(str(obj.get('qss_source_path', '') or ''))
+    if parsed is None:
+        if not source_path or not os.path.isfile(source_path):
+            raise bsp.BSPError('The source BSP is required to sample world-aligned lightmap charts.')
+        parsed = bsp.BSP29.from_file(source_path)
+    face_attr = mesh.attributes.get('qss_bsp_face_id')
+    if face_attr is None or poly_index >= len(face_attr.data):
+        raise bsp.BSPError('BSP face IDs are missing while sampling a world-aligned chart.')
+    face_id = int(face_attr.data[poly_index].value)
+    if source_cache is None:
+        source_cache = _qss_source_face_sample_cache(parsed)
+    info = _qss_read_source_face_sample(
+        mesh, poly_index, face_id, parsed, source_cache=source_cache
+    )
+    if info is None or info.get('decoupled_lmvecs') is not None:
+        return None
+    size = int(image.size[0])
+    return lightmap_export_utils.sample_classic_face_grid_from_world_chart(
+        pixels, size, _qss_lightmap_pixel_scale(obj, image),
+        info['atlas_x'], info['atlas_y'],
+        int(obj.get('qss_lightmap_gutter', 2)),
+        max(1, int(obj.get('qss_lightmap_scale', 1))),
+        info['texinfo'], info['plane_normal'], info['plane_distance'],
+        info['s_min'], info['t_min'], info['width'], info['height'],
+        info['chart_axis_s'], info['chart_axis_t'],
+        info['chart_s_min'], info['chart_t_min'],
+        preserve_float=bool(preserve_float),
+    )
+
+def _lightmap_sample_luminances(obj, image, face_indices=None, parsed_source=None, source_cache=None):
     """Read only real luxel centers, excluding atlas gutters and empty space."""
     mesh = obj.data
     attrs = _qss_validate_face_domain_attributes(
         mesh, ('qss_lm_has_data', 'qss_lm_atlas_x', 'qss_lm_atlas_y',
-               'qss_lm_sample_w', 'qss_lm_sample_h'),
+               'qss_lm_sample_w', 'qss_lm_sample_h', 'qss_lm_world_chart'),
         'sample lightmap luxels'
     )
     size = int(image.size[0])
@@ -7470,6 +7831,19 @@ def _lightmap_sample_luminances(obj, image, face_indices=None):
     image.pixels.foreach_get(pixels)
     values = []
     target_set = None if face_indices is None else {int(index) for index in face_indices}
+    has_world_chart = any(
+        bool(attrs['qss_lm_world_chart'].data[index].value)
+        and bool(attrs['qss_lm_has_data'].data[index].value)
+        for index in (target_set if target_set is not None else range(len(mesh.polygons)))
+        if 0 <= index < len(mesh.polygons)
+    )
+    if has_world_chart and parsed_source is None:
+        source_path = bpy.path.abspath(str(obj.get('qss_source_path', '') or ''))
+        if not source_path or not os.path.isfile(source_path):
+            raise bsp.BSPError('The source BSP is required to sample world-aligned lightmap charts.')
+        parsed_source = bsp.BSP29.from_file(source_path)
+    if has_world_chart and source_cache is None:
+        source_cache = _qss_source_face_sample_cache(parsed_source)
     for poly_index, _poly in enumerate(mesh.polygons):
         if target_set is not None and poly_index not in target_set:
             continue
@@ -7479,6 +7853,16 @@ def _lightmap_sample_luminances(obj, image, face_indices=None):
         y0 = int(_qss_safe_collection_item(attrs['qss_lm_atlas_y'].data, poly_index, 'qss_lm_atlas_y').value) * resolution + gutter
         width = int(_qss_safe_collection_item(attrs['qss_lm_sample_w'].data, poly_index, 'qss_lm_sample_w').value)
         height = int(_qss_safe_collection_item(attrs['qss_lm_sample_h'].data, poly_index, 'qss_lm_sample_h').value)
+        if bool(attrs['qss_lm_world_chart'].data[poly_index].value):
+            chart_rgb = _qss_world_chart_face_rgb_samples(
+                obj, image, pixels, poly_index, parsed_source, source_cache,
+                preserve_float=True,
+            )
+            if chart_rgb is not None:
+                for offset in range(0, len(chart_rgb), 3):
+                    r, g, b = chart_rgb[offset:offset + 3]
+                    values.append(0.2126 * r + 0.7152 * g + 0.0722 * b)
+                continue
         for sy in range(height):
             top_y = y0 + sy * scale + (scale - 1) // 2
             blender_y = size - 1 - top_y
@@ -7492,12 +7876,12 @@ def _lightmap_sample_luminances(obj, image, face_indices=None):
     return values
 
 
-def _lightmap_face_coverage(obj, image, threshold=1e-8, face_indices=None):
+def _lightmap_face_coverage(obj, image, threshold=1e-8, face_indices=None, parsed_source=None, source_cache=None):
     """Summarize how many imported faces receive nonzero sampled bake luxels."""
     mesh = obj.data
     attrs = _qss_validate_face_domain_attributes(
         mesh, ('qss_lm_has_data', 'qss_lm_atlas_x', 'qss_lm_atlas_y',
-               'qss_lm_sample_w', 'qss_lm_sample_h'),
+               'qss_lm_sample_w', 'qss_lm_sample_h', 'qss_lm_world_chart'),
         'measure lightmap face coverage'
     )
     size = int(image.size[0])
@@ -7510,6 +7894,19 @@ def _lightmap_face_coverage(obj, image, threshold=1e-8, face_indices=None):
     total_faces = lit_faces = total_luxels = lit_luxels = 0
     face_max_luminance = 0.0
     target_set = None if face_indices is None else {int(index) for index in face_indices}
+    has_world_chart = any(
+        bool(attrs['qss_lm_world_chart'].data[index].value)
+        and bool(attrs['qss_lm_has_data'].data[index].value)
+        for index in (target_set if target_set is not None else range(len(mesh.polygons)))
+        if 0 <= index < len(mesh.polygons)
+    )
+    if has_world_chart and parsed_source is None:
+        source_path = bpy.path.abspath(str(obj.get('qss_source_path', '') or ''))
+        if not source_path or not os.path.isfile(source_path):
+            raise bsp.BSPError('The source BSP is required to sample world-aligned lightmap charts.')
+        parsed_source = bsp.BSP29.from_file(source_path)
+    if has_world_chart and source_cache is None:
+        source_cache = _qss_source_face_sample_cache(parsed_source)
     for poly_index, _poly in enumerate(mesh.polygons):
         if target_set is not None and poly_index not in target_set:
             continue
@@ -7532,6 +7929,24 @@ def _lightmap_face_coverage(obj, image, threshold=1e-8, face_indices=None):
         ).value)
         face_lit = 0
         face_max = 0.0
+        if bool(attrs['qss_lm_world_chart'].data[poly_index].value):
+            chart_rgb = _qss_world_chart_face_rgb_samples(
+                obj, image, pixels, poly_index, parsed_source, source_cache,
+                preserve_float=True,
+            )
+            if chart_rgb is not None:
+                total_luxels += len(chart_rgb) // 3
+                for offset in range(0, len(chart_rgb), 3):
+                    r, g, b = chart_rgb[offset:offset + 3]
+                    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+                    face_max = max(face_max, luminance)
+                    if luminance > threshold:
+                        face_lit += 1
+                        lit_luxels += 1
+                if face_lit:
+                    lit_faces += 1
+                face_max_luminance = max(face_max_luminance, face_max)
+                continue
         for sy in range(height):
             top_y = y0 + sy * scale + (scale - 1) // 2
             blender_y = size - 1 - top_y
@@ -7573,34 +7988,228 @@ def _image_pixels_mean(image):
 
 
 def _image_rgb_statistics(image):
-    """Return whole-image diagnostics, including whether Cycles wrote any pixels."""
+    """Return whole-image diagnostics, including non-finite pixels from Cycles."""
     pixel_count = int(image.size[0]) * int(image.size[1])
     pixels = array.array('f', [0.0]) * (pixel_count * 4)
     image.update()
     image.pixels.foreach_get(pixels)
     if pixel_count <= 0:
-        return {'pixels': 0, 'mean_luma': 0.0, 'max_channel': 0.0,
-                'nonzero_pixels': 0, 'nonzero_rgb_values': 0}
+        return {
+            'pixels': 0, 'mean_luma': 0.0, 'mean_luma_finite_pixels': 0.0,
+            'max_channel': 0.0, 'nonzero_pixels': 0, 'nonzero_rgb_values': 0,
+            'nonfinite_pixels': 0, 'nonfinite_rgb_values': 0,
+            'first_nonfinite_pixels': [],
+        }
     luma_sum = 0.0
+    finite_luma_sum = 0.0
+    finite_pixel_count = 0
     max_channel = 0.0
     nonzero_pixels = 0
     nonzero_rgb_values = 0
-    for i in range(0, len(pixels), 4):
-        r, g, b = float(pixels[i]), float(pixels[i + 1]), float(pixels[i + 2])
-        luma_sum += 0.2126 * r + 0.7152 * g + 0.0722 * b
-        pixel_max = max(r, g, b)
-        max_channel = max(max_channel, pixel_max)
-        if pixel_max > 1e-8:
-            nonzero_pixels += 1
-        nonzero_rgb_values += int(r > 1e-8) + int(g > 1e-8) + int(b > 1e-8)
+    nonfinite_pixels = 0
+    nonfinite_rgb_values = 0
+    first_nonfinite_pixels = []
+    for pixel_index in range(pixel_count):
+        i = pixel_index * 4
+        channels = (float(pixels[i]), float(pixels[i + 1]), float(pixels[i + 2]))
+        finite_channels = tuple(value for value in channels if math.isfinite(value))
+        bad_channels = 3 - len(finite_channels)
+        if bad_channels:
+            nonfinite_pixels += 1
+            nonfinite_rgb_values += bad_channels
+            if len(first_nonfinite_pixels) < 16:
+                first_nonfinite_pixels.append((
+                    pixel_index % int(image.size[0]),
+                    pixel_index // int(image.size[0]),
+                ))
+        if finite_channels:
+            pixel_max = max(finite_channels)
+            max_channel = max(max_channel, pixel_max)
+            if pixel_max > 1e-8:
+                nonzero_pixels += 1
+            nonzero_rgb_values += sum(value > 1e-8 for value in finite_channels)
+        if bad_channels == 0:
+            luma = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+            luma_sum += luma
+            finite_luma_sum += luma
+            finite_pixel_count += 1
     return {
         'pixels': pixel_count,
-        'mean_luma': luma_sum / pixel_count,
+        'mean_luma': (
+            luma_sum / pixel_count if nonfinite_rgb_values == 0 else float('nan')
+        ),
+        'mean_luma_finite_pixels': finite_luma_sum / max(1, finite_pixel_count),
+        'finite_pixels': finite_pixel_count,
         'max_channel': max_channel,
         'nonzero_pixels': nonzero_pixels,
         'nonzero_rgb_values': nonzero_rgb_values,
+        'nonfinite_pixels': nonfinite_pixels,
+        'nonfinite_rgb_values': nonfinite_rgb_values,
+        'first_nonfinite_pixels': first_nonfinite_pixels,
     }
 
+
+
+
+
+def _qss_describe_nonfinite_luxels(
+    context, obj, image, face_indices, parsed_source, source_cache,
+    atlas_coordinates,
+):
+    """Map non-finite atlas pixels to BSP face/luxel/world position and nearest lights."""
+    mesh = obj.data
+    if parsed_source is None:
+        source_path = bpy.path.abspath(str(obj.get('qss_source_path', '') or ''))
+        if not source_path or not os.path.isfile(source_path):
+            return 'Source BSP unavailable; unable to map bad atlas pixels to BSP faces.'
+        parsed_source = bsp.BSP29.from_file(source_path)
+        source_cache = _qss_source_face_sample_cache(parsed_source)
+    elif source_cache is None:
+        source_cache = _qss_source_face_sample_cache(parsed_source)
+    attrs = _qss_validate_face_domain_attributes(
+        mesh,
+        ('qss_bsp_face_id', 'qss_lm_has_data', 'qss_lm_atlas_x',
+         'qss_lm_atlas_y', 'qss_lm_sample_w', 'qss_lm_sample_h',
+         'qss_lm_world_chart'),
+        'locate non-finite lightmap samples',
+    )
+    image_size = int(image.size[0])
+    resolution = _qss_lightmap_pixel_scale(obj, image)
+    pixels_per_luxel = max(1, int(obj.get('qss_lightmap_scale', 1)))
+    block = pixels_per_luxel * resolution
+    gutter = max(0, int(obj.get('qss_lightmap_gutter', 0)))
+    bad_pixels = [(float(x), float(y)) for x, y in atlas_coordinates]
+    matches = []
+    for poly_index in face_indices:
+        if not (0 <= int(poly_index) < len(mesh.polygons)):
+            continue
+        if not bool(attrs['qss_lm_has_data'].data[poly_index].value):
+            continue
+        face_id = int(attrs['qss_bsp_face_id'].data[poly_index].value)
+        info = _qss_read_source_face_sample(
+            mesh, poly_index, face_id, parsed_source, source_cache=source_cache
+        )
+        if info is None:
+            continue
+        width, height = int(info['width']), int(info['height'])
+        atlas_x, atlas_y = int(info['atlas_x']), int(info['atlas_y'])
+        if bool(info['world_chart']) and info['decoupled_lmvecs'] is None:
+            pixel_centres = lightmap_export_utils.classic_face_grid_world_chart_pixel_coordinates(
+                image_size, resolution, atlas_x, atlas_y, gutter,
+                pixels_per_luxel, info['texinfo'], info['plane_normal'],
+                info['plane_distance'], info['s_min'], info['t_min'],
+                width, height, info['chart_axis_s'], info['chart_axis_t'],
+                info['chart_s_min'], info['chart_t_min'],
+            )
+        else:
+            x0 = atlas_x * resolution + gutter * resolution
+            y0 = atlas_y * resolution + gutter * resolution
+            sample_step = pixels_per_luxel * resolution
+            offset = (sample_step - 1) // 2
+            pixel_centres = tuple(
+                (x0 + sx * sample_step + offset,
+                 image_size - 1 - (y0 + sy * sample_step + offset))
+                for sy in range(height) for sx in range(width)
+            )
+        world_positions = None
+        if info['decoupled_lmvecs'] is None:
+            s_coords = tuple(info['s_min'] + 16.0 * sx for sx in range(width))
+            t_coords = tuple(info['t_min'] + 16.0 * sy for sy in range(height))
+            try:
+                world_positions = lightmap_export_utils.world_chart_grid_positions(
+                    info['texinfo'], info['plane_normal'], info['plane_distance'],
+                    s_coords, t_coords,
+                )
+            except Exception:
+                world_positions = None
+        tolerance = max(1.25, block * 0.5 + 0.25)
+        for luxel_index, centre in enumerate(pixel_centres):
+            sx = luxel_index % width
+            sy = luxel_index // width
+            distances = [
+                ((centre[0] - bad[0]) ** 2 + (centre[1] - bad[1]) ** 2, bad)
+                for bad in bad_pixels
+            ]
+            nearest_distance, nearest_bad = min(distances, default=(float('inf'), None))
+            if nearest_distance > tolerance * tolerance:
+                continue
+            world_position = (
+                tuple(float(v) for v in world_positions[luxel_index])
+                if world_positions is not None else None
+            )
+            record = {
+                'face_id': face_id,
+                'poly_index': int(poly_index),
+                'luxel': (sx, sy),
+                'atlas_sample_centre': (round(centre[0], 3), round(centre[1], 3)),
+                'nearest_bad_pixel': nearest_bad,
+                'world_quake': world_position,
+            }
+            matches.append(record)
+    lights = []
+    for light_obj in _qss_active_map_objects(context.scene, obj):
+        if light_obj.type != 'LIGHT' or light_obj.get('qss_light_role') not in {
+            'quake_entity_light', 'quake_world_sunlight'
+        }:
+            continue
+        origin = light_obj.get('qss_quake_origin')
+        try:
+            origin = tuple(float(v) for v in origin[:3])
+            if len(origin) != 3 or not all(math.isfinite(v) for v in origin):
+                continue
+        except (TypeError, ValueError, IndexError):
+            continue
+        light_data = light_obj.data
+        lights.append({
+            'name': light_obj.name,
+            'origin': origin,
+            'delay': int(light_obj.get('qss_quake_light_delay', 0)),
+            'value': float(light_obj.get('qss_quake_raw_light_value',
+                                         light_obj.get('qss_quake_light_value', 0.0))),
+            'wait': float(light_obj.get('qss_quake_wait', 1.0)),
+            'falloff': float(light_obj.get('qss_quake_falloff', 0.0)),
+            'cycles_active': bool(light_obj.get('qss_cycles_falloff_active', False)),
+            'cycles_profile': str(light_obj.get('qss_cycles_falloff_profile', 'unknown')),
+            'light_node_tree': _qss_cycles_light_node_summary(light_data),
+            'light_node_tree_qss_owned': _qss_cycles_falloff_tree_is_owned(light_data),
+            'spot_size': float(getattr(light_data, 'spot_size', 0.0)),
+            'spot_blend': float(getattr(light_data, 'spot_blend', 0.0)),
+            'energy': float(getattr(light_data, 'energy', 0.0)),
+        })
+    lines = []
+    for match in matches[:8]:
+        lines.append(
+            f"face={match['face_id']} poly={match['poly_index']} luxel={match['luxel']} "
+            f"atlas_sample={match['atlas_sample_centre']} "
+            f"world_quake={match['world_quake']}"
+        )
+        if match['world_quake'] is not None:
+            point = match['world_quake']
+            closest = sorted(
+                (
+                    (
+                        math.sqrt(sum((point[i] - light['origin'][i]) ** 2 for i in range(3))),
+                        light,
+                    )
+                    for light in lights
+                ),
+                key=lambda item: item[0],
+            )[:3]
+            for distance, light in closest:
+                lines.append(
+                    f"  nearest_light={light['name']} distance_qu={distance:.6g} "
+                    f"origin={light['origin']} delay={light['delay']} "
+                    f"value={light['value']:.6g} wait={light['wait']:.6g} "
+                    f"falloff={light['falloff']:.6g} "
+                    f"cycles_profile={light['cycles_profile']} "
+                    f"cycles_custom_active={light['cycles_active']} "
+                    f"light_node_tree_qss_owned={light['light_node_tree_qss_owned']} "
+                    f"light_node_tree={light['light_node_tree']} "
+                    f"spot_size={light['spot_size']:.6g} "
+                    f"spot_blend={light['spot_blend']:.6g} "
+                    f"energy={light['energy']:.6g}W"
+                )
+    return '\\n'.join(lines) if lines else 'No BSP face/luxel centre matched the reported non-finite atlas pixels.'
 
 
 def _qss_vector3(values):
@@ -7625,7 +8234,8 @@ def _qss_collect_direct_lights(context, obj, unit_scale, flip_z):
     inv_scale = 1.0 / max(1e-9, float(unit_scale))
     inverse_map = obj.matrix_world.inverted_safe()
     inverse_map_3x3 = inverse_map.to_3x3()
-    for light_obj in context.scene.objects:
+    active_map_objects = _qss_active_map_objects(context.scene, obj)
+    for light_obj in active_map_objects:
         role = light_obj.get('qss_light_role') if light_obj.type == 'LIGHT' else None
         if role not in {'quake_entity_light', 'quake_world_sunlight'}:
             continue
@@ -7704,10 +8314,42 @@ def _qss_source_bvh(obj, parsed, unit_scale, flip_z, context):
     return BVHTree.FromPolygons(world_vertices, polygons, all_triangles=False, epsilon=0.0)
 
 
-def _qss_read_source_face_sample(mesh, poly_index, face_id, parsed, sample_count=None):
+def _qss_source_face_sample_cache(parsed, sample_count=None):
+    """Precompute BSP face/style/geometry arrays once for per-face sampling."""
+    faces = parsed.faces()
+    texinfos = parsed.texinfos()
+    planes = parsed.planes()
+    edges = parsed.edges()
+    surfedges = parsed.surfedges()
+    vertices = parsed.vertices()
+    if sample_count is None:
+        source_rgb = parsed.bspx_lumps.get('RGBLIGHTING')
+        sample_count = max(
+            len(parsed.lumps[bsp.LUMP_LIGHTING]),
+            len(source_rgb) // 3 if source_rgb else 0,
+        )
+    decoupled_records, styles_by_face = _qss_decoupled_lightmap_state(
+        parsed, int(sample_count)
+    )
+    return {
+        'faces': faces,
+        'texinfos': texinfos,
+        'planes': planes,
+        'edges': edges,
+        'surfedges': surfedges,
+        'vertices': vertices,
+        'decoupled_records': decoupled_records,
+        'styles_by_face': styles_by_face,
+        'sample_count': int(sample_count),
+    }
+
+
+def _qss_read_source_face_sample(mesh, poly_index, face_id, parsed, sample_count=None, source_cache=None):
     """Return original BSP face, plane, texinfo and lightmap atlas metadata safely."""
     required = ('qss_bsp_face_id', 'qss_lm_has_data', 'qss_lm_atlas_x', 'qss_lm_atlas_y',
-                'qss_lm_sample_w', 'qss_lm_sample_h')
+                'qss_lm_sample_w', 'qss_lm_sample_h', 'qss_lm_world_chart',
+                'qss_lm_chart_s_min', 'qss_lm_chart_t_min',
+                'qss_lm_chart_axis_s', 'qss_lm_chart_axis_t')
     attrs = {name: mesh.attributes.get(name) for name in required}
     for name, attr in attrs.items():
         if attr is None:
@@ -7725,15 +8367,16 @@ def _qss_read_source_face_sample(mesh, poly_index, face_id, parsed, sample_count
     actual_face_id = int(_qss_safe_collection_item(attrs['qss_bsp_face_id'].data, poly_index, 'qss_bsp_face_id').value)
     if actual_face_id != int(face_id):
         face_id = actual_face_id
-    faces = parsed.faces()
+    cache = source_cache if source_cache is not None else _qss_source_face_sample_cache(parsed, sample_count)
+    faces = cache['faces']
     if face_id < 0 or face_id >= len(faces):
         raise bsp.BSPError(f'Face ID {face_id} is outside the source BSP face lump.')
     face = faces[face_id]
-    texinfos = parsed.texinfos()
+    texinfos = cache['texinfos']
     texinfo_id = int(face[4])
     if texinfo_id < 0 or texinfo_id >= len(texinfos):
         raise bsp.BSPError(f'BSP face {face_id} references invalid texinfo {texinfo_id}.')
-    planes = parsed.planes()
+    planes = cache['planes']
     plane_id = int(face[0])
     if plane_id < 0 or plane_id >= len(planes):
         raise bsp.BSPError(f'BSP face {face_id} references invalid plane {plane_id}.')
@@ -7741,18 +8384,14 @@ def _qss_read_source_face_sample(mesh, poly_index, face_id, parsed, sample_count
     sign = -1.0 if int(face[1]) else 1.0
     normal = tuple(float(plane[i]) * sign for i in range(3))
     distance = float(plane[3]) * sign
-    edges = parsed.edges()
-    surfedges = parsed.surfedges()
-    vertices = parsed.vertices()
-    vertex_ids = parsed.face_vertex_indices(face, edges, surfedges)
+    vertex_ids = parsed.face_vertex_indices(face, cache['edges'], cache['surfedges'])
+    vertices = cache['vertices']
     positions = [vertices[i] for i in vertex_ids]
     texinfo = texinfos[texinfo_id]
     sample_w = int(_qss_safe_collection_item(attrs['qss_lm_sample_w'].data, poly_index, 'qss_lm_sample_w').value)
     sample_h = int(_qss_safe_collection_item(attrs['qss_lm_sample_h'].data, poly_index, 'qss_lm_sample_h').value)
-    if sample_count is None:
-        source_rgb = parsed.bspx_lumps.get('RGBLIGHTING')
-        sample_count = max(len(parsed.lumps[bsp.LUMP_LIGHTING]), len(source_rgb) // 3 if source_rgb else 0)
-    decoupled_records, styles_by_face = _qss_decoupled_lightmap_state(parsed, sample_count)
+    decoupled_records = cache['decoupled_records']
+    styles_by_face = cache['styles_by_face']
     decoupled = decoupled_records[face_id] if decoupled_records is not None else None
     if decoupled_records is not None and decoupled is None:
         return None
@@ -7801,6 +8440,11 @@ def _qss_read_source_face_sample(mesh, poly_index, face_id, parsed, sample_count
         'styles': styles_by_face[face_id],
         'atlas_x': int(_qss_safe_collection_item(attrs['qss_lm_atlas_x'].data, poly_index, 'qss_lm_atlas_x').value),
         'atlas_y': int(_qss_safe_collection_item(attrs['qss_lm_atlas_y'].data, poly_index, 'qss_lm_atlas_y').value),
+        'world_chart': bool(_qss_safe_collection_item(attrs['qss_lm_world_chart'].data, poly_index, 'qss_lm_world_chart').value),
+        'chart_s_min': float(_qss_safe_collection_item(attrs['qss_lm_chart_s_min'].data, poly_index, 'qss_lm_chart_s_min').value),
+        'chart_t_min': float(_qss_safe_collection_item(attrs['qss_lm_chart_t_min'].data, poly_index, 'qss_lm_chart_t_min').value),
+        'chart_axis_s': tuple(float(value) for value in _qss_safe_collection_item(attrs['qss_lm_chart_axis_s'].data, poly_index, 'qss_lm_chart_axis_s').vector),
+        'chart_axis_t': tuple(float(value) for value in _qss_safe_collection_item(attrs['qss_lm_chart_axis_t'].data, poly_index, 'qss_lm_chart_axis_t').vector),
     }
 
 
@@ -7826,6 +8470,7 @@ def _qss_run_ericw_direct_bake(context, obj):
         len(parsed.lumps[bsp.LUMP_LIGHTING]),
         len(source_lit_rgb) // 3 if source_lit_rgb is not None else 0,
     )
+    source_sample_cache = _qss_source_face_sample_cache(parsed, light_sample_count)
     mesh = obj.data
     if len(mesh.polygons) == 0:
         raise bsp.BSPError('The selected QSS mesh has no polygons.')
@@ -7870,12 +8515,16 @@ def _qss_run_ericw_direct_bake(context, obj):
         raise bsp.BSPError(f'qss_bsp_face_id has {count} entries for {len(mesh.polygons)} polygons; exit Edit Mode and re-import if this persists.')
     # Keep exact per-atlas sample positions and source pixels for brightness matching.
     work = []
+    seen_chart_pixels = set()
     total_luxels = 0
     for poly_index, poly in enumerate(mesh.polygons):
         if not _qss_face_receives_light(obj, poly_index):
             continue
         face_id = int(_qss_safe_collection_item(face_id_attr.data, poly_index, 'qss_bsp_face_id').value)
-        face_info = _qss_read_source_face_sample(mesh, poly_index, face_id, parsed, light_sample_count)
+        face_info = _qss_read_source_face_sample(
+            mesh, poly_index, face_id, parsed, light_sample_count,
+            source_cache=source_sample_cache,
+        )
         if face_info is None:
             continue
         x0 = face_info['atlas_x'] * resolution + gutter
@@ -7906,17 +8555,32 @@ def _qss_run_ericw_direct_bake(context, obj):
                     local_normal.z = -local_normal.z
                 world_normal = (obj.matrix_world.to_3x3().inverted_safe().transposed() @ local_normal).normalized()
                 world_point = _qss_quake_to_world(obj, qpoint, unit_scale, flip_z)
-                top_y = y0 + sy * scale + (scale - 1) // 2
-                pixel_y = size - 1 - top_y
-                pixel_x = x0 + sx * scale + (scale - 1) // 2
+                if face_info.get('world_chart', False):
+                    world_s = sum(qpoint[i] * face_info['chart_axis_s'][i] for i in range(3))
+                    world_t = sum(qpoint[i] * face_info['chart_axis_t'][i] for i in range(3))
+                    pixel_x_float, pixel_y_float = lightmap_export_utils.world_chart_pixel_coordinates(
+                        world_s, world_t, face_info['atlas_x'], face_info['atlas_y'],
+                        face_info['chart_s_min'], face_info['chart_t_min'],
+                        int(obj.get('qss_lightmap_gutter', 0)), max(1, int(obj.get('qss_lightmap_scale', 1))),
+                        resolution, size,
+                    )
+                    pixel_x, pixel_y = int(round(pixel_x_float)), int(round(pixel_y_float))
+                else:
+                    top_y = y0 + sy * scale + (scale - 1) // 2
+                    pixel_y = size - 1 - top_y
+                    pixel_x = x0 + sx * scale + (scale - 1) // 2
                 pixel_index = (pixel_y * size + pixel_x) * 4
                 source_luma = 0.0
                 if original_pixels is not None:
                     source_luma = (0.2126 * original_pixels[pixel_index] +
                                    0.7152 * original_pixels[pixel_index + 1] +
                                    0.0722 * original_pixels[pixel_index + 2])
-                work.append((face_id, face_info['styles'], qpoint, face_info['plane_normal'],
-                             world_point, world_normal, pixel_index, source_luma))
+                # Adjacent faces in a shared chart can address the same boundary
+                # luxel. Evaluate/write that physical chart pixel once.
+                if pixel_index not in seen_chart_pixels:
+                    seen_chart_pixels.add(pixel_index)
+                    work.append((face_id, face_info['styles'], qpoint, face_info['plane_normal'],
+                                 world_point, world_normal, pixel_index, source_luma))
         total_luxels += face_info['width'] * face_info['height']
     if not work:
         raise bsp.BSPError('No valid lightmap luxels were found. Check BSP face styles and UV metadata.')
@@ -8212,9 +8876,37 @@ def _qss_restore_lightmap_uvs(obj, uv_layer, backup):
     obj.data.update()
 
 
+def _qss_expand_world_chart_face_scope(obj, face_indices):
+    """Expand partial bake scopes to every face sharing a world-aligned chart."""
+    mesh = obj.data
+    selected = {int(index) for index in face_indices}
+    world_attr = mesh.attributes.get("qss_lm_world_chart")
+    x_attr = mesh.attributes.get("qss_lm_atlas_x")
+    y_attr = mesh.attributes.get("qss_lm_atlas_y")
+    if not all(attr is not None and len(attr.data) == len(mesh.polygons)
+               for attr in (world_attr, x_attr, y_attr)):
+        raise bsp.BSPError("World-chart metadata is missing or stale; re-import the BSP.")
+    chart_keys = set()
+    for index in selected:
+        if 0 <= index < len(mesh.polygons) and bool(world_attr.data[index].value):
+            chart_keys.add((
+                int(x_attr.data[index].value), int(y_attr.data[index].value)
+            ))
+    if not chart_keys:
+        return sorted(selected)
+    for index in range(len(mesh.polygons)):
+        if not bool(world_attr.data[index].value):
+            continue
+        key = (int(x_attr.data[index].value), int(y_attr.data[index].value))
+        if key in chart_keys:
+            selected.add(index)
+    return sorted(selected)
+
+
 def _qss_partial_lightmap_rectangles(obj, image, face_indices, padding=0):
     mesh = obj.data
-    required = ("qss_lm_atlas_x", "qss_lm_atlas_y", "qss_lm_sample_w", "qss_lm_sample_h")
+    required = ("qss_lm_atlas_x", "qss_lm_atlas_y", "qss_lm_sample_w", "qss_lm_sample_h",
+                "qss_lm_world_chart", "qss_lm_chart_width", "qss_lm_chart_height")
     attributes = {}
     for name in required:
         attribute = mesh.attributes.get(name)
@@ -8222,12 +8914,20 @@ def _qss_partial_lightmap_rectangles(obj, image, face_indices, padding=0):
             raise bsp.BSPError(f"Face attribute {name} is missing or invalid; re-import the BSP.")
         attributes[name] = attribute
     resolution = _qss_lightmap_pixel_scale(obj, image)
-    return bake_scope_utils.face_luxel_rectangles(
+    widths, heights = [], []
+    for index in range(len(mesh.polygons)):
+        if bool(attributes["qss_lm_world_chart"].data[index].value):
+            widths.append(int(attributes["qss_lm_chart_width"].data[index].value))
+            heights.append(int(attributes["qss_lm_chart_height"].data[index].value))
+        else:
+            widths.append(int(attributes["qss_lm_sample_w"].data[index].value))
+            heights.append(int(attributes["qss_lm_sample_h"].data[index].value))
+    rectangles = bake_scope_utils.face_luxel_rectangles(
         face_indices,
         [int(item.value) for item in attributes["qss_lm_atlas_x"].data],
         [int(item.value) for item in attributes["qss_lm_atlas_y"].data],
-        [int(item.value) for item in attributes["qss_lm_sample_w"].data],
-        [int(item.value) for item in attributes["qss_lm_sample_h"].data],
+        widths,
+        heights,
         image_width=int(image.size[0]),
         image_height=int(image.size[1]),
         resolution=resolution,
@@ -8235,6 +8935,7 @@ def _qss_partial_lightmap_rectangles(obj, image, face_indices, padding=0):
         gutter=max(0, int(obj.get("qss_lightmap_gutter", 0))) * resolution,
         padding=max(0, int(padding)),
     )
+    return list(dict.fromkeys(tuple(int(value) for value in rect) for rect in rectangles))
 
 
 def _qss_map_for_selected_lights(context, lights):
@@ -8701,7 +9402,9 @@ class QSS_OT_bake_scene_lights(Operator):
                 if _qss_face_receives_light(obj, poly.index)
             ]
             if target_face_indices is not None:
-                requested_faces = {int(index) for index in target_face_indices}
+                requested_faces = set(_qss_expand_world_chart_face_scope(
+                    obj, target_face_indices
+                ))
                 receiver_face_indices = [
                     index for index in receiver_face_indices if index in requested_faces
                 ]
@@ -8820,50 +9523,35 @@ class QSS_OT_bake_scene_lights(Operator):
             # Measure the raw Cycles irradiance at actual BSP luxel centres.
             # The atlas is float/Non-Color: unlike an 8-bit byte image it can
             # preserve low irradiance values and calibrated values above 1.0.
-            bake_values = _lightmap_sample_luminances(obj, bake_target, receiver_face_indices)
-            raw_bake_mean = (sum(bake_values) / len(bake_values)) if bake_values else 0.0
-            raw_image_stats = _image_rgb_statistics(bake_target)
-            raw_face_coverage = _lightmap_face_coverage(obj, bake_target, face_indices=receiver_face_indices)
-            obj['qss_last_bake_attempt_face_coverage'] = str(raw_face_coverage)
+            # Parse the source BSP once for all chart-aware diagnostics. Previously
+            # each world-chart face reparsed the complete BSP independently here,
+            # making post-bake validation scale as O(faces * BSP parse time) on E1M1.
+            source_bsp_for_samples = None
+            if any(
+                bool(mesh.attributes['qss_lm_world_chart'].data[index].value)
+                for index in receiver_face_indices
+            ):
+                source_path = bpy.path.abspath(str(obj.get('qss_source_path', '') or ''))
+                if not source_path or not os.path.isfile(source_path):
+                    raise bsp.BSPError('The source BSP is required for world-chart bake validation.')
+                source_bsp_for_samples = bsp.BSP29.from_file(source_path)
+            source_sample_cache = (
+                _qss_source_face_sample_cache(source_bsp_for_samples)
+                if source_bsp_for_samples is not None else None
+            )
             source_image = bpy.data.images.get(obj.get('qss_original_lightmap_backup', ''))
-            source_values = _lightmap_sample_luminances(obj, source_image, receiver_face_indices) if source_image else []
+            source_values = (
+                _lightmap_sample_luminances(
+                    obj, source_image, receiver_face_indices,
+                    parsed_source=source_bsp_for_samples, source_cache=source_sample_cache,
+                ) if source_image else []
+            )
             source_mean = (sum(source_values) / len(source_values)) if source_values else 0.0
             energy_scale = max(0.0, float(scene.qss_light_energy_scale))
             max_energy_after_bake = max((float(o.data.energy) for o in imported_lights), default=0.0)
             obj['qss_last_bake_attempt_scale'] = energy_scale
             obj['qss_last_bake_attempt_max_lamp_energy'] = max_energy_after_bake
-            obj['qss_last_bake_attempt_sample_count'] = len(bake_values)
-            obj['qss_last_bake_attempt_raw_mean'] = float(raw_bake_mean)
-            obj['qss_last_bake_attempt_image_stats'] = str(raw_image_stats)
-            if energy_scale <= 0.0:
-                raise bsp.BSPError(
-                    'Live light scale is exactly 0. Set it to 1.0 (or higher), click Apply Light Energy Scale, '
-                    'confirm the Live Lights preview is illuminated, then bake again.'
-                )
-            if not bake_values or raw_bake_mean <= 1e-8:
-                obj['qss_last_bake_attempt_lights'] = '; '.join(
-                    f'{lamp.name}: {float(lamp.data.energy):.6g}W type={lamp.data.type} '
-                    f'hide_render={bool(lamp.hide_render)} hide_viewport={bool(lamp.hide_viewport)} '
-                    f'hide_get={bool(lamp.hide_get())} cutoff={float(getattr(lamp.data, "cutoff_distance", 0.0)):.4g}'
-                    for lamp in imported_lights
-                )
-                raise bsp.BSPError(
-                    'Cycles completed without producing any nonzero sampled BSP lightmap luxels. '
-                    f'Energy scale={energy_scale:g}; output scale={float(getattr(scene, "qss_bake_output_scale", 1.0)):.6g}; '
-                    f'imported lamps={len(imported_lights)}; max lamp energy={max_energy_after_bake:.6g} W; '
-                    f'sampled luxels={len(bake_values)}; source mean={source_mean:.6g}; '
-                    f'whole atlas nonzero pixels={raw_image_stats["nonzero_pixels"]}/{raw_image_stats["pixels"]}; '
-                    f'whole atlas max RGB={raw_image_stats["max_channel"]:.6g}. '
-                    'The failed bake was discarded. Use Save Lighting Diagnostics and send the report.'
-                )
-            if bool(getattr(scene, 'qss_bake_match_source', True)) and source_mean > 1e-8:
-                # Source matching is an image-atlas operation only. Preserve
-                # imported lamp energies and the user's live energy slider.
-                obj['qss_calibration_source_mean'] = source_mean
-                obj['qss_calibration_bake_mean'] = raw_bake_mean
-                obj['qss_last_bake_atlas_match_scale'] = (
-                    lighting_utils.bake_atlas_match_scale(source_mean, raw_bake_mean)
-                )
+            obj['qss_last_bake_attempt_source_mean'] = float(source_mean)
 
             # Copy the completed float bake into the project's current atlas.
             # Source-match normalization is a global linear calibration, not a
@@ -8887,6 +9575,87 @@ class QSS_OT_bake_scene_lights(Operator):
                     core_rectangles, block_size=luxel_block_size,
                 )
             )
+            # Source-match calibration must measure the exact luxel-reduced
+            # image that is about to be exported. Measuring the supersampled
+            # raster here can differ from the final Quake luxel mean.
+            bake_target.pixels.foreach_set(baked)
+            bake_target.update()
+            bake_values = _lightmap_sample_luminances(
+                obj, bake_target, receiver_face_indices,
+                parsed_source=source_bsp_for_samples, source_cache=source_sample_cache,
+            )
+            raw_bake_mean = (sum(bake_values) / len(bake_values)) if bake_values else 0.0
+            raw_image_stats = _image_rgb_statistics(bake_target)
+            raw_face_coverage = _lightmap_face_coverage(
+                obj, bake_target, face_indices=receiver_face_indices,
+                parsed_source=source_bsp_for_samples, source_cache=source_sample_cache,
+            )
+            obj['qss_last_bake_attempt_face_coverage'] = str(raw_face_coverage)
+            obj['qss_last_bake_attempt_sample_count'] = len(bake_values)
+            obj['qss_last_bake_attempt_raw_mean'] = float(raw_bake_mean)
+            obj['qss_last_bake_attempt_image_stats'] = str(raw_image_stats)
+            nonfinite_bake_samples = sum(
+                not math.isfinite(float(value)) for value in bake_values
+            )
+            nonfinite_source_samples = sum(
+                not math.isfinite(float(value)) for value in source_values
+            )
+            obj['qss_last_bake_attempt_nonfinite_luxels'] = int(nonfinite_bake_samples)
+            obj['qss_last_bake_attempt_nonfinite_source_luxels'] = int(nonfinite_source_samples)
+            if nonfinite_bake_samples or nonfinite_source_samples:
+                nonfinite_details = _qss_describe_nonfinite_luxels(
+                    context, obj, bake_target, receiver_face_indices,
+                    source_bsp_for_samples, source_sample_cache,
+                    raw_image_stats.get('first_nonfinite_pixels', []),
+                )
+                obj['qss_last_bake_attempt_nonfinite_details'] = nonfinite_details
+                obj['qss_last_bake_attempt_lights'] = (
+                    f'Non-finite luxel samples: bake={nonfinite_bake_samples}; '
+                    f'source={nonfinite_source_samples}; locations={nonfinite_details}'
+                )
+                raise bsp.BSPError(
+                    'Cycles bake produced non-finite luxel luminance samples; '
+                    f'baked={nonfinite_bake_samples}/{len(bake_values)}, '
+                    f'source={nonfinite_source_samples}/{len(source_values)}, '
+                    f'non-finite atlas RGB values={raw_image_stats.get("nonfinite_rgb_values", 0)}, '
+                    f'non-finite atlas pixels={raw_image_stats.get("nonfinite_pixels", 0)}, '
+                    f'first atlas pixel coordinates={raw_image_stats.get("first_nonfinite_pixels", [])}. '
+                    'The atlas was restored. This is not a zero-light bake; inspect the offending Cycles light/shader samples.'
+                )
+            if not math.isfinite(float(source_mean)) or not math.isfinite(float(raw_bake_mean)):
+                raise bsp.BSPError(
+                    f'Cycles luminance statistics are non-finite (source={source_mean!r}, '
+                    f'baked={raw_bake_mean!r}); atlas restored.'
+                )
+            if energy_scale <= 0.0:
+                raise bsp.BSPError(
+                    'Live light scale is exactly 0. Set it to 1.0 (or higher), click Apply Light Energy Scale, '
+                    'confirm the Live Lights preview is illuminated, then bake again.'
+                )
+            if not bake_values or raw_bake_mean <= 1e-8:
+                obj['qss_last_bake_attempt_lights'] = '; '.join(
+                    f'{lamp.name}: {float(lamp.data.energy):.6g}W type={lamp.data.type} '
+                    f'hide_render={bool(lamp.hide_render)} hide_viewport={bool(lamp.hide_viewport)} '
+                    f'hide_get={bool(lamp.hide_get())} cutoff={float(getattr(lamp.data, "cutoff_distance", 0.0)):.4g}'
+                    for lamp in imported_lights
+                )
+                raise bsp.BSPError(
+                    'Cycles completed without producing any nonzero sampled BSP lightmap luxels. '
+                    f'Energy scale={energy_scale:g}; output scale={float(getattr(scene, "qss_bake_output_scale", 1.0)):.6g}; '
+                    f'imported lamps={len(imported_lights)}; max lamp energy={max_energy_after_bake:.6g} W; '
+                    f'sampled luxels={len(bake_values)}; source mean={source_mean:.6g}; '
+                    f'whole atlas nonzero pixels={raw_image_stats["nonzero_pixels"]}/{raw_image_stats["pixels"]}; '
+                    f'whole atlas max RGB={raw_image_stats["max_channel"]:.6g}. '
+                    'The failed bake was discarded. Use Save Lighting Diagnostics and send the report.'
+                )
+            if bool(getattr(scene, 'qss_bake_match_source', True)) and source_mean > 1e-8:
+                # Preserve the lamp energy and slider; normalize the completed
+                # reduced atlas only, using unclamped HDR luxel samples.
+                obj['qss_calibration_source_mean'] = source_mean
+                obj['qss_calibration_bake_mean'] = raw_bake_mean
+                obj['qss_last_bake_atlas_match_scale'] = (
+                    lighting_utils.bake_atlas_match_scale(source_mean, raw_bake_mean)
+                )
             # Re-dilate each receiver from its own core luxels. This makes
             # padding deterministic across Cycles versions and partial bakes.
             core_rectangles = _qss_partial_lightmap_rectangles(
@@ -10047,9 +10816,13 @@ def _qss_map_light_updates(context, obj, source_text):
 
 def _qss_prepare_companion_map_export(context, obj, output_bsp):
     """Prepare a separate companion MAP, refusing stale or unowned overwrites."""
-    source_map = os.path.abspath(str(obj.get("qss_source_map_path", "") or ""))
-    if not source_map:
+    source_map_raw = str(obj.get("qss_source_map_path", "") or "").strip()
+    # An absent companion path means MAP synchronization is not configured.
+    # Check this before abspath(): abspath("") resolves to Blender's working
+    # directory and would otherwise be mistaken for a missing .map file.
+    if not source_map_raw:
         return None
+    source_map = os.path.abspath(source_map_raw)
     if not os.path.isfile(source_map):
         raise map_sync.MapSyncError(f"Linked companion MAP is missing: {source_map}")
     with open(source_map, "r", encoding="latin1", newline="") as handle:
@@ -10149,7 +10922,14 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
             if not output:
                 raise OSError("Choose an output BSP filename.")
             os.makedirs(os.path.dirname(output) or os.getcwd(), exist_ok=True)
-            prepared_map = _qss_prepare_companion_map_export(context, obj, output)
+            prepared_map = None
+            map_sync_warning = ""
+            try:
+                prepared_map = _qss_prepare_companion_map_export(context, obj, output)
+            except (map_sync.MapSyncError, OSError, UnicodeError) as map_exc:
+                map_sync_warning = str(map_exc)
+                obj["qss_map_sync_status"] = "UNAVAILABLE"
+                obj["qss_map_sync_error"] = map_sync_warning
             if mode == "BOTH":
                 root, ext = os.path.splitext(output)
                 ext = ext or ".bsp"
@@ -10181,8 +10961,19 @@ class QSS_OT_export_bsp(Operator, ExportHelper):
                 summary = f"Exported {os.path.basename(result[0])} ({mode})"
             obj["qss_last_export_path"] = chosen
             obj["qss_last_export_mode"] = mode
-            map_output_path = _qss_commit_companion_map_export(obj, prepared_map)
+            try:
+                map_output_path = _qss_commit_companion_map_export(obj, prepared_map)
+            except (map_sync.MapSyncError, OSError, UnicodeError) as map_exc:
+                map_output_path = ""
+                map_sync_warning = str(map_exc)
+                obj["qss_map_sync_status"] = "UNAVAILABLE"
+                obj["qss_map_sync_error"] = map_sync_warning
             detail = ""
+            if map_sync_warning:
+                detail += (
+                    " | Companion MAP was not updated (BSP export succeeded): "
+                    + map_sync_warning
+                )
             if map_output_path:
                 detail += (
                     f" | companion MAP {os.path.basename(map_output_path)} "
@@ -10217,13 +11008,15 @@ def _qss_diagnostics_text(context, obj):
         f'Inline mover shadow policy: faces={obj.get("qss_inline_model_no_shadow_face_count", 0)} classes={obj.get("qss_inline_model_no_shadow_classnames", "")}',
         f'Last bake mover shadow-transparent materials: {obj.get("qss_last_bake_shadow_exempt_material_count", "n/a")} (attempt: {obj.get("qss_last_bake_attempt_shadow_exempt_material_count", "n/a")})',
         f'Last bake attempt timing: total={bake_stats_utils.format_duration(obj.get("qss_last_bake_attempt_duration_seconds"))}; Cycles operator={bake_stats_utils.format_duration(obj.get("qss_last_bake_attempt_cycles_seconds"))}',
+        f'Last BSP export: total={bake_stats_utils.format_duration(obj.get("qss_last_export_duration_seconds"))}; stages={obj.get("qss_last_export_stage_timings", "n/a")}',
         f'Last successful bake workload: samples={obj.get("qss_last_bake_samples", "n/a")} device={obj.get("qss_last_bake_device", "n/a")} diffuse_bounces={obj.get("qss_last_bake_diffuse_bounces", "n/a")} atlas={obj.get("qss_last_bake_atlas_size", "n/a")}px receiver_faces={obj.get("qss_last_bake_receiver_faces", "n/a")}',
         f'Last attempted bake workload: samples={obj.get("qss_last_bake_attempt_samples", "n/a")} device={obj.get("qss_last_bake_attempt_device", "n/a")} diffuse_bounces={obj.get("qss_last_bake_attempt_diffuse_bounces", "n/a")} atlas={obj.get("qss_last_bake_attempt_atlas_size", "n/a")}px receiver_faces={obj.get("qss_last_bake_attempt_receiver_faces", "n/a")}',
-        f'Last attempted bake: scale={obj.get("qss_last_bake_attempt_scale", "n/a")} max_lamp_energy={obj.get("qss_last_bake_attempt_max_lamp_energy", "n/a")} sampled_luxels={obj.get("qss_last_bake_attempt_sample_count", "n/a")} sampled_mean={obj.get("qss_last_bake_attempt_raw_mean", "n/a")} image_stats={obj.get("qss_last_bake_attempt_image_stats", "n/a")}',
+        f'Last attempted bake: scale={obj.get("qss_last_bake_attempt_scale", "n/a")} max_lamp_energy={obj.get("qss_last_bake_attempt_max_lamp_energy", "n/a")} sampled_luxels={obj.get("qss_last_bake_attempt_sample_count", "n/a")} sampled_mean={obj.get("qss_last_bake_attempt_raw_mean", "n/a")} source_mean={obj.get("qss_last_bake_attempt_source_mean", "n/a")} nonfinite_luxels={obj.get("qss_last_bake_attempt_nonfinite_luxels", "n/a")} source_nonfinite_luxels={obj.get("qss_last_bake_attempt_nonfinite_source_luxels", "n/a")} image_stats={obj.get("qss_last_bake_attempt_image_stats", "n/a")}',
         f'Last attempted face coverage (raw bake): {obj.get("qss_last_bake_attempt_face_coverage", "n/a")}',
         f'Last Cycles bake operator result: {obj.get("qss_last_bake_attempt_operator_result", "n/a")}',
         f'Last Cycles attempt config: engine={obj.get("qss_last_bake_attempt_engine", "n/a")} target={obj.get("qss_last_bake_attempt_target", "n/a")} type={obj.get("qss_last_bake_attempt_type", "n/a")} uv={obj.get("qss_last_bake_attempt_uv", "n/a")}',
         f'Last attempted lamp states: {obj.get("qss_last_bake_attempt_lights", "n/a")}',
+        f'Non-finite luxel face/world/light matches: {obj.get("qss_last_bake_attempt_nonfinite_details", "n/a")}',
         f'Last attempted scene visibility: {obj.get("qss_last_bake_attempt_scene_visibility", "n/a")}',
         f'Current (restored) bake settings: engine={context.scene.render.engine} target={getattr(context.scene.render.bake, "target", "n/a")} samples={getattr(getattr(context.scene, "cycles", None), "samples", "n/a")} diffuse_bounces={getattr(getattr(context.scene, "cycles", None), "diffuse_bounces", "n/a")} color={getattr(context.scene.render.bake, "use_pass_color", "n/a")} diffuse={getattr(context.scene.render.bake, "use_pass_diffuse", "n/a")} direct={getattr(context.scene.render.bake, "use_pass_direct", "n/a")} indirect={getattr(context.scene.render.bake, "use_pass_indirect", "n/a")}',
         f'Color management: view_transform={context.scene.view_settings.view_transform} look={context.scene.view_settings.look} exposure={context.scene.view_settings.exposure} gamma={context.scene.view_settings.gamma}',
@@ -10235,7 +11028,9 @@ def _qss_diagnostics_text(context, obj):
     lines.append(f'Mesh faces: {len(mesh.polygons)}; materials: {len(mesh.materials)}; loops={len(mesh.loops)}; vertices={len(mesh.vertices)}')
     for attr_name in ('qss_bsp_face_id', 'qss_bsp_texinfo_id', 'qss_bsp_miptex_id',
                       'qss_lm_has_data', 'qss_lm_atlas_x', 'qss_lm_atlas_y',
-                      'qss_lm_sample_w', 'qss_lm_sample_h'):
+                      'qss_lm_sample_w', 'qss_lm_sample_h', 'qss_lm_world_chart',
+                      'qss_lm_chart_s_min', 'qss_lm_chart_t_min',
+                      'qss_lm_chart_axis_s', 'qss_lm_chart_axis_t'):
         try:
             attr = mesh.attributes.get(attr_name)
             count = len(attr.data) if attr is not None else 'MISSING'
@@ -10337,16 +11132,27 @@ def _qss_diagnostics_text(context, obj):
                     uv_maps.append(f'{node.get("qss_role", "")}: {node.uv_map}')
         lines.append(f'  slot {slot} {mat.name}: base={base_images} lightmap={light_images} uv={uv_maps}')
 
-    lines.append('IMPORTED LIGHTS:')
-    for light_obj in context.scene.objects:
+    lines.append('IMPORTED LIGHTS (active BSP map only):')
+    active_map_objects = _qss_active_map_objects(context.scene, obj)
+    active_map_lights = 0
+    for light_obj in active_map_objects:
         if light_obj.type != 'LIGHT' or light_obj.get('qss_light_role') not in {'quake_entity_light', 'quake_world_sunlight'}:
             continue
-        lines.append('  {} type={} color={} energy={:.6g} W style={} inferred={} value={} delay={} range={} manual_calibration={}'.format(
+        lines.append('  {} type={} color={} energy={:.6g} W style={} inferred={} value={} delay={} range={} manual_calibration={} cycles_profile={} cycles_custom_active={} cycles_error={} light_node_tree_qss_owned={} light_node_tree={} spot_size={:.6g} spot_blend={:.6g}'.format(
             light_obj.name, light_obj.data.type, tuple(round(float(v), 4) for v in light_obj.data.color),
             float(light_obj.data.energy), light_obj.get('qss_quake_light_style', 0),
             light_obj.get('qss_quake_style_was_inferred', False), light_obj.get('qss_quake_light_value', ''),
             light_obj.get('qss_quake_light_delay', 0), light_obj.get('qss_quake_range', ''),
-            light_obj.get('qss_manual_energy_calibration', 1.0)))
+            light_obj.get('qss_manual_energy_calibration', 1.0),
+            light_obj.get('qss_cycles_falloff_profile', 'unknown'),
+            light_obj.get('qss_cycles_falloff_active', False),
+            str(light_obj.get('qss_cycles_falloff_error', '')).replace(' ', '_'),
+            _qss_cycles_falloff_tree_is_owned(light_obj.data),
+            _qss_cycles_light_node_summary(light_obj.data),
+            float(getattr(light_obj.data, 'spot_size', 0.0)),
+            float(getattr(light_obj.data, 'spot_blend', 0.0))))
+        active_map_lights += 1
+    lines.append(f'Active-map imported light count: {active_map_lights}')
     world = context.scene.world
     lines.append(f'World: {world.name if world else "None"}')
     if world and world.use_nodes and world.node_tree:
@@ -10693,8 +11499,8 @@ class QSS_OT_set_lighting_mode(Operator):
     mode: EnumProperty(
         name="Lighting mode",
         items=(("source", "Original", "Display imported BSP lightmaps"),
-               ("realtime", "Eevee", "Preview scene lights in Material Preview"),
-               ("cycles", "Cycles", "Preview scene lights in Cycles"),
+               ("realtime", "Eevee", "Fast live preview using Blender-native falloff (approximate)"),
+               ("cycles", "Cycles", "Preview scene lights with Quake delay-0/5 falloff corrections (slower)"),
                ("baked", "Baked", "Display the generated lightmap")),
     )
 
@@ -11205,6 +12011,7 @@ class QSS_OT_test_in_ironwail(Operator):
             stem = f"qss_test_{time.time_ns()}"
             output_path = os.path.join(test_dir, stem + ".bsp")
             export_result = _export_object(obj, output_path, mode)
+            export_duration = float(obj.get('qss_last_export_duration_seconds', 0.0))
             output_path = export_result[0]
             lit_path = export_result[5]
 
@@ -11243,8 +12050,8 @@ class QSS_OT_test_in_ironwail(Operator):
             bpy.app.timers.register(cleanup_test_export, first_interval=3.0)
             self.report(
                 {"INFO"},
-                f"Temporary {mode} test map launched in Ironwail (PID {process.pid}); "
-                "the BSP and optional .lit are removed when Ironwail exits.",
+                f"Temporary {mode} test map exported in {export_duration:.2f}s and launched in Ironwail "
+                f"(PID {process.pid}); the BSP and optional .lit are removed when Ironwail exits.",
             )
             return {"FINISHED"}
         except Exception as exc:

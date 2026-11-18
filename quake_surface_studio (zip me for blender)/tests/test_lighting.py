@@ -6,6 +6,33 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import lighting
 
 
+class CyclesFalloffPolicyTests(unittest.TestCase):
+    def test_delay_zero_uses_the_exact_ericw_correction(self):
+        self.assertTrue(lighting.cycles_uses_ericw_falloff_correction(0))
+
+    def test_delay_five_uses_the_exact_ericw_correction(self):
+        self.assertTrue(lighting.cycles_uses_ericw_falloff_correction(5))
+
+    def test_all_other_delays_keep_the_native_fallback(self):
+        for delay in (1, 2, 3, 4, 6, -1):
+            self.assertFalse(lighting.cycles_uses_ericw_falloff_correction(delay))
+
+    def test_invalid_delay_keeps_the_native_fallback(self):
+        self.assertFalse(lighting.cycles_uses_ericw_falloff_correction("invalid"))
+
+    def test_delay_zero_correction_is_finite_at_the_light_origin(self):
+        import math
+        value = lighting.ericw_cycles_light_falloff_correction(0, 0.0, 1000.0)
+        self.assertTrue(math.isfinite(value))
+        self.assertEqual(value, 0.0)
+
+    def test_delay_five_correction_is_finite_at_the_light_origin(self):
+        import math
+        value = lighting.ericw_cycles_light_falloff_correction(5, 0.0, 1000.0)
+        self.assertTrue(math.isfinite(value))
+        self.assertEqual(value, 0.0)
+
+
 class LightingHelpersTests(unittest.TestCase):
     def test_energy_scale_is_applied_as_a_live_multiplier(self):
         self.assertAlmostEqual(lighting.scaled_quake_light_energy(300, 0.01), 3.0)
@@ -96,6 +123,36 @@ class LightingHelpersTests(unittest.TestCase):
 
 
 class BlenderLivePreviewCalibrationTests(unittest.TestCase):
+    def test_default_ericw_softangle_uses_narrow_cycles_safe_blend(self):
+        blend = lighting.blender_spot_blend_from_ericw_angles(40, 0)
+        self.assertEqual(blend, lighting.CYCLES_MIN_SPOT_BLEND)
+        self.assertGreater(blend, 0.0)
+        self.assertLess(blend, 0.02)
+
+    def test_positive_ericw_softangle_keeps_proportional_blend(self):
+        self.assertAlmostEqual(lighting.blender_spot_blend_from_ericw_angles(40, 30), 0.25)
+        # A zero-width transition also receives the finite Cycles-safe floor.
+        self.assertEqual(
+            lighting.blender_spot_blend_from_ericw_angles(40, 40),
+            lighting.CYCLES_MIN_SPOT_BLEND,
+        )
+
+    def test_invalid_spot_angles_use_cycles_safe_blend(self):
+        self.assertEqual(
+            lighting.blender_spot_blend_from_ericw_angles(float('nan'), 0),
+            lighting.CYCLES_MIN_SPOT_BLEND,
+        )
+        self.assertEqual(
+            lighting.blender_spot_blend_from_ericw_angles('bad', 0),
+            lighting.CYCLES_MIN_SPOT_BLEND,
+        )
+
+    def test_ericw_reference_still_has_an_exact_hard_spot_boundary(self):
+        import math
+        outer_cos = math.cos(math.radians(20.0))
+        self.assertEqual(lighting.ericw_spot_factor(outer_cos - 1e-6, 40, 0), 0.0)
+        self.assertEqual(lighting.ericw_spot_factor(outer_cos, 40, 0), 1.0)
+
     def test_cycles_margin_scales_with_atlas_resolution(self):
         self.assertEqual(lighting.lightmap_bake_margin_pixels(2, 1), 2)
         self.assertEqual(lighting.lightmap_bake_margin_pixels(2, 4), 8)
@@ -438,3 +495,41 @@ class EricwContributionGateTests(unittest.TestCase):
             lighting.ericw_light_value(300, 0, 200, world_dist=2, falloff=100),
             0.0,
         )
+
+
+class CyclesNativeFallbackSourceContractTests(unittest.TestCase):
+    def test_newly_imported_delay_zero_and_five_lights_install_quake_falloff(self):
+        addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
+        with open(addon_path, "r", encoding="utf-8") as handle:
+            source = handle.read()
+        import_start = source.index("def _import_bsp_entities(")
+        import_end = source.index("\ndef ", import_start + 5)
+        importer = source[import_start:import_end]
+        self.assertIn("cycles_uses_ericw_falloff_correction(delay)", importer)
+        self.assertIn("allow_initial_import_tree=True", importer)
+
+        update_start = source.index("def _qss_update_cycles_delay_falloff(")
+        update_end = source.index("\ndef ", update_start + 5)
+        updater = source[update_start:update_end]
+        self.assertIn("allow_initial_import_tree=False", updater)
+        self.assertIn("is_safe_to_replace_light_node_tree", updater)
+
+    def test_blender_native_fallback_clears_only_qss_owned_light_graphs(self):
+        addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
+        with open(addon_path, "r", encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("def _qss_clear_owned_cycles_light_nodes(light_data):", source)
+        helper_start = source.index("def _qss_clear_owned_cycles_light_nodes(light_data):")
+        helper_end = source.index("\ndef ", helper_start + 5)
+        helper = source[helper_start:helper_end]
+        self.assertIn("_qss_cycles_falloff_tree_is_owned(light_data)", helper)
+        self.assertIn("node_tree.nodes.clear()", helper)
+        self.assertNotIn("use_nodes = False", helper)
+
+    def test_native_fallback_records_actual_node_tree_not_use_nodes_flag(self):
+        addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
+        with open(addon_path, "r", encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("def _qss_cycles_light_node_summary(light_data, limit=8):", source)
+        self.assertIn("light_node_tree_qss_owned", source)
+        self.assertIn("light_node_tree={light['light_node_tree']}", source)

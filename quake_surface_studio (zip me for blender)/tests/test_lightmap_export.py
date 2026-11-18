@@ -302,5 +302,222 @@ class CoplanarEdgeStitchTests(unittest.TestCase):
         self.assertEqual(self.lighting[8], 60)
 
 
+class WorldAlignedLightmapChartTests(unittest.TestCase):
+    def setUp(self):
+        self.faces = [
+            (0, 0, 0, 4, 0, 0, 255, 255, 255, 0),
+            (0, 0, 4, 4, 0, 0, 255, 255, 255, 4),
+        ]
+        self.planes = [(0.0, 0.0, 1.0, 0.0, 2)]
+        self.vertices = [
+            (0.0, 0.0, 0.0), (16.0, 0.0, 0.0),
+            (16.0, 16.0, 0.0), (0.0, 16.0, 0.0),
+            (32.0, 0.0, 0.0), (32.0, 16.0, 0.0),
+        ]
+        self.edges = [
+            (0, 1), (1, 2), (2, 3), (3, 0),
+            (1, 4), (4, 5), (5, 2),
+        ]
+        self.surfedges = [0, 1, 2, 3, 4, 5, 6, -1]
+        self.texinfo = (1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0, 0)
+        self.records = [
+            {
+                "face_id": 0, "positions": self.vertices[:4],
+                "styles": (0, 255, 255, 255), "texinfo": self.texinfo,
+                "s_min": 0, "t_min": 0, "width": 2, "height": 2,
+                "samples_rgb": [(20, 20, 20)] * 4,
+            },
+            {
+                "face_id": 1, "positions": [
+                    self.vertices[1], self.vertices[4],
+                    self.vertices[5], self.vertices[2],
+                ],
+                "styles": (0, 255, 255, 255), "texinfo": self.texinfo,
+                "s_min": 16, "t_min": 0, "width": 2, "height": 2,
+                "samples_rgb": [(60, 60, 60)] * 4,
+            },
+        ]
+
+    def test_world_plane_frame_uses_world_xy_for_horizontal_surface(self):
+        frame = lightmap_export.world_plane_frame(self.planes[0], 0)
+        self.assertEqual(frame["normal"], (0.0, 0.0, 1.0))
+        self.assertEqual(frame["axis_s"], (1.0, 0.0, 0.0))
+        self.assertEqual(frame["axis_t"], (0.0, 1.0, 0.0))
+        flipped = lightmap_export.world_plane_frame(self.planes[0], 1)
+        self.assertEqual(flipped["axis_s"], frame["axis_s"])
+        self.assertEqual(flipped["axis_t"], frame["axis_t"])
+
+    def test_adjacent_faces_share_one_world_anchored_chart(self):
+        charts, face_to_chart, _records = lightmap_export.build_coplanar_face_charts(
+            self.records, self.faces, self.planes, self.edges, self.surfedges, [0, 0]
+        )
+        self.assertEqual(len(charts), 1)
+        chart = charts[0]
+        self.assertEqual(chart["face_ids"], (0, 1))
+        self.assertEqual((chart["s_min"], chart["t_min"]), (0.0, 0.0))
+        self.assertEqual((chart["width"], chart["height"]), (3, 2))
+        self.assertEqual(face_to_chart[0], face_to_chart[1])
+
+    def test_shared_edge_source_samples_become_one_averaged_chart_luxel(self):
+        charts, _face_to_chart, records = lightmap_export.build_coplanar_face_charts(
+            self.records, self.faces, self.planes, self.edges, self.surfedges, [0, 0]
+        )
+        samples, valid = lightmap_export.resample_coplanar_chart_sources(charts[0], records)
+        self.assertEqual(len(samples), 6)
+        self.assertEqual(samples[1], (40, 40, 40))
+        self.assertEqual(samples[4], (40, 40, 40))
+        self.assertEqual(samples[0], (20, 20, 20))
+        self.assertEqual(samples[2], (60, 60, 60))
+        self.assertEqual(valid, bytes((1, 1, 1, 1, 1, 1)))
+
+    def test_outward_rounded_classic_luxel_column_is_filled_past_face_edge(self):
+        vertices = [
+            (0.0, 0.0, 0.0), (20.0, 0.0, 0.0),
+            (20.0, 16.0, 0.0), (0.0, 16.0, 0.0),
+        ]
+        edges = [(0, 1), (1, 2), (2, 3), (3, 0)]
+        faces = [(0, 0, 0, 4, 0, 0, 255, 255, 255, 0)]
+        records = [{
+            "face_id": 0,
+            "positions": vertices,
+            "styles": (0, 255, 255, 255),
+            "texinfo": self.texinfo,
+            "s_min": 0,
+            "t_min": 0,
+            "width": 3,
+            "height": 2,
+            "samples_rgb": [
+                (10, 10, 10), (20, 20, 20), (30, 30, 30),
+                (40, 40, 40), (50, 50, 50), (60, 60, 60),
+            ],
+        }]
+        charts, _mapping, chart_records = lightmap_export.build_coplanar_face_charts(
+            records, faces, self.planes, edges, [0, 1, 2, 3], [0]
+        )
+        self.assertEqual((charts[0]["width"], charts[0]["height"]), (3, 2))
+        samples, valid = lightmap_export.resample_coplanar_chart_sources(
+            charts[0], chart_records
+        )
+        # The third sample centre is x=32, beyond the 20-unit polygon edge,
+        # but it is present in the classic BSP29 face lightmap rectangle.
+        self.assertEqual(valid[2], 1)
+        self.assertEqual(samples[2], (30, 30, 30))
+
+
+    def test_different_models_or_styles_do_not_share_a_chart(self):
+        charts, _mapping, _records = lightmap_export.build_coplanar_face_charts(
+            self.records, self.faces, self.planes, self.edges, self.surfedges, [0, 1]
+        )
+        self.assertEqual(len(charts), 2)
+        styled_records = [dict(record) for record in self.records]
+        styled_records[1]["styles"] = (32, 255, 255, 255)
+        charts, _mapping, _records = lightmap_export.build_coplanar_face_charts(
+            styled_records, self.faces, self.planes, self.edges, self.surfedges, [0, 0]
+        )
+        self.assertEqual(len(charts), 2)
+
+    def test_world_chart_coordinates_return_stable_pixel_centres(self):
+        first = lightmap_export.world_chart_pixel_coordinates(
+            16.0, 16.0, 10, 20, 0.0, 0.0, 2, 2, 2, 1024
+        )
+        self.assertAlmostEqual(first[0], 29.5)
+        self.assertAlmostEqual(first[1], 973.5)
+
+
+class WorldChartSamplingTests(unittest.TestCase):
+    def test_float_sampling_preserves_hdr_values_while_export_stays_byte_clamped(self):
+        size = 16
+        pixels = [0.0] * (size * size * 4)
+        for index in range(size * size):
+            pixels[index * 4:index * 4 + 4] = (0.25, 1.5, 3.0, 1.0)
+        args = (
+            pixels, size, 1, 2, 2, 1, 1,
+            (0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0),
+            (1.0, 0.0, 0.0), 0.0,
+            0.0, 0.0, 1, 1,
+            (0.0, 1.0, 0.0), (0.0, 0.0, 1.0), 0.0, 0.0,
+        )
+        exported = lightmap_export.sample_classic_face_grid_from_world_chart(*args)
+        measured = lightmap_export.sample_classic_face_grid_from_world_chart(
+            *args, preserve_float=True
+        )
+        self.assertEqual(exported, bytes((64, 255, 255)))
+        self.assertEqual(len(measured), 3)
+        self.assertAlmostEqual(measured[0], 0.25)
+        self.assertAlmostEqual(measured[1], 1.5)
+        self.assertAlmostEqual(measured[2], 3.0)
+
+    def test_classic_face_grid_samples_map_to_shared_world_chart_positions(self):
+        # The two face-local grids use different S offsets, but the shared
+        # physical point (16, 16, 0) must read the same chart pixel.
+        size = 16
+        pixels = [0.0] * (size * size * 4)
+        for i in range(size * size):
+            pixels[i * 4:i * 4 + 4] = [0.25, 0.5, 0.75, 1.0]
+        first = lightmap_export.sample_rgb_from_world_chart_positions(
+            pixels, size, 1, 2, 3, 1, 1,
+            [(16.0, 16.0, 0.0)], (1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0), 0.0, 0.0,
+        )
+        second = lightmap_export.sample_rgb_from_world_chart_positions(
+            pixels, size, 1, 2, 3, 1, 1,
+            [(16.0, 16.0, 0.0)], (1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0), 0.0, 0.0,
+        )
+        self.assertEqual(first, bytes((64, 128, 191)))
+        self.assertEqual(first, second)
+
+    def test_classic_face_grid_pixel_coordinates_match_sampler_centres(self):
+        coords = lightmap_export.classic_face_grid_world_chart_pixel_coordinates(
+            16, 1, 2, 2, 1, 1,
+            (0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0),
+            (1.0, 0.0, 0.0), 0.0,
+            0.0, 0.0, 1, 1,
+            (0.0, 1.0, 0.0), (0.0, 0.0, 1.0), 0.0, 0.0,
+        )
+        self.assertEqual(len(coords), 1)
+        self.assertAlmostEqual(coords[0][0], 3.0)
+        self.assertAlmostEqual(coords[0][1], 12.0)
+
+    def test_world_chart_grid_positions_solve_classic_texinfo_coordinates(self):
+        texinfo = (0.0, 1.0, 0.0, -32.0, 0.0, 0.0, -1.0, 0.0)
+        positions = lightmap_export.world_chart_grid_positions(
+            texinfo, (1.0, 0.0, 0.0), 496.0,
+            (0.0, 16.0), (0.0, 16.0),
+        )
+        self.assertEqual(positions[0], (496.0, 32.0, 0.0))
+        self.assertEqual(positions[-1], (496.0, 48.0, -16.0))
+
+    def test_affine_classic_grid_sampler_matches_xyz_reference_sampler(self):
+        size = 64
+        pixels = [0.0] * (size * size * 4)
+        for y in range(size):
+            for x in range(size):
+                offset = (y * size + x) * 4
+                pixels[offset:offset + 4] = (
+                    x / (size - 1), y / (size - 1), 0.25, 1.0
+                )
+        texinfo = (0.0, 1.0, 0.0, -32.0, 0.0, 0.0, -1.0, 0.0)
+        plane_normal = (1.0, 0.0, 0.0)
+        plane_distance = 496.0
+        s_values = (0.0, 16.0, 32.0)
+        t_values = (0.0, 16.0, 32.0)
+        positions = lightmap_export.world_chart_grid_positions(
+            texinfo, plane_normal, plane_distance, s_values, t_values
+        )
+        reference = lightmap_export.sample_rgb_from_world_chart_positions(
+            pixels, size, 1, 4, 4, 1, 1, positions,
+            (0.0, 1.0, 0.0), (0.0, 0.0, -1.0), 0.0, -32.0,
+        )
+        optimized = lightmap_export.sample_classic_face_grid_from_world_chart(
+            pixels, size, 1, 4, 4, 1, 1,
+            texinfo, plane_normal, plane_distance,
+            0.0, 0.0, 3, 3,
+            (0.0, 1.0, 0.0), (0.0, 0.0, -1.0), 0.0, -32.0,
+        )
+        self.assertEqual(optimized, reference)
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
