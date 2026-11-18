@@ -1813,3 +1813,83 @@ The flat-face edge fade is therefore not yet diagnosed. Plausible areas to isola
 5. Keep the light-node correction validation separate: this report already confirms the delay-0/5 nodes are installed. Do not change the falloff formulas or add another broad intensity multiplier based on the screenshot alone.
 
 No source code was changed and no new Blender runtime bake or Ironwail runtime test was performed during this review. Treat all edge-fade explanations as hypotheses until the ORA layers and exact exported BSP variants are compared.
+
+
+## 2026-11-18 — 0.21.24 Enhanced BSPX export repair and optional companion MAP
+
+### User report
+
+The user reported two export failures while exporting E1M1:
+- `Linked companion MAP is missing: /app/blender`
+- Enhanced BSPX export aborted with `name 'face_info' is not defined`.
+
+The `/app/blender` path came from calling `os.path.abspath("")` when `qss_source_map_path` was empty. That incorrectly converted "no companion MAP is configured" into Blender's working directory and then treated it as a missing .map file.
+
+### Production source changes
+
+Production source branch: `fix/0.21.17-world-aligned-lightmap-charts`.
+Final head: `d27e7be286829a019badb556b6c4c30c0c4c2eb4`.
+Add-on version: **0.21.24**.
+
+Commit `3fcfd6ac581cde6d910a584e05d2f049d52876b7` — `Fix Enhanced BSPX chart export and decouple MAP sync`:
+- In `_build_enhanced_lightmap_payload()`, the world-chart sampling branch used `face_info` without constructing it. It now constructs this per-face context from the validated face-domain mesh attributes and original BSP geometry: world-chart flag, source texinfo, oriented BSP plane normal/distance, shared chart S/T axes and chart S/T origin.
+- The sampling path then uses that context to solve the classic face luxel grid onto the shared world chart and sample the correct atlas coordinates.
+- Companion MAP preparation failures (missing, stale, ambiguous, unreadable) are now captured as sidecar warnings instead of aborting the BSP export. Existing protections against overwriting a MAP that is not a verified previous SLOPGATE export remain intact. MAP write errors are also reported as warnings after the BSP export.
+- Added `tests/test_export_contracts.py`: Enhanced world-chart context is constructed before use, and MAP preparation/commit failures do not abort the BSP export.
+- Bumped version to 0.21.24 and documented the change in README.
+
+Commit `d27e7be286829a019badb556b6c4c30c0c4c2eb4` — `Treat absent companion MAP as an unconfigured sidecar`:
+- `_qss_prepare_companion_map_export()` now checks the raw linked MAP path before normalizing it. An empty property returns `None` immediately. Only a non-empty path is passed to `os.path.abspath()`.
+- Added a regression contract ensuring an empty link is not resolved to the Blender working directory.
+
+### CI and installer
+
+Final workflow run: `44232978822`.
+- URL: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/44232978822
+- Exact tested source commit: `d27e7be286829a019badb556b6c4c30c0c4c2eb4`.
+- Python module compilation passed.
+- **317 tests passed** (`Ran 317 tests in 4.852s; OK`).
+- The three new export contracts passed, including:
+  - `test_world_chart_face_context_is_defined_before_it_is_used`
+  - `test_companion_map_preparation_and_write_errors_do_not_abort_bsp_export`
+  - `test_missing_companion_map_link_is_not_resolved_to_blender_working_directory`
+- Blender-ready add-on package assembly and artifact upload passed.
+- Installer: `Quake-Surface-Studio-v0.21.24-Blender-Install`, artifact ID `14396470461`, size 319,967 bytes.
+- SHA-256: `8a4c4dec82249f9382d5dddbc9bbe2b430144f39f2ecd88a80aebdb2bf30ab8b`.
+- Installer artifact: https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/44232978822/artifacts/14396470461
+
+CI proves syntax, static export contracts and standalone unit tests; it does not run Blender or Ironwail. A fresh Blender 5.3 Enhanced export and engine load are still required to prove the original E1M1 case is fixed at runtime.
+
+### Extracted ORA review
+
+The user said the ORA had been extracted into the repository. The extracted layer directory was found, but on a separate branch `ChnuckiErdBeer-patch-1` (commit `f78d9e9c6f788bd634a5119c1be2caf0e842e60a`), under `screens and diagnostics/v.0.21.21/screenshots_v2.21.21/data/`. Its `stack.xml` was read and supplies these explicit layer labels:
+- layer0: Blender ericw lightmap + texture
+- layer1: Blender Eevee preview lightmap + texture
+- layer2: Blender Cycles preview lightmap + texture
+- layer3: Blender Cycles bake lightmap + texture
+- layer4: Ironwail Cycles bake lightmap + textures
+- layer5: Ironwail Cycles bake lightmap
+- layer6: Ironwail ericw lightmap
+- layer7: Ironwail ericw lightmap + textures
+- layer8: Ironwail fullbright
+- layer9: Blender ericw textures
+- layer10: Blender Cycles preview lightmap
+- layer11: Blender Eevee preview lightmap
+- layer12: Blender ericw lightmap
+- layer13: Blender Cycles bake lightmap
+
+The GitHub connector successfully returned/allowed inspection of layer5, layer11, layer12, the small thumbnail and the standalone `phonglike_lighting_example_ironwail.png`. Most other extracted layer images exceed the connector's binary image response limit (about 1 MB raw); their filenames and labels are known from `stack.xml`, but those image pixels were not inspected. Thus this is not a complete pixel-by-pixel comparison of all 14 layers. Ask the user to attach the large extracted PNGs (especially layers 0, 2, 3, 4, 6, 10 and 13) directly in chat if a complete review is required.
+
+Visible images confirm broad continuous brightness variation on some large planar faces. That appearance does not indicate Blender Phong/vertex-normal interpolation by itself: a flat polygon can contain a spatially varying lightmap and the engine interpolates lightmap samples across it. Since the gradient is visible in the lightmap-only Ironwail image, the likely data path is the baked/exported luxel field and/or engine interpolation, not texture shading. This is still a visual interpretation, not a runtime isolation test. The visible Cycles-bake screenshot shows broad light pools and smooth gradients; the visible Blender Eevee and Ericw screenshot variants have noticeably different brightness distributions. Eevee is an approximation, not the correct reference for Quake/Ericw equivalence. The key Blender Cycles-bake and Ironwail Ericw lightmap-only images are among the inaccessible larger files, so their direct comparison remains incomplete.
+
+Do not conflate this visual issue with the Enhanced-export exception: the latter is a confirmed source-level bug and now has a targeted fix, while the precise reason for the flat-face edge fade still needs the Classic-versus-Enhanced controlled export comparison.
+
+### Next user acceptance test
+
+1. Install 0.21.24 from the artifact above.
+2. Open the E1M1 Blender file and export Enhanced BSPX directly with no companion MAP linked; it should not mention `/app/blender`. If a linked MAP is missing or stale, the BSP export should still finish and show a MAP sidecar warning.
+3. Export Enhanced for a freshly selected `baked` lightmap preview. Confirm the `face_info` traceback is gone and the `.bsp` / `.lit` files are written.
+4. Load that exact Enhanced BSP in Ironwail. Also export Classic from the same baked atlas and compare both outputs at the same player-start position. The Enhanced export is the path with half-luxel edge padding; Classic retains the standard BSP29 layout.
+5. Report whether the planar edge fade differs between Classic and Enhanced. Do not change light falloff or apply another global brightness adjustment before this comparison.
+
+No Blender runtime export or Ironwail runtime validation was performed by the assistant during this session.
