@@ -2018,3 +2018,122 @@ Do not start a broad BSP2 conversion in the same change as the current 0.21.24 E
 ### Current state
 
 Production source is still SLOPGATE 0.21.24 on fix/0.21.17-world-aligned-lightmap-charts; no source code was changed as part of this strategy correction. The existing Enhanced mode is BSP29 + BSPX, not BSP2 + BSPX. The actual rerelease BSP2 acceptance test is user-performed; assistant did not run the engine.
+
+
+## 2026-11-19 — SLOPGATE 1.0 readiness assessment and roadmap
+
+### Current baseline
+
+Production source branch: `fix/0.21.17-world-aligned-lightmap-charts`.
+Current source commit: `d27e7be286829a019badb556b6c4c30c0c4c2eb4`.
+Add-on version: **0.21.24**.
+Latest CI run: `44232978822`, successful; compilation, add-on packaging and **317 standalone tests** passed. This CI does not run Blender or Ironwail.
+Default branch `main` still carries version 0.11.0, not the current production build.
+There are no open GitHub issues; five old pull requests remain open from historical development branches. These are repository-maintenance items, not an accurate list of current work.
+
+Assessment: SLOPGATE is a feature-rich pre-1.0 prototype. Its surface-editing workflows and supporting utilities are substantial, but it is not release-ready for the intended modern BSP2 target. The main blockers are BSP2 parser/writer support, runtime validation of current exports, and dependable Quake-style lighting/lightmap behavior.
+
+### Implemented foundations
+
+The current 0.21.24 codebase already includes:
+- BSP29 import/export with original geometry/topology retained, and preservation of unrelated standard lumps and unknown BSPX payloads.
+- Embedded miptex and external texture import, WAD2 lookup for uncompressed miptex lumps, face detachment, texture painting, Quake-palette quantization/mip rebuilding, transparency and fullbright handling.
+- RGB lightmap import from BSPX RGBLIGHTING or QLIT v1 sidecar, editable Blender atlas, original-lightmap snapshot/restore, paint-back and export.
+- Quake point/spot/world light import, style metadata, a direct Quake-space luxel solver for the documented static delay 0–5 attenuation modes, and an experimental Cycles diffuse bake.
+- Cycles light-node falloff correction for delay 0 (linear) and delay 5 (soft inverse-square). Other delay modes still use native fallback in the Cycles light representation.
+- Coplanar world-aligned lightmap charts, classic face-grid resampling, edge reconciliation and Enhanced half-luxel lightmap padding.
+- Partial-bake scopes, diagnostics, bake snapshots, map audits, inspector/export validator, navigation/focus/isolate helpers, image undo safeguards and companion MAP light-entity synchronization.
+- CI suite of 317 standalone tests and versioned Blender package assembly.
+
+This is meaningful functionality. The 1.0 work is primarily about format modernization, runtime reliability, and finishing the advertised lighting workflow rather than starting from scratch.
+
+### P0 — must be completed before 1.0
+
+**1. Make BSP2 a first-class core format**
+- The current `bsp.py` parser explicitly accepts BSP29 only and rejects BSP2 and 2PSB. Current Classic/Enhanced exporters also serialize BSP29.
+- Introduce a format-neutral parsed model and explicit BSP29/BSP2 record adapters. BSP2 is not a version-number-only change: nodes, leaves, faces, edges, indices, bounds and other records use different layouts/widths.
+- Implement BSP2 import first, then BSP2 export while preserving geometry, visibility/collision lumps, entities and unknown supported BSPX payloads.
+- Use the user's `qbsp -bsp2` E1M1 file as a fixture and include at least one larger BSP2 map. Validate round-trip structure and actual loading in Ironwail and the Nightdive rerelease.
+- Make BSP2 the modern default. Keep BSP29 as an explicit legacy compatibility option. 2PSB/RMQ should not be included unless a concrete target/user need justifies it.
+
+**2. Separate core format from lighting extensions**
+- Replace the current Classic/Enhanced naming as the only format switch. BSP29/BSP2 is the core file layout; BSPX is an independent optional extension set.
+- Build a compatibility matrix for Ironwail and KEX/rerelease. Test each extension independently on both engines:
+  - RGBLIGHTING
+  - DECOUPLED_LM
+  - LMSHIFT and LMSHIFT/LMOFFSET variants
+  - LMSTYLE and LMSTYLE16
+  - QLIT v1 .lit sidecar
+  - SLOPGATE's SLPG_LMPAD marker (confirm what it signals and ensure its use never depends on unverified engine-specific behavior)
+- Current README says LMSTYLE16, legacy LMSHIFT/LMOFFSET without DECOUPLED_LM, and LIGHTING_E5BGR9 are not implemented. Decide which formats are actually required for 1.0 and reject unsupported variants with clear messages.
+- The user's successful qbsp -bsp2 test proves the rerelease accepts the BSP2 core layout; it does not prove every listed BSPX lump is supported. Test them separately.
+
+**3. User-accept and regression-test 0.21.24 export fixes**
+- User runtime test still required for the Enhanced `face_info` repair and optional companion MAP behavior.
+- Confirm exporting without a linked MAP no longer mentions `/app/blender`; a stale/missing configured MAP must not block BSP output.
+- Export from explicitly selected Baked lighting and load the exact resulting BSP in Ironwail. Then run Classic and Enhanced from the same baked atlas and compare lightmap-only output at E1M1 info_player_start.
+- Preserve the user's test result, Blender version, source BSP hash, export mode/path and engine build in a reproducible acceptance report.
+- Add an actual Blender integration/export test path if feasible; static contracts and pure Python tests cannot expose all bpy context, image, UV, Cycles or serializer integration failures.
+
+**4. Establish lightmap correctness, not just a successful bake**
+- Keep the original source lightmap as a deterministic reference and ensure every export records whether the selected layer was source or baked.
+- Validate world-chart continuity, face-local classic sampling, supersampling, atlas gutters, edge support and BSP export sampling on actual maps, not just pure helper tests.
+- E1M1 screenshots show broad gradients on flat faces in both EricW and SLOPGATE, so smooth fade alone is not proof of Phong shading. The remaining concern is local distribution mismatch and any narrow face-boundary seams.
+- Diagnostic source mean 0.2947401 vs final atlas mean 0.2950881 (about 0.12% difference) is a global match only. The sampled maximum 202.4476 shows why local per-face/spatial comparison is essential.
+- Do not change global energy or falloff as a substitute for spatially validating the bake.
+
+### P1 — important 1.0 quality and workflow items
+
+**5. Define and improve lighting fidelity**
+- Keep three concepts clearly separated in the UI and documentation: live preview, Quake Direct Lightmap Solver, and experimental Cycles artistic/physical bake.
+- The Quake direct solver supports documented static point/spot delay 0–5 attenuation, but is not a bit-identical ericw-tools light compiler. It still lacks or approximates radiosity/bounce, dirtmapping, deviance/area sampling, surface emitters, sunlight/sky sampling, projected texture lights, compiler visibility approximations, animated lightstyle time curves and special minlight behavior.
+- Cycles currently has explicit correction node graphs only for delay 0 and delay 5. Other delay values fall back to Blender's native lamp model. This distinction needs explicit UI/documentation and targeted test fixtures.
+- Live Eevee remains an approximation; Cycles preview and bake do not currently guarantee the same result as ericw-tools.
+- Either implement the missing compiler semantics required by the chosen 1.0 fidelity target, or define a smaller, honest supported lighting subset and show warnings when source maps use unsupported features.
+- Current static preview combines style samples at full weight; export flattens them into style 0. Animated/flickering lightstyle playback and multi-style preservation need a conscious 1.0 decision.
+
+**6. Finish advertised MAP/light entity editing or narrow its scope**
+- MAP sync currently safely updates a subset of existing lights: origin, RGB, intensity and spotlight cone angle.
+- Spot direction/target/mangle updates and creating new MAP light entities are not implemented. New lights created in Blender do not yet become new MAP entities.
+- Decide whether 1.0 advertises two-way MAP/light editing. If yes, implement and test target/mangle, new/deleted lights and entity key preservation. If no, state clearly that MAP sync is a limited companion update, not a full entity editor.
+
+**7. Document intentional surface-editor boundaries**
+- SLOPGATE currently does not rebuild BSP geometry, modify topology, run QBSP/VIS/ericw light, or act as a complete .map/WAD level compiler. The importer/exporter relies on the exact original BSP and preserves geometry rather than rebuilding it. This can remain out of 1.0 scope if SLOPGATE is explicitly a compiled-map surface/texture/lightmap editor.
+- Inline movers are represented in a combined mesh, are not independently selectable Blender objects and are not animated.
+- Selected-face/selected-light bake scopes protect atlas pixels but do not yet guarantee true Cycles performance acceleration; the full BSP is still evaluated. Selected-light receiver masks are direct-light approximations and may miss indirect-only contribution.
+- Only uncompressed WAD2 miptex lookup is supported; compressed WAD2 and WAD3/GoldSrc variants are not.
+- Existing conservative Classic-era limits (including 512 miptex entries, 4096 texinfo records and 2048 atlas ceiling) must be revisited as part of BSP2 architecture rather than silently carried into modern output.
+- Special shadow modes (_shadowself, _shadowworldonly, _switchableshadow) are not fully ericw-equivalent.
+
+### P2 — polish and release engineering
+
+**8. Release/compatibility matrix**
+- Declare and test supported Blender versions and operating systems. CI currently validates standard-Python compilation/tests and packages the add-on; it is not an interactive Blender test.
+- Exercise install, upgrade, disable/re-enable, multiple open maps, save/reopen .blend, image-paint undo, bake undo/restore, export cancellation and error recovery in real Blender.
+- Maintain a small repeatable engine acceptance suite in Ironwail and KEX: import/export, textures, BSPX RGB lightmaps, decoupled lightmaps, styles, moving models and representative large BSP2 maps.
+- Update user documentation around the modern BSP2-first workflow, supported BSPX variants, texture/WAD limits, lighting semantics and recovery.
+- Synchronize production source into default `main` (currently 0.11.0) once the branch strategy is agreed, close/archive stale development PRs, create tagged releases, and provide a single authoritative installer/release page.
+
+### Proposed 1.0 definition of done
+
+1. BSP2 is the default supported import/export format and is tested on real medium/large maps. BSP29 remains an optional compatibility output.
+2. Supported BSPX lighting extensions work on both Ironwail and the Nightdive rerelease, or are rejected/documented accurately.
+3. No data loss in round-trip tests for geometry, entities, visibility/collision lumps, textures, lightmaps and unknown preserved extensions.
+4. Texture painting, face detachment, palette conversion, lightmap painting, undo/restore and export all pass real Blender acceptance checks.
+5. Lighting behavior has a declared scope and repeatable reference comparisons; known approximations are visible to the user.
+6. 0.21.24 export repairs have passed the user's actual Blender and engine tests; no critical export traceback remains.
+7. No critical/high-severity known issues in the supported workflow; install/upgrade and recovery procedures are documented.
+8. The default branch, version metadata, installer and release notes all identify the same 1.0 release.
+
+### Recommended order
+
+A. First, get the user's 0.21.24 Enhanced export acceptance result and close the immediate E1M1 export/seam question.
+B. Then create a dedicated BSP2 parser/import branch with fixtures and structural tests. Do not combine it with lightmap changes.
+C. Add BSP2 export and validate all unchanged/preserved lumps.
+D. Add BSP2 + BSPX lighting extensions and test each target engine separately.
+E. Close the highest-impact lighting gaps and decide what MAP sync/mover capabilities belong in 1.0.
+F. Run the Blender/engine regression matrix, update docs and default branch, and tag 1.0.
+
+### Overall assessment
+
+The core surface-editing product is substantial; the main 1.0 risk is not a lack of convenience features. It is the gap between an increasingly capable BSP29 prototype and a reliable BSP2-first tool with predictable Quake lighting and tested engine exports. Do not inflate the 1.0 scope into a full QBSP/VIS/map geometry editor unless that becomes an explicit product goal.
