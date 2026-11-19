@@ -22385,3 +22385,36 @@ Crucial distinction: BSP2 is a core BSP layout; BSPX is an optional extension di
 The user's KEX test confirms BSP2 core support, not every optional BSPX lightmap extension. Verify RGBLIGHTING, DECOUPLED_LM, LMSHIFT, LMSTYLE, and the SLOPGATE-specific SLPG_LMPAD independently in Ironwail and KEX.
 
 Recommended implementation sequence: format-neutral parsed model; BSP29/BSP2 record adapters; BSP2 import and structural round-trip tests using qbsp -bsp2 maps; BSP2 export; then port standard and BSPX lighting independently; validate each extension in each target engine. Do not conflate this broad BSP2 feature with the 0.21.24 runtime acceptance test. No production source code was changed during this strategy update.
+
+
+## 2026-11-19 — SLOPGATE 1.0 readiness assessment
+
+Baseline: production branch `fix/0.21.17-world-aligned-lightmap-charts`, commit `d27e7be286829a019badb556b6c4c30c0c4c2eb4`, add-on v0.21.24. Latest CI run `44232978822` passes Python compilation, package assembly and 317 standalone tests; CI does not run Blender or Ironwail. Default `main` remains v0.11.0. No open GitHub issues; five historical development PRs remain open.
+
+SLOPGATE is a feature-rich pre-1.0 prototype, not yet release-ready for the modern target. Substantial existing foundations: BSP29 import/export and data preservation; embedded/external textures, face detachment, Texture Paint and Quake palette conversion; RGB lightmap atlas paint/restore/export; Quake light import and direct luxel solver; experimental Cycles bake; coplanar world-aligned charts and edge handling; partial bake scopes; MAP light-entity synchronization; navigation, diagnostics, audits, export validation and undo safeguards.
+
+Main 1.0 blockers:
+1. **BSP2 core support** — current parser explicitly rejects BSP2/2PSB and serializer is BSP29-only. Implement format-neutral parsed model and BSP29/BSP2 adapters; do not just change the version number. Add BSP2 import, export and round-trip structural tests using the user's qbsp -bsp2 E1M1 and a larger BSP2 map. BSP2 should be modern default; BSP29 optional legacy. 2PSB only if a real need arises.
+2. **BSPX compatibility matrix** — BSP2 and BSPX are separate. Test RGBLIGHTING, DECOUPLED_LM, LMSHIFT variants, LMSTYLE/LMSTYLE16, QLIT .lit and SLPG_LMPAD independently in Ironwail and Nightdive KEX. Current README says LMSTYLE16, legacy LMSHIFT/LMOFFSET without DECOUPLED_LM and LIGHTING_E5BGR9 are unsupported. User's BSP2 test confirms core layout only, not each extension.
+3. **0.21.24 runtime acceptance** — the Enhanced face_info repair and nonblocking/optional companion MAP fix passed CI but still need a real Blender export and engine load. Verify no /app/blender path, no face_info traceback and successful Enhanced BSP load.
+4. **Lighting/lightmap correctness** — source mean and final atlas mean match within about 0.12%, but local values still differ; the max sampled luxel was 202.4476. Compare source/baked output selection, world charts, face-grid sampling, gutters, Classic/Enhanced edge support and engine filtering on real BSPs. Broad gradients on flat faces also occur in the EricW reference; do not call smooth fade a Phong bug without a boundary-specific reproduction.
+
+Important rough edges:
+- Quake Direct Luxel Solver supports documented static delay 0–5, but not bit-identical ericw compiler output: still lacks/approximates bounce/radiosity, dirt, deviance/area samples, surface emitters, sunlight/sky, projected textures, compiler visibility and animated styles/minlight behavior.
+- Cycles node-graph corrections cover delay 0 and 5; other delays fall back to native Blender lights. Eevee live preview is approximate. The Cycles artistic bake is not equivalent to Quake's compiler.
+- Static style preview/export collapses light styles into style 0; flicker/animated styles are not implemented.
+- MAP sync only covers some existing light fields (origin, RGB, intensity, cone); target/mangle direction and creation of new MAP entities are missing.
+- Inline movers live in one combined mesh; they are not separately selectable or animated.
+- Partial bake protects pixels but does not yet provide true Cycles speedup (full BSP still evaluates); selected-light masks are approximate.
+- WAD support is limited to uncompressed WAD2; no compressed WAD2/WAD3.
+- Existing Classic-era caps (512 miptex, 4096 texinfo, 2048 atlas) need review as part of BSP2.
+- Geometry/topology editing, QBSP/VIS/ericw compilation and full .map rebuilding are intentionally outside the current surface-editor scope; decide this explicitly rather than expanding 1.0 into a full level compiler.
+- Some special shadow keys are not fully ericw-equivalent.
+
+Release readiness also needs a declared Blender/OS support matrix, interactive Blender install/undo/painting/bake tests, Ironwail and KEX runtime acceptance maps, refreshed docs, synchronization of production source to default main (still 0.11.0), and tagged 1.0 release packaging.
+
+Recommended order: (A) user tests 0.21.24 Enhanced export; (B) dedicated BSP2 parser/import with fixtures; (C) BSP2 export/preservation; (D) BSP2+BSPX extensions and engine matrix; (E) targeted lighting/MAP fidelity decisions; (F) integration regression suite, docs, main synchronization and tagged release.
+
+Definition of done: BSP2 default and BSP29 optional; supported BSPX lumps verified on both engines; robust import/export round trips without data loss; texture/lightmap/undo workflows accepted in Blender; declared lighting scope and known limitations; all current export regressions closed; no critical workflow bugs; install/recovery docs and default branch/release all aligned.
+
+Overall: main 1.0 risk is the transition from a capable BSP29 prototype into a reliable BSP2-first editor with predictable lighting and target-engine exports, not a shortage of small convenience features.
