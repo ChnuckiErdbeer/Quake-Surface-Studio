@@ -22418,3 +22418,20 @@ Recommended order: (A) user tests 0.21.24 Enhanced export; (B) dedicated BSP2 pa
 Definition of done: BSP2 default and BSP29 optional; supported BSPX lumps verified on both engines; robust import/export round trips without data loss; texture/lightmap/undo workflows accepted in Blender; declared lighting scope and known limitations; all current export regressions closed; no critical workflow bugs; install/recovery docs and default branch/release all aligned.
 
 Overall: main 1.0 risk is the transition from a capable BSP29 prototype into a reliable BSP2-first editor with predictable lighting and target-engine exports, not a shortage of small convenience features.
+
+
+## 2026-11-19 — Master roadmap promoted to the front of the SLOPGATE handoff
+
+At the user's request, the SLOPGATE 1.0 roadmap is now front-and-center in SLOPGATE_AI_Handoff.md, directly after the opening instructions. It is explicitly the governing development plan and source of truth for sequencing and scope.
+
+The promoted plan fixes the product direction as BSP2-first with BSP29 optional, and separates the core BSP version from BSPX lighting extensions. It sets the ordered phases:
+1. Close the 0.21.24 runtime acceptance loop.
+2. Build BSP2 parser/import foundation.
+3. Implement BSP2 export and round-trip preservation.
+4. Verify BSPX lighting extensions independently in Ironwail and Nightdive KEX.
+5. Improve lighting fidelity and make MAP/mover scope decisions.
+6. Stabilize Blender workflows, documentation, default branch and 1.0 release packaging.
+
+The handoff now starts with the product direction, phase status, 1.0 definition of done, explicit out-of-scope guardrails, immediate next action and verified source/build baseline. Stale top-level references to BSP29-only as the official 1.0 scope, old source commit/version and old PR chain were replaced. Historical baseline material remains below as history, not as the current roadmap.
+
+The next action remains the user's real Blender 5.3 / Ironwail acceptance test of 0.21.24. Upon a pass, begin BSP2 parser/import on a dedicated branch; upon a failure, fix the concrete regression first. No production source code was changed in this documentation-only task.
