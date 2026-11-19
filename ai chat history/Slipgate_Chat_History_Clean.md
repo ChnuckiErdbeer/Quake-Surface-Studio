@@ -22372,3 +22372,16 @@ Branch inventory at review time:
 - `ChnuckiErdBeer-patch-1` holds extracted ORA PNGs.
 - Other feature/fix branches are old isolated experiments/milestones. Some are ancestors of production; a few have small divergent commits and need review before deletion.
 The large branch count came from isolating features/regressions and keeping user uploads/docs separate. Two branches matter for current day-to-day work: production source and docs/handoff. Do not delete branches blindly. After 0.21.24 is accepted, consider synchronizing the production branch into default `main`.
+
+
+## 2026-11-18 — BSP2 target correction
+
+User compiled E1M1 using qbsp -bsp2 and reports that the Nightdive rerelease loaded it successfully. This direct target-engine test establishes BSP2 core compatibility for the user's current rerelease. User also notes that large MachineGames campaign maps are BSP2 (recorded as user-provided knowledge, not independently audited map-by-map).
+
+The earlier assistant caution about rerelease BSP2 compatibility was too conservative. Modern BSP2 should be the main SLOPGATE target, with BSP29 retained as an optional vanilla-compatibility export. ericw-tools docs describe -bsp2 as supporting much larger/more complex maps than BSP29; -2psb is the older, separate format: https://ericw-tools.readthedocs.io/en/latest/qbsp.html
+
+Crucial distinction: BSP2 is a core BSP layout; BSPX is an optional extension directory. Existing SLOPGATE Classic/Enhanced are currently both BSP29-based. Enhanced is BSP29 + BSPX (DECOUPLED_LM, LMSHIFT, LMSTYLE, RGBLIGHTING, SLPG_LMPAD), not BSP2. Current parser explicitly rejects BSP2 and 2PSB. Future UI should separate core format (BSP2 default / BSP29 optional) from lighting extensions (standard / BSPX-enhanced) and optional sidecars (.lit).
+
+The user's KEX test confirms BSP2 core support, not every optional BSPX lightmap extension. Verify RGBLIGHTING, DECOUPLED_LM, LMSHIFT, LMSTYLE, and the SLOPGATE-specific SLPG_LMPAD independently in Ironwail and KEX.
+
+Recommended implementation sequence: format-neutral parsed model; BSP29/BSP2 record adapters; BSP2 import and structural round-trip tests using qbsp -bsp2 maps; BSP2 export; then port standard and BSPX lighting independently; validate each extension in each target engine. Do not conflate this broad BSP2 feature with the 0.21.24 runtime acceptance test. No production source code was changed during this strategy update.
