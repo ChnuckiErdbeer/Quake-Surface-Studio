@@ -22435,3 +22435,21 @@ The promoted plan fixes the product direction as BSP2-first with BSP29 optional,
 The handoff now starts with the product direction, phase status, 1.0 definition of done, explicit out-of-scope guardrails, immediate next action and verified source/build baseline. Stale top-level references to BSP29-only as the official 1.0 scope, old source commit/version and old PR chain were replaced. Historical baseline material remains below as history, not as the current roadmap.
 
 The next action remains the user's real Blender 5.3 / Ironwail acceptance test of 0.21.24. Upon a pass, begin BSP2 parser/import on a dedicated branch; upon a failure, fix the concrete regression first. No production source code was changed in this documentation-only task.
+
+
+## 2026-11-19 — Phase 1 source audit and acceptance gate
+
+Reviewed the current production source branch `fix/0.21.17-world-aligned-lightmap-charts` at `d27e7be286829a019badb556b6c4c30c0c4c2eb4`.
+
+Source review confirms:
+- Enhanced world-chart export constructs the face-local `face_info` before use; a dedicated AST contract test covers the previously reported NameError.
+- Companion MAP preparation checks for an empty raw path before `abspath()`; this prevents an empty path becoming Blender's working directory (/app/blender).
+- MAP preparation/commit failures are handled as sidecar warnings and are not intended to cancel the BSP export.
+- The add-on version in `__init__.py` is 0.21.24.
+- Enhanced export emits the supported `DECOUPLED_LM`, `LMSTYLE` and `RGBLIGHTING` BSPX data while preserving classic LIGHTING compatibility.
+
+CI run `44232978822` passed compilation, standalone Python tests, package assembly and artifact upload for this source HEAD. The run title is stale (0.21.18), but the checked-out commit and add-on metadata are 0.21.24. This CI does not execute Blender 5.3 operators or Ironwail.
+
+Phase 1 therefore remains **runtime-pending**, not complete. The handoff now contains an exact controlled acceptance procedure: fresh import of original E1M1 with no companion MAP, explicit Enhanced export to a new filename, QSS Validate BSP Export, then load that exact file in Ironwail. It also records the evidence the user should return and the rule not to overwrite the source BSP.
+
+No production code was changed in this audit. Phase 2 BSP2 work remains blocked until this runtime gate passes.
