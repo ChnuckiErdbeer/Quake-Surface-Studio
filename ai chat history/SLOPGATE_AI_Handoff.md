@@ -1966,3 +1966,55 @@ Practical simplification: two branches matter for current work — production so
 ### Next useful runtime comparison
 
 After the user tests 0.21.24, export Classic and Enhanced from the same explicitly selected Baked preview, load each exact output in Ironwail, and compare with the EricW map at the same info_player_start viewpoint. This isolates the new Enhanced edge-support path from the classic fallback. Do not change light intensity before that controlled comparison.
+
+
+## 2026-11-18 — BSP2 as the primary target: strategy corrected by user runtime test
+
+User compiled E1M1 with ericw-tools qbsp -bsp2 and loaded the result in the Nightdive rerelease successfully. This directly demonstrates that the user's installed target rerelease accepts the modern BSP2 core format (not merely BSP29). User also reports that the large MachineGames campaign maps are BSP2; record this as user-provided project/engine knowledge, not as a separate file-by-file audit.
+
+This supersedes the earlier handoff assumption that rerelease acceptance of community BSP2 was uncertain. That uncertainty was too conservative once the actual engine test was available.
+
+### Corrected product direction
+
+SLOPGATE should treat modern BSP2 as the primary core map format, with BSP29 retained as an optional legacy compatibility target. The target audience is modern Quake engines, particularly Ironwail and the Nightdive rerelease; original vanilla compatibility should not constrain the main architecture.
+
+ericw-tools documentation says qbsp -bsp2 emits BSP2 for much larger/more complex maps than original BSP29. It separately describes -2psb as an earlier, distinct format. Modern BSP2 and 2PSB/RMQ must not be conflated. Reference: https://ericw-tools.readthedocs.io/en/latest/qbsp.html
+
+### Keep core BSP format and lighting extensions separate
+
+BSP2 and BSPX are not two values in the same format choice:
+- BSP29 or BSP2 describes the core BSP header and geometry/lump record layouts.
+- BSPX is an optional extension directory carrying extra lumps.
+
+Current SLOPGATE CLASSIC and ENHANCED output modes are not BSP29-versus-BSP2 choices. Both are built around BSP29 serialization. Enhanced writes BSPX data including DECOUPLED_LM, LMSHIFT, LMSTYLE, RGBLIGHTING, and the SLOPGATE SLPG_LMPAD edge-support marker, while preserving a classic fallback lighting sample region. Current bsp.py explicitly rejects BSP2 and 2PSB, and the importer/exporter assumes BSP29 record layouts.
+
+The future UI and internal model should separate:
+1. Core BSP format: BSP2 (modern default), BSP29 (optional compatibility).
+2. Lighting data: standard face lightmaps or optional BSPX-enhanced/decoupled lightmaps, with RGB data and supported edge-filtering data.
+3. Optional compatibility sidecars: e.g. .lit where useful for engines/toolchains that use it.
+
+### Important compatibility qualification
+
+The user's E1M1 test proves Nightdive accepts a BSP2 core map. It does not yet prove that KEX supports every specific BSPX lightmap extension SLOPGATE may attach. Verify individual lump support for the target engines:
+- RGBLIGHTING
+- DECOUPLED_LM
+- LMSHIFT
+- LMSTYLE
+- SLPG_LMPAD (a SLOPGATE-specific marker; engine behavior must not be assumed)
+
+Ironwail and the rerelease must be tested independently. A valid BSP2 file loading successfully does not by itself validate the optional lighting-lump semantics.
+
+### Recommended implementation plan
+
+1. Refactor BSP parsing/writing around a format-neutral in-memory model and explicit BSP29/BSP2 record adapters. Do not change only the version integer: node/leaf/face/edge/index structures and bounds differ.
+2. Add BSP2 import first, with structural/reference validation and round-trip tests against qbsp -bsp2 files, including the user's E1M1 test BSP.
+3. Add BSP2 export preserving source geometry/BSP tree and unknown supported extensions, then validate all rewritten offsets and indices.
+4. Port standard lightmap and BSPX export to the BSP2 adapter, keeping core format selection orthogonal to lighting extension selection.
+5. Run target-engine acceptance tests: BSP2 with standard lighting; BSP2 + RGBLIGHTING; BSP2 + decoupled lightmaps; then each engine separately.
+6. Keep BSP29 as an explicit optional export path for people who want vanilla-compatible maps.
+
+Do not start a broad BSP2 conversion in the same change as the current 0.21.24 Enhanced export runtime acceptance test. First collect user feedback on 0.21.24. Then establish a dedicated BSP2 parser/writer feature branch with structural tests before UI changes.
+
+### Current state
+
+Production source is still SLOPGATE 0.21.24 on fix/0.21.17-world-aligned-lightmap-charts; no source code was changed as part of this strategy correction. The existing Enhanced mode is BSP29 + BSPX, not BSP2 + BSPX. The actual rerelease BSP2 acceptance test is user-performed; assistant did not run the engine.
