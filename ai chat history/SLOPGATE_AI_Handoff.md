@@ -1,6 +1,6 @@
 # SLOPGATE — AI Project Handoff
 
-**Last reviewed:** 2026-11-17  
+**Last reviewed:** 2026-11-19  
 **Purpose:** A compact, maintained project and collaboration brief for future assistant sessions. This is an editorial summary, not a verbatim record.
 
 ## Read this first
@@ -11,47 +11,154 @@ This brief deliberately compresses the archive. It can become stale. The live re
 
 The archive filename and some historic headings contain the old spelling “Slipgate”. That is historical. The current product name is **SLOPGATE**. Do not rename or rewrite historic transcript material merely to normalize the old spelling.
 
+
+
+# 1.0 MASTER ROADMAP — PROJECT NORTH STAR
+
+**This is the governing development plan. Read this section before starting new feature work.** When an older note, historical transcript, README paragraph or previous experiment conflicts with this roadmap, follow the latest user decision and this section. Keep this roadmap current as priorities are completed or changed.
+
+## Product direction
+
+SLOPGATE is a Blender-based **compiled Quake map surface, texture and lighting editor** for modern Quake mapping. The primary engine targets are **Ironwail** and the **Nightdive rerelease**.
+
+- **Modern core format:** BSP2 is the intended primary import/export target.
+- **Legacy core format:** BSP29 remains an optional compatibility import/export path.
+- **Extensions:** BSPX lighting and other optional lumps are independent of the core BSP version.
+- **Not the product goal:** SLOPGATE is not intended to become a complete brush-based MAP editor or an integrated QBSP/VIS/light compiler for 1.0.
+
+The user has compiled E1M1 with ericw-tools qbsp -bsp2 and confirmed that the Nightdive rerelease loads it. Treat BSP2 core acceptance in that engine as user-verified. Do **not** infer from that test that every BSPX lighting lump works in KEX; verify extensions individually.
+
+## Roadmap — follow this order
+
+### PHASE 1 — Close the current 0.21.24 acceptance loop
+**Status: WAITING FOR USER RUNTIME TEST · highest immediate priority**
+
+Do not leap into broad BSP2 refactoring while the immediate export fixes remain unverified in Blender.
+
+- Install/test SLOPGATE 0.21.24 in the user's Blender 5.3 environment.
+- Export Enhanced with no companion MAP configured: no bogus /app/blender warning.
+- Export Enhanced from an explicitly selected Baked lightmap preview: no face_info error, valid BSP and lighting sidecar.
+- Load that exact output in Ironwail. Record the exact file opened.
+- Compare Classic and Enhanced variants only as a controlled diagnostic of the current BSP29 edge-support path; do not mistake those modes for BSP2.
+- Record Blender version, source BSP hash, export selection, filenames, engine version and screenshots/logs.
+- Keep observations distinct from CI results. Do not claim runtime success until the user confirms it.
+
+### PHASE 2 — BSP2 foundation
+**Status: NOT STARTED · largest architectural blocker**
+
+- Design a format-neutral internal BSP representation.
+- Separate BSP29 and BSP2 record readers/writers into explicit adapters.
+- Implement BSP2 parsing and structural/reference validation first.
+- Preserve entities, geometry, visibility, nodes, leaves, clipnodes, models, textures and unknown supported lumps.
+- Build fixtures from the user's qbsp -bsp2 E1M1 and at least one larger BSP2 map.
+- Test parsing, inspection, round-trip serialization and failure handling before connecting the full Blender UI.
+- Do not implement BSP2 by changing only the version field. BSP2 changes record layouts and field widths.
+- Do not add 2PSB/RMQ unless a concrete user/engine requirement appears.
+
+### PHASE 3 — BSP2 export and lossless editing
+**Status: NOT STARTED · depends on Phase 2**
+
+- Add BSP2-aware export for existing supported edits: texture changes, face material/texinfo references and lightmap data.
+- Preserve unchanged source lumps and unknown supported BSPX payloads.
+- Validate every rewritten reference, index, offset, length and bounds field.
+- Add round-trip and edit/export/re-import tests using real BSP2 fixtures.
+- Keep BSP29 behind the same core-format abstraction as an optional legacy path.
+
+### PHASE 4 — BSPX lighting compatibility on both target engines
+**Status: NOT STARTED AS A BSP2 WORKFLOW**
+
+Keep two separate questions in code and UI:
+1. Which **core BSP format** is being read/written? BSP2 or BSP29.
+2. Which **lighting extensions** are included? Standard lightmaps or supported BSPX data.
+
+Build a per-engine test matrix for Ironwail and Nightdive KEX. Verify each required extension independently:
+- RGBLIGHTING
+- DECOUPLED_LM
+- LMSHIFT / LMOFFSET variants
+- LMSTYLE and LMSTYLE16
+- QLIT v1 .lit sidecar behavior
+- SLPG_LMPAD, the SLOPGATE edge-support marker (verify its consumer/semantics; never assume an engine acts on it).
+
+The current parser supports only some layouts. LMSTYLE16, legacy LMSHIFT/LMOFFSET without DECOUPLED_LM, and LIGHTING_E5BGR9 are documented limitations. Decide explicitly what 1.0 supports; unsupported variants must be rejected with an actionable message, not silently misread.
+
+### PHASE 5 — Lighting fidelity and map workflow quality
+**Status: PARTIALLY IMPLEMENTED · requires deliberate scope decisions**
+
+- Preserve the original compiler lightmap as a reference and make every export's selected lighting source (source vs baked) explicit and diagnosable.
+- Compare local/spatial luxel distributions, not only global averages. E1M1's diagnostic source mean (0.2947401) and final atlas mean (0.2950881) differ by only about 0.12%, while the maximum sampled luxel is 202.4476. A global mean match is not spatial fidelity.
+- Keep Original, Quake Direct Solver, Cycles preview and Cycles bake clearly distinguished in UI and docs.
+- State which compiler semantics are supported. The direct solver currently supports documented static delay 0–5, but does not reproduce the entire ericw compiler: radiosity/bounce, dirt, deviance/area sampling, surface emitters, sky/sun sampling, projected texture lights, full compiler visibility behavior and animated lightstyle curves/minlight behavior are incomplete or approximated.
+- Cycles correction graphs currently cover delay 0 and delay 5; other delays use native fallback. Eevee is an approximation. Do not promise compiler-identical lighting.
+- Decide whether 1.0 needs animated style preview/export. Current static handling composites styles at full weight and flattens output to style 0.
+- Complete or explicitly scope companion MAP editing. Current sync updates a subset of existing light properties; target/mangle direction and creating new MAP light entities are not implemented.
+- Improve true partial-bake performance only when it can be measured. Current face scopes protect atlas pixels but Cycles still evaluates the full BSP; selected-light masks are approximations.
+
+### PHASE 6 — Stabilization, documentation and 1.0 release
+**Status: NOT STARTED**
+
+- Declare supported Blender versions and OS combinations.
+- Run real Blender tests: install/upgrade/re-enable, multiple maps, save/reopen, texture paint, detachment, palette conversion, lightmap paint, bake, undo/restore, export/cancel/error recovery.
+- Run repeatable engine regression maps in both Ironwail and Nightdive KEX, including a larger BSP2 map and each supported BSPX lighting layout.
+- Verify no silent data loss in import/edit/export/re-import.
+- Update onboarding, format matrix, known limitations, troubleshooting and recovery documentation.
+- Synchronize the tested production source into default main (currently still v0.11.0), close/archive obsolete development branches and old PRs, tag the release, and publish one authoritative installer.
+
+## 1.0 definition of done
+
+Do not call SLOPGATE 1.0 until all are true:
+
+1. BSP2 is the primary supported import/export format; BSP29 remains an optional legacy path.
+2. Supported BSPX lighting layouts are verified separately in Ironwail and Nightdive KEX; unsupported layouts are clearly rejected/documented.
+3. Round-trip tests show no unintended loss of geometry, entities, visibility/collision data, textures, lightmaps or preserved unknown extensions.
+4. Texture painting, face detachment, palette conversion, lightmap editing, bake, undo/restore and export pass real Blender acceptance tests.
+5. Lighting has a clearly declared fidelity scope; remaining approximations are visible to users and do not masquerade as compiler-equivalent output.
+6. Current export regressions (including the 0.21.24 Enhanced and companion-MAP fixes) have passed actual Blender and target-engine tests.
+7. No known critical/high-severity defects remain in the supported workflow.
+8. Install/upgrade/recovery documentation is complete, and version metadata, default branch, release notes and installer all identify the same 1.0 build.
+
+## Scope guardrails — do not let 1.0 drift
+
+Keep these outside 1.0 unless the user explicitly changes scope:
+- Full brush-based MAP editing and BSP geometry/topology rebuilding.
+- Running QBSP, VIS or ericw light as an integrated compiler.
+- Gameplay simulation, animated mover travel or a complete Quake player collision system.
+- Universal support for every historical BSP/BSPX/WAD variant.
+- 2PSB/RMQ without a concrete requirement.
+
+Current intentional limitations to carry consciously or resolve:
+- Inline movers are in a combined mesh, not independent animated Blender objects.
+- WAD support is limited to uncompressed WAD2 miptex data; WAD3 and compressed variants are not implemented.
+- Existing Classic-era texture/texinfo and atlas limits must be reviewed during BSP2 work, not blindly inherited.
+- Special shadow modes such as _shadowself, _shadowworldonly and _switchableshadow are not fully ericw-equivalent.
+- Selected-face/selected-light filtering is not yet true Cycles receiver-only acceleration.
+
+## Immediate next action
+
+**Wait for and incorporate the user's 0.21.24 runtime acceptance result.** If it passes, create a dedicated BSP2 parser/import feature branch and begin Phase 2. If it fails, fix that concrete regression first. Do not start unrelated features or change lighting formulas without a controlled reproduction.
+
+## Current verified baseline
+
+- Production source: fix/0.21.17-world-aligned-lightmap-charts, commit d27e7be286829a019badb556b6c4c30c0c4c2eb4, add-on version **0.21.24**.
+- Latest CI: run 44232978822, success; Python compilation, **317 standalone tests**, package assembly and artifact upload passed. This is not a Blender GUI or engine runtime test.
+- Installer artifact: Quake-Surface-Studio-v0.21.24-Blender-Install, artifact 14396470461; SHA-256 8a4c4dec82249f9382d5dddbc9bbe2b430144f39f2ecd88a80aebdb2bf30ab8b.
+- Installer: https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/44232978822/artifacts/14396470461
+- User reports that qbsp -bsp2 E1M1 loads in the Nightdive rerelease. This verifies the core BSP2 path in that engine, not individual BSPX extensions.
+- Fourteen E1M1 comparison JPGs at info_player_start have been reviewed. Broad smooth gradients occur in both EricW and SLOPGATE Ironwail lightmaps; do not call that alone a Phong bug. A local light-distribution mismatch remains.
+- Documentation branch: fix/v0.11.1-metadata-style-order-test. Default main remains v0.11.0 and must be synchronized before 1.0.
+- No open GitHub issues; five historical PRs remain open and should be audited/closed or archived during release housekeeping.
+
+---
+
 ## Project identity and purpose
 
-- Product: **SLOPGATE**, a Blender add-on and workflow for Quake BSP map import, texture editing/painting, lighting, map inspection and export.
-- Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
-- Active development PR branch: fix/v0.11.1-metadata-style-order-test (latest head checked 2026-11-17: d1f1fd29257cf9932121c1ede6555b61242c725c; latest add-on source baseline on this branch remains c63205dc4974c313103ef9b8b7def5131b8680f1).
-- Target interactive environment: Blender 5.3 on Linux.
-- Target map format: Quake 1 BSP29. Target engine includes Ironwail 0.8.2.
-- The add-on's package folder and internal identifiers still use quake_surface_studio / QSS for compatibility. Do not perform a partial global rename. New user-visible branding, log entries and new code labels should use SLOPGATE.
-- The scope may grow beyond surface painting; preserve the existing BSP, texture, lighting and export workflows.
-
-## How to work with the user
-
-1. **Do not remove existing functionality, controls, operators, settings or workflows without explicit permission.** If a change might retire or replace a feature, ask first. The user has explicitly allowed changing or rolling back the recent experimental Cycles attenuation work, but that permission is limited to that lighting experiment.
-2. Work incrementally and keep changes organized. The user prefers one coherent task at a time and values accuracy over speculative conclusions.
-3. Do not ask again for information already present in the conversation archive or current project context.
-4. Be direct about what is known, inferred, or unverified. Distinguish source inspection, automated tests, user-reported results and actual interactive verification.
-5. Never claim Blender GUI/runtime testing, a Cycles/Eevee render or bake, QBSP compilation, or Ironwail launching succeeded unless that was actually performed. CI and pure-Python tests are not substitutes for those tests.
-6. Preserve original dialogue in the main archive. Append new sessions; do not rewrite the historic transcript. Keep this concise handoff updated when decisions or source state materially change.
-7. The user wants an **installable Blender ZIP for every new add-on version/build**. For each such build:
-   - build from the exact source commit being reported;
-   - verify the artifact exists and its package layout contains the installable quake_surface_studio/__init__.py;
-   - provide a direct download link;
-   - report exact version, source commit, artifact identity/checksum when available, and test status;
-   - if CI fails or the artifact cannot be verified, state that plainly and do not offer an unverified archive.
-8. Do not promise background work or results later. Complete the task in the current session or state what could not be completed.
-
-
-## Current source/build baseline — checked 2026-11-17
-
-- Repository: https://github.com/ChnuckiErdbeer/Quake-Surface-Studio
-- The official 1.0 scope remains classic Quake 1 BSP29 only. BSP2/2PSB remain post-1.0.
-- Do not describe any 0.21.x build as an official release. The latest candidate is version 0.21.19 on open draft PR #5. Its delay-0 native-falloff experiment has a 300-test CI/package pass. The one-luxel failure has been traced to BSP face 5828 at Quake position (-80, 640, 96), near three delay-0 lights; whether the native-falloff experiment removes it remains unverified in Blender 5.3.
-- The repository default branch main is still at b6936a58c5159dbe79a60d5778ad40df42e126f5 and is not the active development baseline. Do not start new feature work from main.
-- PR #1 is the long-running development PR against main. Its branch is fix/v0.11.1-metadata-style-order-test; the archive and handoff are maintained on this branch. The latest underlying add-on code on that branch remains c63205dc4974c313103ef9b8b7def5131b8680f1. Treat the live GitHub branch ref as authoritative for the latest documentation commit.
-- The active lightmap feature sequence is a stacked draft PR chain: PR #3 (0.21.15) → PR #4 (0.21.16) → PR #5 (latest candidate 0.21.19; previous candidate 0.21.18). The latest PR #5 head is a781e3f43d24e42bb19145cda13da3973d5044cd. It includes HDR sampling/calibration-order, hard-spotlight and active-map scoping, non-finite diagnostics, Test in Ironwail export-stage timings, face/luxel/world-position/nearest-light attribution, and a 0.21.19 experiment that uses Blender's normal Cycles point-light falloff for Quake delay-0 lights while retaining the delay-5 correction. It includes the PR #3 and PR #4 base work. PRs #3–#5 remain open and draft.
-- PR #2 is a separate draft diagnostic branch, fix/0.21.15-bsp-import-array-trace, head 66767f0fe7d34db7a29204af1d13dc383ec300ce. Its branch name is not an add-on version. It is based on c63205d and is not part of the PR #3–#5 lightmap chain.
-- Version metadata on the PR #1 development base is inconsistent: the package __init__.py reports bl_info version 0.21.14, while addon.py ADDON_VERSION and README still report 0.21.13. A 0.21.14 installer was generated from the diagnostic branch, but do not treat it as a clean versioned release. The PR #3 branch repairs the version declarations at 0.21.15; PR #4 synchronizes them at 0.21.16; PR #5 synchronizes __init__.py, addon.py and README to 0.21.18.
-- The 0.21.18 candidate ZIP was produced from PR #5 head 7f182cf97cc1a3aa35c15408d429a478f87e08c2. GitHub Actions QSS Python run 43783467279 / job 133025758521 passed Python compilation, 290 standalone tests, BSP export integrity checks, package assembly and artifact upload. Artifact: Quake-Surface-Studio-v0.21.18-Blender-Install, ID 14188889199, 308,296 bytes. The Actions run and artifact page are https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43783467279 and https://github.com/ChnuckiErdbeer/Quake-Surface-Studio/actions/runs/43783467279/artifacts/14188889199.
-- The authoritative digest printed by the artifact-upload step and returned by GitHub artifact metadata is SHA-256 18499457a52b39b232cce6c4f7567be6c7d028ca29fdcdc70de226ee4cf772e8. The reconstructed conversation contains a different 0.21.18 digest (5bff80081380ff08ae1c7779f6ad605c058b0d514238d3cbfa37be638b607015) for the same stated size; treat that as an unresolved transcription/artifact-identity discrepancy. Use the GitHub Actions artifact digest unless an independently downloaded ZIP is re-hashed and proves otherwise.
-- Runtime validation of 0.21.18 remains outstanding: no Blender 5.3 GUI import/bake/export, no e1m1 timing run, and no Ironwail or Quake rerelease comparison by the assistant. Do not claim the chart changes solved the reported seam.
-- User-confirmed latest seam test remains the 0.21.13 Enhanced BSPX rim comparison on 2026-11-15: no visible change in either the Quake 2021 rerelease or Ironwail. That approach is not a fix for the classic path.
+- Product: **SLOPGATE**, a Blender add-on for compiled Quake map surface, texture, lightmap and lighting editing.
+- Repository: https://github.com/ChnuckiErdBeer/Quake-Surface-Studio
+- Primary target engines: **Ironwail** and the **Nightdive rerelease**.
+- Current primary format strategy: **BSP2 core + independently selected BSPX extensions**. BSP29 remains optional legacy compatibility. 2PSB/RMQ is not in scope without a concrete need.
+- User-confirmed engine fact: an E1M1 compiled with ericw-tools qbsp -bsp2 loads in the Nightdive rerelease. This verifies the BSP2 core format for the user's engine build; it does not verify every BSPX extension.
+- Target interactive environment: Blender 5.3 on Linux (verify/declare the supported release matrix before 1.0).
+- Package folder and internal identifiers still use quake_surface_studio / QSS for compatibility. Do not perform a partial global rename. New user-visible branding and new labels should use SLOPGATE.
+- The product is a compiled-map surface/texture/lightmap editor, not a full brush-based MAP editor or integrated QBSP/VIS/light compiler.
 
 ## Historical source/build baseline — checked 2026-11-11
 
