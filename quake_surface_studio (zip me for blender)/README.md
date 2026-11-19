@@ -1,4 +1,12 @@
-# SLOPGATE 0.21.10
+# SLOPGATE 0.21.15
+
+## 0.21.15 — classic BSP29 detached-face lightmap alignment
+
+- Keeps the shared detached-face atlas as the Blender painting surface, but crops each edited face tile back out at export and writes it as an individual face-local miptexture.
+- Uses that face's original local texture projection for classic BSP29 export. This avoids the atlas packer's per-face scale/offset changes from shifting the classic lightmap sample grid at shared coplanar edges.
+- Adds regression coverage for atlas tile extraction/orientation and for preserving luxel phase across the two adjacent faces in the committed spottest01 BSP fixture.
+- The per-face texture strategy can consume more classic miptexture slots than exporting one shared atlas; the existing conservative 512-texture limit remains enforced.
+- Automated Python tests cover the data transformations. Blender 5.3 export/bake and Ironwail runtime validation are still required to confirm the visual seam is fixed.
 
 ## 0.21.5 — visible bake timing and BSP inline-model placement
 

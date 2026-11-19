@@ -171,6 +171,44 @@ def allocate_image_texture_index(entries: list, indices_by_image: dict, image_ke
     return index
 
 
+
+def extract_atlas_tile_rgba(
+    pixels, atlas_size: int, tile: dict, output_size: tuple[int, int]
+) -> list[float]:
+    """Crop one bottom-left atlas tile and restore its face-local image size.
+
+    The detached-face atlas is a Blender paint surface. It may scale each tile
+    slightly to make the packed layout fit, but classic BSP29 must export the
+    face-local texinfo projection rather than that atlas transform so adjacent
+    lightmap grids retain their original world-space phase. This helper crops
+    the edited tile and resamples it to the original face-local dimensions.
+    """
+    size = int(atlas_size)
+    if size <= 0 or len(pixels) != size * size * 4:
+        raise ValueError("Atlas pixel buffer does not match its square dimensions.")
+    try:
+        x, y, width, height = (
+            int(tile[key]) for key in ("x", "y", "width", "height")
+        )
+        target_width, target_height = (int(value) for value in output_size)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Atlas tile and output dimensions must be valid.") from exc
+    if (
+        x < 0 or y < 0 or width <= 0 or height <= 0
+        or x + width > size or y + height > size
+        or target_width <= 0 or target_height <= 0
+    ):
+        raise ValueError("Atlas tile lies outside the image or output dimensions are invalid.")
+    cropped = [0.0] * (width * height * 4)
+    for row in range(height):
+        source = ((y + row) * size + x) * 4
+        target = row * width * 4
+        cropped[target:target + width * 4] = pixels[source:source + width * 4]
+    return resample_rgba_nearest(
+        cropped, width, height, target_width, target_height
+    )
+
+
 def resample_rgba_nearest(pixels, source_width, source_height, target_width, target_height):
     """Nearest-neighbour resample of a bottom-up RGBA float image."""
     sw, sh = int(source_width), int(source_height)

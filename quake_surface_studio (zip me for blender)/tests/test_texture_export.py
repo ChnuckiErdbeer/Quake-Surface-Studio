@@ -96,6 +96,53 @@ class TextureExportHelperTests(unittest.TestCase):
         mapped = texture_export.projection_for_atlas_tile(projection, (100, 100), tile, 512)
         self.assertEqual(mapped, (1.0, 0.0, 0.0, -6.0, 0.0, 4.0, 0.0, 328.0))
 
+    def test_atlas_tile_crop_restores_local_image_size_and_bottom_left_origin(self):
+        # A 2x2 tile at bottom-left-based atlas coordinate (1, 1) contains
+        # red, green / blue, white. Surrounding atlas pixels are black.
+        pixels = []
+        black = (0.0, 0.0, 0.0, 1.0)
+        colors = [
+            black, black, black, black,
+            black, (1.0, 0.0, 0.0, 1.0), (0.0, 1.0, 0.0, 1.0), black,
+            black, (0.0, 0.0, 1.0, 1.0), (1.0, 1.0, 1.0, 1.0), black,
+            black, black, black, black,
+        ]
+        for color in colors:
+            pixels.extend(color)
+        result = texture_export.extract_atlas_tile_rgba(
+            pixels, atlas_size=4,
+            tile={"x": 1, "y": 1, "width": 2, "height": 2},
+            output_size=(4, 4),
+        )
+        self.assertEqual(len(result), 4 * 4 * 4)
+        self.assertEqual(result[:4], [1.0, 0.0, 0.0, 1.0])
+        self.assertEqual(result[4:8], [1.0, 0.0, 0.0, 1.0])
+        self.assertEqual(result[8:12], [0.0, 1.0, 0.0, 1.0])
+        self.assertEqual(result[-4:], [1.0, 1.0, 1.0, 1.0])
+
+    def test_face_local_projections_keep_adjacent_classic_luxel_phase(self):
+        # Original texinfo axes and projected bounds for faces 0 and 1 in
+        # the committed spottest01_ericw.bsp fixture. They share y=-208.
+        # Face-local projections change only the offset; the shared-edge S
+        # coordinates still differ by exactly 7 classic 16-unit luxels.
+        face_a = texture_export.face_local_texinfo_projection(
+            (0, 1, 0, -32, 0, 0, -1, 0),
+            (-352, -256, 112, 240),
+            (128, 256),
+        )
+        face_b = texture_export.face_local_texinfo_projection(
+            (0, 1, 0, 0, 0, 0, -1, 0),
+            (-208, -256, 192, 240),
+            (256, 256),
+        )
+        edge_s_a = -208 + face_a[3]
+        edge_s_b = -208 + face_b[3]
+        self.assertEqual(face_a[:3], (0.0, 1.0, 0.0))
+        self.assertEqual(face_b[:3], (0.0, 1.0, 0.0))
+        self.assertEqual(face_a[4:7], face_b[4:7])
+        self.assertAlmostEqual((edge_s_a - edge_s_b) / 16.0, 7.0)
+        self.assertAlmostEqual((edge_s_a - edge_s_b) % 16.0, 0.0)
+
     def test_inverse_projection_maps_back_to_source_axis(self):
         old = (2, 0, 0, 8)
         new = (4, 0, 0, -20)

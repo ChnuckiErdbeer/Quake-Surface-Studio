@@ -1,19 +1,11 @@
 # Quake-Surface-Studio
-blender add on for importing, manipulating and exporting quake bsp files.
 
 ## Current development build
 
-SLOPGATE **0.21.13** — BSP29-only development build. The undo regression runner
-is now non-invasive and global Ctrl+Z testing is parked while feature testing
-continues.
+SLOPGATE **0.21.15** — BSP29-only development build.
 
-Enhanced BSPX export adds a half-luxel support rim to eligible per-face
-`DECOUPLED_LM` lightmaps and writes the `SLPG_LMPAD` marker to prevent the rim
-from being added again after re-import. This is an experimental edge-filtering
-mitigation, not a proven renderer fix. It does **not** change the classic BSP29
-fallback: renderers that ignore `DECOUPLED_LM` (including the inspected
-Ironwail classic path) will not benefit from this rim. Runtime support for this
-extension in the Quake rerelease has not yet been verified.
+The detached-face paint atlas remains shared inside Blender, but each edited face is now exported as its own face-local miptexture. The classic BSP29 texinfo therefore retains its face-local projection rather than inheriting the atlas tile's compressed scale and offset. This keeps neighboring coplanar faces' classic lightmap sample grids aligned at shared edges. Export still enforces the conservative 512 classic miptexture limit.
 
-Python tests and the install package are checked in GitHub Actions. Blender
-GUI baking and in-engine lightmap comparisons still require manual validation.
+The 0.21.13 half-luxel rim remains limited to the Enhanced BSPX `DECOUPLED_LM` payload; it does not change the classic BSP29 fallback read by Ironwail's classic path.
+
+Automated Python tests and package assembly are intended to run in GitHub Actions. Blender 5.3 export/bake and Ironwail/Quake rerelease comparisons are not claimed as runtime-tested until performed.
