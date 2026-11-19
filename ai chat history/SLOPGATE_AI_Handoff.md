@@ -31,17 +31,36 @@ The user has compiled E1M1 with ericw-tools qbsp -bsp2 and confirmed that the Ni
 ## Roadmap — follow this order
 
 ### PHASE 1 — Close the current 0.21.24 acceptance loop
-**Status: WAITING FOR USER RUNTIME TEST · highest immediate priority**
+**Status: SOURCE-SIDE REVIEW COMPLETE · WAITING FOR USER BLENDER 5.3 / IRONWAIL ACCEPTANCE**
 
-Do not leap into broad BSP2 refactoring while the immediate export fixes remain unverified in Blender.
+Source-side review completed 2026-11-19 against production source HEAD `d27e7be286829a019badb556b6c4c30c0c4c2eb4` (add-on version 0.21.24).
 
-- Install/test SLOPGATE 0.21.24 in the user's Blender 5.3 environment.
-- Export Enhanced with no companion MAP configured: no bogus /app/blender warning.
-- Export Enhanced from an explicitly selected Baked lightmap preview: no face_info error, valid BSP and lighting sidecar.
-- Load that exact output in Ironwail. Record the exact file opened.
-- Compare Classic and Enhanced variants only as a controlled diagnostic of the current BSP29 edge-support path; do not mistake those modes for BSP2.
-- Record Blender version, source BSP hash, export selection, filenames, engine version and screenshots/logs.
-- Keep observations distinct from CI results. Do not claim runtime success until the user confirms it.
+Verified in source:
+- `_build_enhanced_lightmap_payload()` constructs `face_info` locally for each face before the world-chart sampling branch reads it. The previous reported `name 'face_info' is not defined` failure has a dedicated AST regression test in `tests/test_export_contracts.py::test_world_chart_face_context_is_defined_before_it_is_used`.
+- `_qss_prepare_companion_map_export()` checks the raw linked MAP path before calling `abspath()`. An empty path returns `None`, avoiding the erroneous `/app/blender` resolution. A missing/changed/unwritable linked MAP is caught as a sidecar warning.
+- `QSS_OT_export_bsp.execute()` runs BSP export independently of MAP preparation/commit. A companion MAP problem is reported as “BSP export succeeded” rather than aborting the BSP write.
+- Enhanced export builds `DECOUPLED_LM`, `LMSTYLE` and `RGBLIGHTING`; retains classic LIGHTING samples for engines that ignore BSPX; the audit path runs `export_validation.validate_export_pair()`.
+- `__init__.py` reports version **0.21.24**.
+
+Automated evidence:
+- GitHub Actions run `44232978822` completed successfully on source HEAD above. All workflow steps passed: Python compilation, standalone unittest discovery, add-on folder assembly and artifact upload.
+- Artifact: `Quake-Surface-Studio-v0.21.24-Blender-Install`, ID `14396470461`, SHA-256 `8a4c4dec82249f9382d5dddbc9bbe2b430144f39f2ecd88a80aebdb2bf30ab8b`.
+- Important caveat: this is a Python 3.12 CI run. It does not execute Blender's `bpy` export operator, validate Blender 5.3 file-dialog state, or load the result in Ironwail.
+- The workflow run's display title is stale and says 0.21.18; the actual checked-out HEAD and `__init__.py` version are the authoritative 0.21.24 values.
+
+**Runtime acceptance still outstanding.** Do not mark Phase 1 complete until the user confirms the following on Blender 5.3 and Ironwail:
+
+1. Install the 0.21.24 artifact above (ensure Blender is not loading an older duplicate add-on copy).
+2. Use a fresh import of the original, unrecompiled E1M1 BSP in a test directory. For the no-companion-MAP case, keep the BSP in a directory without a same-basename `.map`; no decompiled MAP is required.
+3. Keep the imported BSP object active and in Object Mode. Export explicitly as **Enhanced BSPX** to a new filename, e.g. `e1m1_phase1_enhanced.bsp`. Do not rely on AUTO or the BOTH option for the first test.
+4. Expected result: export operator returns FINISHED; no `/app/blender` MAP error; no `face_info` NameError; Enhanced BSP is written. If source RGB lighting is available, expect the corresponding `.lit` sidecar as well.
+5. Run **Validate BSP Export** against the original E1M1 BSP and the new Enhanced BSP (select the generated `.lit` if prompted). Require PASS.
+6. Load the exact generated Enhanced BSP in Ironwail. Confirm the map opens and inspect the player-start area / lightmap edges. Record the exact filename opened.
+7. Repeat with a linked companion MAP only if MAP synchronization itself is being tested; confirm that the output MAP is created/updated safely and that BSP export still succeeds if the MAP is absent or invalid.
+
+Report back with: Blender version; add-on version shown in Blender; export mode; exact operator message; whether BSP and `.lit` exist; validator report; Ironwail version and whether the exact file loads; any traceback. If it fails, preserve the complete traceback and do not overwrite the source BSP.
+
+**Phase 1 exit condition:** explicit Enhanced export passes in Blender 5.3, QSS structural validation passes, and that exact exported file loads in Ironwail. Only then start Phase 2 BSP2 parser/import work. If a step fails, fix that concrete defect first.
 
 ### PHASE 2 — BSP2 foundation
 **Status: NOT STARTED · largest architectural blocker**
@@ -134,7 +153,8 @@ Current intentional limitations to carry consciously or resolve:
 
 ## Immediate next action
 
-**Wait for and incorporate the user's 0.21.24 runtime acceptance result.** If it passes, create a dedicated BSP2 parser/import feature branch and begin Phase 2. If it fails, fix that concrete regression first. Do not start unrelated features or change lighting formulas without a controlled reproduction.
+**Phase 1 source review is complete; wait for the user's Blender 5.3 / Ironwail acceptance result using the explicit test procedure in Phase 1 above.** Do not begin BSP2 implementation until Enhanced export, structural validation and target-engine loading pass. If any step fails, fix that reproducible defect first.
+
 
 ## Current verified baseline
 
