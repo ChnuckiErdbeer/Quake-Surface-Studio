@@ -29,7 +29,7 @@ from . import bsp, color, lighting as lighting_utils, light_node_utils, material
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils, image_undo
 
 
-ADDON_VERSION = (0, 21, 21)
+ADDON_VERSION = (0, 21, 24)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -12561,6 +12561,13 @@ class QSS_PT_project(Panel):
         export_row = row.row(align=True)
         export_row.enabled = _qss_is_map_object(obj) and context.mode == "OBJECT"
         export_row.operator(QSS_OT_export_bsp.bl_idname, text="Export BSP", icon="EXPORT")
+        validate_row = layout.row()
+        validate_row.enabled = _qss_is_map_object(obj)
+        validate_row.operator(
+            QSS_OT_validate_bsp_export.bl_idname,
+            text="Validate BSP Export",
+            icon="CHECKMARK",
+        )
         launch = layout.row(align=True)
         test_button = launch.row(align=True)
         test_button.enabled = bool(
