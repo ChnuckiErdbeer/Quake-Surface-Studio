@@ -22484,3 +22484,17 @@ The follow-up fix and regression test passed CI on source head `037fb6277598e0ec
 - Installer: https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/44967059712/artifacts/14731764251
 
 The add-on version remains 0.21.24; this is a refreshed build of that version containing the new guard. The earlier artifact must not be used for this retest. CI does not prove Blender 5.3 operator behavior or Ironwail loading. Phase 1 remains open pending user runtime acceptance.
+
+## 2026-11-22 — User asks for SLOPGATE handoff review
+
+### User
+“Hi! Welcome to SLOPGATE. Go to the ai chat history folder and study the handoff.”
+
+### Assistant
+Reviewed the expanded `SLOPGATE_AI_Handoff.md` and `Slipgate_Chat_History_Clean.md` on `fix/v0.11.1-metadata-style-order-test`, and compared them with the handoff copy in the production branch. The production-branch handoff is stale and ends at the 0.21.13 edge-padding work; the docs branch contains the expanded project roadmap and the investigations through 2026-11-19. Production source and docs therefore have distinct roles: use `fix/0.21.17-world-aligned-lightmap-charts` for code, and the docs branch for project history.
+
+Live production source HEAD is `a99db5ce374c1522942b5aee238475c804d73e14`, version 0.21.24. The new Indirect Bounces control is present in the child `QSS_PT_lighting` panel, with default 2 and range 0–12. The latest CI run `45059371718` failed one test because the test inspects the root `QSS_PT_main` panel rather than the child panel containing the control. Compilation passed; 329 tests ran with one failure; package assembly and artifact upload did not run. No installer for this UI change exists yet.
+
+The user-confirmed world-chart edge-strip fix is separate and successful: the white strips are gone in Blender and Ironwail. The latest fresh-import lighting diagnostics show active delay-0 and delay-5 QSS Cycles correction graphs, with four delay-3 native fallbacks. The current Cycles bake falloff concern remains open; indirect-light accumulation is only a hypothesis. The diagnostic next step is an otherwise identical bake at 0 and 2 indirect bounces after a green CI build.
+
+No add-on source code or tests were changed in this session. No Blender or engine runtime test, new package build or merge occurred. Only project documentation was updated.
