@@ -22,7 +22,35 @@ def _source_for(node):
     return ast.get_source_segment(ADDON_SOURCE, node) or ""
 
 
+def _assigned_value(tree, name):
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if any(isinstance(target, ast.Name) and target.id == name for target in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError(f"Module assignment {name!r} was not found")
+
+
+INIT_PATH = ADDON_PATH.parent / "__init__.py"
+INIT_TREE = ast.parse(INIT_PATH.read_text(encoding="utf-8"))
+
+
 class EnhancedBSPExportContractTests(unittest.TestCase):
+    def test_sidebar_version_matches_installed_addon_version(self):
+        sidebar_version = _assigned_value(ADDON_TREE, "ADDON_VERSION")
+        package_info = _assigned_value(INIT_TREE, "bl_info")
+        self.assertEqual(sidebar_version, package_info["version"])
+
+    def test_bsp_export_validation_is_available_in_main_sidebar_panel(self):
+        panel = next(
+            node for node in ADDON_TREE.body
+            if isinstance(node, ast.ClassDef) and node.name == "QSS_PT_project"
+        )
+        draw = _find_function(panel, "draw")
+        context = _source_for(draw)
+        self.assertIn("QSS_OT_validate_bsp_export.bl_idname", context)
+        self.assertIn('text="Validate BSP Export"', context)
+
     def test_world_chart_face_context_is_defined_before_it_is_used(self):
         function = _find_function(ADDON_TREE, "_build_enhanced_lightmap_payload")
         context = _source_for(function)
