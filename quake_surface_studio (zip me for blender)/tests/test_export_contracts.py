@@ -49,7 +49,28 @@ class EnhancedBSPExportContractTests(unittest.TestCase):
         draw = _find_function(panel, "draw")
         context = _source_for(draw)
         self.assertIn("QSS_OT_validate_bsp_export.bl_idname", context)
-        self.assertIn('text="Validate BSP Export"', context)
+        self.assertIn('text="Validate Last Export"', context)
+        self.assertIn("_qss_last_export_path(obj)", context)
+        self.assertIn("validate_row.enabled = bool(last_export)", context)
+
+    def test_export_validator_uses_recorded_source_and_last_export_without_file_dialog(self):
+        operator = next(
+            node for node in ADDON_TREE.body
+            if isinstance(node, ast.ClassDef) and node.name == "QSS_OT_validate_bsp_export"
+        )
+        self.assertNotIn("ImportHelper", [ast.unparse(base) for base in operator.bases])
+        self.assertFalse(any(
+            isinstance(node, ast.FunctionDef) and node.name in {"invoke", "draw"}
+            for node in operator.body
+        ))
+        execute = _find_function(operator, "execute")
+        context = _source_for(execute)
+        self.assertIn('obj.get("qss_source_path", "")', context)
+        self.assertIn("_qss_last_export_path(obj)", context)
+        self.assertIn("export_validation.validate_export_pair(source, exported)", context)
+        self.assertNotIn("self.filepath", context)
+        self.assertNotIn("self.source_bsp", context)
+        self.assertNotIn("self.lit_file", context)
 
     def test_world_chart_face_context_is_defined_before_it_is_used(self):
         function = _find_function(ADDON_TREE, "_build_enhanced_lightmap_payload")
