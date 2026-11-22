@@ -12802,6 +12802,10 @@ class QSS_PT_lighting(Panel):
         bake = layout.column(align=True)
         bake.enabled = context.mode in {"OBJECT", "EDIT_MESH"} and mode in {"realtime", "cycles"} and obj.get("qss_light_entity_count", 0) > 0
         bake.prop(context.scene, "qss_bake_only_selected_faces", text="Only Selected Faces")
+        bake.prop(
+            context.scene, "qss_bake_bounces",
+            text="Indirect Bounces",
+        )
         bake.operator(QSS_OT_bake_scene_lights.bl_idname, text="Bake Lightmap", icon="RENDER_STILL")
         if mode == "realtime":
             layout.label(text="Eevee preview selected; baking currently uses the Cycles backend.", icon="INFO")
