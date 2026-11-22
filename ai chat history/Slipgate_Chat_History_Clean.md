@@ -22453,3 +22453,17 @@ CI run `44232978822` passed compilation, standalone Python tests, package assemb
 Phase 1 therefore remains **runtime-pending**, not complete. The handoff now contains an exact controlled acceptance procedure: fresh import of original E1M1 with no companion MAP, explicit Enhanced export to a new filename, QSS Validate BSP Export, then load that exact file in Ironwail. It also records the evidence the user should return and the rule not to overwrite the source BSP.
 
 No production code was changed in this audit. Phase 2 BSP2 work remains blocked until this runtime gate passes.
+
+
+## 2026-11-22 — Follow-up: false companion MAP warning on E1M1
+
+The user clarified that the E1M1 copy never had a companion MAP, but Enhanced export still reported `Linked companion MAP is missing: /app/blender`.
+
+The exact value is not a MAP filename. The prior empty-path guard only handled empty metadata; it did not reject a non-empty directory path. Import discovery assigns the source-MAP property only when it finds a same-basename MAP or the user explicitly supplies one, so this points to stale/invalid Blender object metadata or a path-lifecycle defect, not a requirement for a companion file.
+
+Fix committed to production source branch:
+- Commit `7a5d92a40a19776f8affb4ad44222ed04aa2c381`: if a stored companion path does not end in `.map`, clear the path and its hash, set map sync status to `NO_COMPANION`, and continue BSP-only export.
+- A missing actual `.map` path remains a warning, preserving protection against genuinely stale linked companions.
+- Regression test added in commit `037fb6277598e0ecbbf2b73c962ef0214e2a0c25`.
+
+CI for these commits has not yet been verified. The old 0.21.24 artifact does not contain this fix. User needs a new CI-built installer before retesting. Phase 1 remains open until the updated build passes Blender Enhanced export, SLOPGATE export validation and Ironwail load.
