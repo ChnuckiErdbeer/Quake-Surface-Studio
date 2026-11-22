@@ -5245,44 +5245,43 @@ class QSS_OT_browse_game_maps(Operator):
             return {'CANCELLED'}
 
 
-class QSS_OT_validate_bsp_export(Operator, ImportHelper):
+class QSS_OT_validate_bsp_export(Operator):
     bl_idname = "qss.validate_bsp_export"
-    bl_label = "Validate BSP Export"
-    bl_description = "Compare an exported BSP with its original source and validate its lightmaps and optional .lit sidecar"
-    filename_ext = ".bsp"
-    filter_glob: StringProperty(default="*.bsp", options={'HIDDEN'})
-    source_bsp: StringProperty(name="Original / source BSP", subtype='FILE_PATH', default="")
-    lit_file: StringProperty(name="Optional .lit sidecar", subtype='FILE_PATH', default="")
-
-    def invoke(self, context, event):
-        obj = context.object
-        source = obj.get('qss_source_path', '') if _qss_is_map_object(obj) else ''
-        if not source:
-            source = _qss_load_config().get('last_source_bsp', '')
-        self.source_bsp = source
-        return ImportHelper.invoke(self, context, event)
-
-    def draw(self, context):
-        layout = self.layout
-        layout.label(text="Choose the exported BSP in the file browser.")
-        layout.prop(self, "source_bsp")
-        layout.prop(self, "lit_file")
+    bl_label = "Validate Last Export"
+    bl_description = "Validate this map's most recent SLOPGATE BSP export against its original source; a sibling .lit is detected automatically"
 
     def execute(self, context):
-        source = bpy.path.abspath(self.source_bsp) if self.source_bsp else ''
-        exported = bpy.path.abspath(self.filepath) if self.filepath else ''
-        lit_path = bpy.path.abspath(self.lit_file) if self.lit_file else None
+        obj = context.object
+        source = ""
+        exported = ""
         try:
+            if not _qss_is_map_object(obj):
+                raise ValueError("Select the imported SLOPGATE map before validating its export.")
+            source = _qss_abspath(str(obj.get("qss_source_path", "") or ""))
+            exported = _qss_abspath(_qss_last_export_path(obj))
             if not source or not os.path.isfile(source):
-                raise FileNotFoundError("Choose a valid original/source BSP in the operator options.")
+                detail = source or "no source BSP path is recorded"
+                raise FileNotFoundError(
+                    f"Original/source BSP is unavailable ({detail}). Re-import the source map before validating."
+                )
             if not exported or not os.path.isfile(exported):
-                raise FileNotFoundError("Choose a valid exported BSP.")
-            report = export_validation.validate_export_pair(source, exported, lit_path)
+                raise FileNotFoundError(
+                    "No existing BSP export is recorded for this map. Export the BSP first, then validate the last export."
+                )
+            # validate_export_pair auto-detects a sibling .lit file when present.
+            report = export_validation.validate_export_pair(source, exported)
             body = _qss_format_export_report(report)
-            body = f"Original: {source}\nExported: {exported}\n\n" + body
+            body = (
+                f"Original: {source}\n"
+                f"Exported: {exported}\n"
+                f"Export mode: {obj.get('qss_last_export_mode', 'unknown')}\n\n"
+                + body
+            )
             _qss_write_text_report("QSS_Export_Validation", body)
-            _qss_save_config(context.scene, last_source_bsp=source)
-            self.report({'INFO'}, "PASS: BSP export integrity checks. See Text datablock QSS_Export_Validation.")
+            self.report(
+                {'INFO'},
+                "PASS: Last BSP export integrity checks. See Text datablock QSS_Export_Validation."
+            )
             return {'FINISHED'}
         except (OSError, bsp.BSPError, ValueError) as exc:
             message = f"FAIL: {exc}"
@@ -12561,13 +12560,16 @@ class QSS_PT_project(Panel):
         export_row = row.row(align=True)
         export_row.enabled = _qss_is_map_object(obj) and context.mode == "OBJECT"
         export_row.operator(QSS_OT_export_bsp.bl_idname, text="Export BSP", icon="EXPORT")
+        last_export = _qss_last_export_path(obj)
         validate_row = layout.row()
-        validate_row.enabled = _qss_is_map_object(obj)
+        validate_row.enabled = bool(last_export)
         validate_row.operator(
             QSS_OT_validate_bsp_export.bl_idname,
-            text="Validate BSP Export",
+            text="Validate Last Export",
             icon="CHECKMARK",
         )
+        if _qss_is_map_object(obj) and not last_export:
+            layout.label(text="Export this map first to enable validation.", icon="INFO")
         launch = layout.row(align=True)
         test_button = launch.row(align=True)
         test_button.enabled = bool(
