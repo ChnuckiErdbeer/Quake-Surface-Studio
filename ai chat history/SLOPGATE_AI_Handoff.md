@@ -31,7 +31,7 @@ The user has compiled E1M1 with ericw-tools qbsp -bsp2 and confirmed that the Ni
 ## Roadmap — follow this order
 
 ### PHASE 1 — Close the current 0.21.24 acceptance loop
-**Status: FOLLOW-UP FIX COMMITTED · CI AND BLENDER 5.3 / IRONWAIL ACCEPTANCE PENDING**
+**Status: SOURCE FIX + CI PASSED · WAITING FOR USER BLENDER 5.3 / IRONWAIL ACCEPTANCE**
 
 Source-side review completed 2026-11-19 against production source HEAD `d27e7be286829a019badb556b6c4c30c0c4c2eb4` (add-on version 0.21.24).
 
@@ -48,8 +48,11 @@ Follow-up investigation after the user clarified that this E1M1 copy never had a
 - Import discovery only assigns `qss_source_map_path` when `map_sync.find_companion_map()` finds an actual same-basename MAP, or when the user explicitly supplies a source MAP. Therefore the likely issue is stale/invalid Blender object metadata or an import path that left a non-MAP value behind; it is not evidence that E1M1 needs a MAP file.
 - Production fix committed on `fix/0.21.17-world-aligned-lightmap-charts`: `7a5d92a40a19776f8affb4ad44222ed04aa2c381`. Before resolving a linked path, export now checks that it has a `.map` extension. A non-MAP value is cleared from the object (including its stored hash), status becomes `NO_COMPANION`, and BSP export proceeds without a MAP warning. A genuine missing path ending in `.map` still warns, so real stale links are not silently discarded.
 - Regression test added: `test_non_map_directory_metadata_is_ignored_as_no_companion`; test commit `037fb6277598e0ecbbf2b73c962ef0214e2a0c25`.
-- CI for these new commits has not yet been confirmed. The combined commit status endpoint returned no checks; do not infer a pass.
-- The earlier 0.21.24 artifact predates this fix. A new installer must be produced from the updated source before the user retests.
+- Latest CI run `44967059712` completed successfully on test commit `037fb6277598e0ecbbf2b73c962ef0214e2a0c25`. Compilation passed; **318 standalone tests passed**; BSP export integrity checks passed; the Blender-ready package was assembled and uploaded. This is not a Blender GUI/operator or Ironwail runtime test.
+- New installer artifact: `Quake-Surface-Studio-v0.21.24-Blender-Install`, ID `14731764251`, SHA-256 `972fae0a1053f21eac166c578d554e4c040f52f4efb2d9d72d7683374a32425d`.
+- Run: https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/44967059712
+- Installer: https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/44967059712/artifacts/14731764251
+- This replaces the older 0.21.24 artifact for the next test. Version number remains 0.21.24; the new artifact contains the non-MAP metadata guard.
 
 Automated evidence:
 - GitHub Actions run `44232978822` completed successfully on source HEAD above. All workflow steps passed: Python compilation, standalone unittest discovery, add-on folder assembly and artifact upload.
