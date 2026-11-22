@@ -519,5 +519,32 @@ class WorldChartSamplingTests(unittest.TestCase):
 
 
 
+class SourceLightmapPassThroughTests(unittest.TestCase):
+    def test_unedited_source_and_live_previews_preserve_compiled_lightmaps(self):
+        for mode in ("source", "realtime", "cycles"):
+            with self.subTest(mode=mode):
+                self.assertTrue(
+                    lightmap_export.should_preserve_source_lightmaps(mode)
+                )
+
+    def test_baked_or_painted_source_lightmaps_use_rebuild_path(self):
+        self.assertFalse(lightmap_export.should_preserve_source_lightmaps("baked"))
+        self.assertFalse(
+            lightmap_export.should_preserve_source_lightmaps(
+                "source", painted_override_active=True
+            )
+        )
+
+    def test_detached_face_projection_uses_rebuild_path(self):
+        self.assertFalse(
+            lightmap_export.should_preserve_source_lightmaps(
+                "source", has_face_local_projection=True
+            )
+        )
+
+    def test_unrecognized_preview_mode_does_not_claim_source_passthrough(self):
+        self.assertFalse(lightmap_export.should_preserve_source_lightmaps("unknown"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
