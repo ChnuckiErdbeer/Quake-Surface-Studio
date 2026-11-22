@@ -55,6 +55,58 @@ def _qss_log(level, event, message):
     stamp = time.strftime('%H:%M:%S')
     print(f"[{stamp}] [SLOPGATE] [{str(level).upper()}] [{event}] {message}", flush=True)
 
+def _qss_record_import_failure(source_path, exc, stage="BSP import"):
+    """Preserve the full Python traceback when a BSP import fails.
+
+    Blender operators normally expose only the exception message in the Info
+    area. Keep the traceback in a Text datablock and a user-data log so the
+    failing source line can be identified without the System Console.
+    """
+    trace = traceback.format_exc()
+    source = os.path.abspath(str(source_path or "")) if source_path else "(unknown source)"
+    report = (
+        "SLOPGATE BSP import failure\\n"
+        f"Stage: {stage}\\n"
+        f"Source: {source}\\n"
+        f"Exception: {type(exc).__name__}: {exc}\\n\\n"
+        f"{trace}"
+    )
+    text_name = "SLOPGATE_Last_Import_Traceback"
+    try:
+        text_block = bpy.data.texts.get(text_name)
+        if text_block is None:
+            text_block = bpy.data.texts.new(text_name)
+        else:
+            text_block.clear()
+        text_block.write(report)
+    except Exception as text_exc:
+        _qss_log("WARNING", "import_traceback", f"Could not create Blender Text datablock: {text_exc}")
+
+    diagnostic_path = ""
+    try:
+        directory = bpy.utils.user_resource(
+            "DATAFILES", path=os.path.join("qss", "diagnostics"), create=True
+        )
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+            diagnostic_path = os.path.join(directory, "SLOPGATE_Last_Import_Traceback.txt")
+            with open(diagnostic_path, "w", encoding="utf-8") as handle:
+                handle.write(report)
+    except Exception as file_exc:
+        _qss_log("WARNING", "import_traceback", f"Could not write traceback file: {file_exc}")
+
+    frames = traceback.extract_tb(exc.__traceback__)
+    location = ""
+    if frames:
+        frame = frames[-1]
+        location = f"{os.path.basename(frame.filename)}:{frame.lineno} ({frame.name})"
+    _qss_log(
+        "ERROR", "import",
+        f"{type(exc).__name__}: {exc}; {location or 'traceback location unavailable'}"
+    )
+    _qss_log("ERROR", "import_traceback", report)
+    return diagnostic_path or f"Blender Text datablock '{text_name}'"
+
 
 # QSS per-user installation settings are kept outside .blend files in config.json.
 _qss_config_update_depth = False
@@ -4743,7 +4795,10 @@ class QSS_OT_import_bsp(Operator, ImportHelper):
             _report(self, 'INFO', f"Imported {len(obj.data.polygons)} faces, {light_count} light entities. Palette: {palette_origin}.{texture_note}{lit_note}{resolution_note}{spawn_note}")
             return {'FINISHED'}
         except Exception as exc:
-            _report(self, 'ERROR', str(exc))
+            diagnostic = _qss_record_import_failure(
+                locals().get("source_path", self.filepath), exc
+            )
+            _report(self, 'ERROR', f"{exc} · full traceback: {diagnostic}")
             return {'CANCELLED'}
 
 
@@ -4818,7 +4873,13 @@ class QSS_OT_browse_game_maps(Operator):
             self.report({'INFO'}, f"Imported {entry['path']} from {entry['source_label']}.")
             return {'FINISHED'}
         except Exception as exc:
-            self.report({'ERROR'}, f"Could not import {entry['path']}: {exc}")
+            diagnostic = _qss_record_import_failure(
+                entry.get("path", ""), exc, stage="Game-map browser import"
+            )
+            self.report(
+                {'ERROR'},
+                f"Could not import {entry['path']}: {exc} · full traceback: {diagnostic}"
+            )
             return {'CANCELLED'}
 
 
