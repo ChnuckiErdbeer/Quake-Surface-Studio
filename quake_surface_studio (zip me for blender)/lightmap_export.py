@@ -17,6 +17,24 @@ MAX_SURFACE_LUXELS = 256
 NO_LIGHT_OFFSET = 0xFFFFFFFF
 
 
+def should_preserve_source_lightmaps(
+    preview_mode: str,
+    painted_override_active: bool = False,
+    has_face_local_projection: bool = False,
+) -> bool:
+    """Return whether export must retain the original compiled lightmap bytes.
+
+    Source and live-lighting preview modes represent the imported BSP lighting,
+    not newly generated samples. An active painted-original override or a
+    detached face projection requires the normal atlas rebuild path.
+    """
+    return (
+        str(preview_mode).lower() in {"source", "realtime", "cycles"}
+        and not bool(painted_override_active)
+        and not bool(has_face_local_projection)
+    )
+
+
 def choose_luxel_grid(
     s_values: Sequence[float],
     t_values: Sequence[float],
