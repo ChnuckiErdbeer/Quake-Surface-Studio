@@ -404,6 +404,50 @@ class WorldAlignedLightmapChartTests(unittest.TestCase):
         self.assertEqual(samples[2], (30, 30, 30))
 
 
+    def test_world_chart_edge_support_clamps_only_within_half_cell_diagonal(self):
+        root_half = 2.0 ** 0.5
+        texinfo = (
+            1.0 / root_half, 1.0 / root_half, 0.0, 0.0,
+            -1.0 / root_half, 1.0 / root_half, 0.0, 32.0,
+        )
+        chart = {
+            "face_ids": (0,),
+            "axis_s": (1.0, 0.0, 0.0),
+            "axis_t": (0.0, 1.0, 0.0),
+            "normal": (0.0, 0.0, 1.0),
+            "distance": 0.0,
+            "s_min": 0.0,
+            "t_min": 0.0,
+            "width": 3,
+            "height": 3,
+        }
+        records = {
+            0: {
+                "positions": (
+                    (0.0, 0.0, 0.0),
+                    (32.0, 0.0, 0.0),
+                    (0.0, 32.0, 0.0),
+                ),
+                "texinfo": texinfo,
+                "s_min": 0.0,
+                "t_min": -32.0,
+                "width": 3,
+                "height": 5,
+                "samples_rgb": [(77, 77, 77)] * 15,
+            }
+        }
+        samples, valid = lightmap_export.resample_coplanar_chart_sources(
+            chart, records
+        )
+        # (16, 32) is just outside the triangle but within half a luxel
+        # diagonal. Its rotated texinfo projection exceeds the source S grid,
+        # so the face's own edge sample must be clamped into the chart.
+        self.assertEqual(valid[2 * 3 + 1], 1)
+        self.assertEqual(samples[2 * 3 + 1], (77, 77, 77))
+        # (32, 32) is farther than the support radius and must stay invalid.
+        self.assertEqual(valid[2 * 3 + 2], 0)
+
+
     def test_different_models_or_styles_do_not_share_a_chart(self):
         charts, _mapping, _records = lightmap_export.build_coplanar_face_charts(
             self.records, self.faces, self.planes, self.edges, self.surfedges, [0, 1]
