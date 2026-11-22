@@ -29,7 +29,7 @@ from . import bsp, color, lighting as lighting_utils, material_utils, lightmap_e
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils, image_undo
 
 
-ADDON_VERSION = (0, 21, 13)
+ADDON_VERSION = (0, 21, 15)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -1028,13 +1028,19 @@ def _qss_create_detached_face_atlas(plans, atlas_size=512):
                     atlas_pixels[dst_offset + 1] = resized[src_offset + 1]
                     atlas_pixels[dst_offset + 2] = resized[src_offset + 2]
                     atlas_pixels[dst_offset + 3] = resized[src_offset + 3]
+            plan["local_projection"] = tuple(plan["projection"])
+            plan["local_image_size"] = (width, height)
+            plan["atlas_tile"] = {
+                "x": int(tile["x"]), "y": int(tile["y"]),
+                "width": target_w, "height": target_h,
+            }
+            plan["atlas_size"] = int(atlas_size)
+            plan["atlas_projection"] = texture_export.projection_for_atlas_tile(
+                plan["projection"], (width, height), tile, atlas_size
+            )
             plan["uvs"] = texture_export.remap_uvs_to_atlas(
                 plan["uvs"], tile, atlas_size
             )
-            plan["projection"] = texture_export.projection_for_atlas_tile(
-                plan["projection"], (width, height), tile, atlas_size
-            )
-            plan["local_image"] = source
             plan["image"] = atlas
         atlas.pixels.foreach_set(atlas_pixels)
         atlas.update()
@@ -1055,6 +1061,62 @@ def _qss_create_detached_face_atlas(plans, atlas_size=512):
             pass
         raise
 
+
+
+
+def _qss_make_classic_face_texture_from_atlas(mat, atlas_image):
+    """Return the edited detached face tile as its original face-local image.
+
+    Blender continues painting the shared atlas. BSP29 export crops that live
+    tile, restores the original local dimensions, and uses the local texinfo
+    projection so the atlas packing transform cannot desynchronize adjacent
+    classic lightmap grids.
+    """
+    tile_values = mat.get("qss_detached_atlas_tile")
+    source_size = mat.get("qss_detached_source_size")
+    atlas_size = int(mat.get("qss_detached_atlas_size", 0) or 0)
+    if tile_values is None or source_size is None:
+        return atlas_image, False
+    try:
+        values = tuple(int(value) for value in tile_values)
+        dimensions = tuple(int(value) for value in source_size)
+        if len(values) != 4 or len(dimensions) != 2:
+            raise ValueError("Stored atlas tile metadata has invalid dimensions.")
+        tile = dict(zip(("x", "y", "width", "height"), values))
+        if atlas_size != int(atlas_image.size[0]) or atlas_size != int(atlas_image.size[1]):
+            raise ValueError("The detached-face atlas dimensions changed after packing.")
+        atlas_pixels = array.array("f", [0.0]) * (atlas_size * atlas_size * 4)
+        atlas_image.update()
+        atlas_image.pixels.foreach_get(atlas_pixels)
+        local_pixels = texture_export.extract_atlas_tile_rgba(
+            atlas_pixels, atlas_size, tile, dimensions
+        )
+    except (TypeError, ValueError) as exc:
+        raise bsp.BSPError(
+            f"Could not recover detached face '{mat.name}' from its paint atlas: {exc}"
+        ) from exc
+    image = bpy.data.images.new(
+        name=f"{mat.name}_QSS_Export",
+        width=dimensions[0], height=dimensions[1],
+        alpha=True, float_buffer=True,
+    )
+    try:
+        try:
+            image.colorspace_settings.name = atlas_image.colorspace_settings.name
+        except Exception:
+            pass
+        image.pixels.foreach_set(local_pixels)
+        image.update()
+        image["qss_import_hash"] = ""
+        image["qss_face_local_export_tile"] = True
+        return image, True
+    except Exception:
+        try:
+            if image.users == 0:
+                bpy.data.images.remove(image, do_unlink=True)
+        except Exception:
+            pass
+        raise
 
 
 def _install_lightmap_nodes(mat, image):
@@ -4271,19 +4333,45 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
         if mat is None or 'qss_texture_index' not in mat:
             continue
         source_texture_id = int(mat.get('qss_texture_index', -2))
-        image = _find_image(mat)
-        if image is None:
+        source_image = _find_image(mat)
+        if source_image is None:
             continue
-        digest = _image_hash(image)
-        baseline = image.get('qss_import_hash', '')
+        image, temporary_face_image = (source_image, False)
         if source_texture_id == -1:
-            material_key = mat.as_pointer()
-            image_key = image.as_pointer()
-            if image_key not in new_texture_for_image:
-                fallback = f"qss_{len(entries):05d}"
+            image, temporary_face_image = _qss_make_classic_face_texture_from_atlas(
+                mat, source_image
+            )
+        try:
+            digest = _image_hash(image)
+            baseline = image.get('qss_import_hash', '')
+            if source_texture_id == -1:
+                material_key = mat.as_pointer()
+                # Temporary per-face crops are deleted after encoding; key them by
+                # material identity so Blender pointer reuse cannot alias two faces.
+                image_key = mat.as_pointer() if temporary_face_image else image.as_pointer()
+                if image_key not in new_texture_for_image:
+                    fallback = f"qss_{len(entries):05d}"
+                    tex_name = _safe_texture_name(mat.get('qss_export_name', ''), fallback)
+                    source_id = int(mat.get("qss_fullbright_source_texture_id", -1))
+                    source_entry = entries[source_id] if 0 <= source_id < len(entries) else None
+                    fullbright_mask = _miptex_fullbright_mask(
+                        source_entry, image.size[0], image.size[1], fullbright_start, image
+                    )
+                    blob = _encode_image_to_miptex(
+                        image, palette, tex_name, fullbright_mask=fullbright_mask,
+                        settings=converter_settings,
+                    )
+                    texture_index = texture_export.allocate_image_texture_index(
+                        entries, new_texture_for_image, image_key,
+                        bsp.MipTexture(blob, tex_name, image.size[0], image.size[1]),
+                    )
+                    new_texture_for_image[image_key] = texture_index
+                new_texture_for_material[material_key] = new_texture_for_image[image_key]
+                continue
+            if source_texture_id >= 0 and source_texture_id < len(entries) and digest != baseline:
+                fallback = entries[source_texture_id].name or f"qss_{source_texture_id:05d}"
                 tex_name = _safe_texture_name(mat.get('qss_export_name', ''), fallback)
-                source_id = int(mat.get("qss_fullbright_source_texture_id", -1))
-                source_entry = entries[source_id] if 0 <= source_id < len(entries) else None
+                source_entry = entries[source_texture_id]
                 fullbright_mask = _miptex_fullbright_mask(
                     source_entry, image.size[0], image.size[1], fullbright_start, image
                 )
@@ -4291,31 +4379,19 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
                     image, palette, tex_name, fullbright_mask=fullbright_mask,
                     settings=converter_settings,
                 )
-                texture_index = texture_export.allocate_image_texture_index(
-                    entries, new_texture_for_image, image_key,
-                    bsp.MipTexture(blob, tex_name, image.size[0], image.size[1]),
-                )
-                new_texture_for_image[image_key] = texture_index
-            new_texture_for_material[material_key] = new_texture_for_image[image_key]
-            continue
-        if source_texture_id >= 0 and source_texture_id < len(entries) and digest != baseline:
-            fallback = entries[source_texture_id].name or f"qss_{source_texture_id:05d}"
-            tex_name = _safe_texture_name(mat.get('qss_export_name', ''), fallback)
-            source_entry = entries[source_texture_id]
-            fullbright_mask = _miptex_fullbright_mask(
-                source_entry, image.size[0], image.size[1], fullbright_start, image
-            )
-            blob = _encode_image_to_miptex(
-                image, palette, tex_name, fullbright_mask=fullbright_mask,
-                settings=converter_settings,
-            )
-            prior = replacements.get(source_texture_id)
-            if prior and prior[0] != digest:
-                raise bsp.BSPError(
-                    f"Multiple Blender materials contain different edits for shared BSP texture {source_texture_id}. "
-                    "Use 'Detach Selected Faces' before painting a face independently."
-                )
-            replacements[source_texture_id] = (digest, bsp.MipTexture(blob, tex_name, image.size[0], image.size[1]))
+                prior = replacements.get(source_texture_id)
+                if prior and prior[0] != digest:
+                    raise bsp.BSPError(
+                        f"Multiple Blender materials contain different edits for shared BSP texture {source_texture_id}. "
+                        "Use 'Detach Selected Faces' before painting a face independently."
+                    )
+                replacements[source_texture_id] = (digest, bsp.MipTexture(blob, tex_name, image.size[0], image.size[1]))
+        finally:
+            if temporary_face_image:
+                try:
+                    bpy.data.images.remove(image, do_unlink=True)
+                except Exception:
+                    pass
 
     for texture_id, (_, replacement) in replacements.items():
         entries[texture_id] = replacement
@@ -6229,7 +6305,18 @@ class QSS_OT_detach_faces(Operator):
                 new_mat['qss_export_name'] = (texture_prefix + f"qssf{plan['face_id']:05d}")[:15]
                 new_mat['qss_texture_name'] = new_mat['qss_export_name']
                 new_mat['qss_face_local_projection'] = True
-                new_mat['qss_texinfo_projection'] = [float(v) for v in plan['projection']]
+                local_projection = plan.get('local_projection', plan['projection'])
+                new_mat['qss_texinfo_projection'] = [float(v) for v in local_projection]
+                atlas_tile = plan.get('atlas_tile')
+                if atlas_tile is not None:
+                    new_mat['qss_detached_atlas_tile'] = [
+                        int(atlas_tile['x']), int(atlas_tile['y']),
+                        int(atlas_tile['width']), int(atlas_tile['height']),
+                    ]
+                    new_mat['qss_detached_source_size'] = [
+                        int(value) for value in plan['local_image_size']
+                    ]
+                    new_mat['qss_detached_atlas_size'] = int(plan['atlas_size'])
                 _set_material_image(new_mat, plan['image'])
                 plan['new_mat'] = new_mat
 
