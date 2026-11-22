@@ -10822,6 +10822,18 @@ def _qss_prepare_companion_map_export(context, obj, output_bsp):
     # directory and would otherwise be mistaken for a missing .map file.
     if not source_map_raw:
         return None
+    # A companion link must name an actual .map file. Older imports or stale
+    # Blender object metadata can contain a directory/current-working-folder
+    # value (for example "/app/blender") even though no MAP was ever linked.
+    # Such a value is not a missing companion MAP: discard the invalid link
+    # and continue with the BSP-only export. A missing path ending in .map is
+    # still reported below, because that represents a real stale MAP link.
+    if os.path.splitext(source_map_raw)[1].lower() != ".map":
+        obj.pop("qss_source_map_path", None)
+        obj.pop("qss_source_map_sha256", None)
+        obj["qss_map_sync_status"] = "NO_COMPANION"
+        obj.pop("qss_map_sync_error", None)
+        return None
     source_map = os.path.abspath(source_map_raw)
     if not os.path.isfile(source_map):
         raise map_sync.MapSyncError(f"Linked companion MAP is missing: {source_map}")
