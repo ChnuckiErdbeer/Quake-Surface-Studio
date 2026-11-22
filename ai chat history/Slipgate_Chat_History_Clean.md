@@ -22467,3 +22467,20 @@ Fix committed to production source branch:
 - Regression test added in commit `037fb6277598e0ecbbf2b73c962ef0214e2a0c25`.
 
 CI for these commits has not yet been verified. The old 0.21.24 artifact does not contain this fix. User needs a new CI-built installer before retesting. Phase 1 remains open until the updated build passes Blender Enhanced export, SLOPGATE export validation and Ironwail load.
+
+
+## 2026-11-22 — Invalid companion path fix: CI and refreshed installer
+
+The follow-up fix and regression test passed CI on source head `037fb6277598e0ecbbf2b73c962ef0214e2a0c25`.
+
+- Workflow run `44967059712`: success.
+- Python compilation passed.
+- **318 standalone tests passed**.
+- BSP export integrity checks passed.
+- Blender-ready add-on package assembled and uploaded.
+- New artifact `Quake-Surface-Studio-v0.21.24-Blender-Install`, ID `14731764251`, size 320,408 bytes.
+- Artifact SHA-256: `972fae0a1053f21eac166c578d554e4c040f52f4efb2d9d72d7683374a32425d`.
+- Run: https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/44967059712
+- Installer: https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/44967059712/artifacts/14731764251
+
+The add-on version remains 0.21.24; this is a refreshed build of that version containing the new guard. The earlier artifact must not be used for this retest. CI does not prove Blender 5.3 operator behavior or Ironwail loading. Phase 1 remains open pending user runtime acceptance.
