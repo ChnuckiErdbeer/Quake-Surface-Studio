@@ -16,6 +16,18 @@ class AddonRegistrationTests(unittest.TestCase):
             if isinstance(node, ast.Assign) and any(
                 isinstance(target, ast.Name) and target.id == "CLASSES" for target in node.targets))
 
+    def test_cycles_indirect_bounce_control_is_exposed_in_lightmap_panel(self):
+        addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
+        with open(addon_path, "r", encoding="utf-8") as handle:
+            source = handle.read()
+        panel_start = source.index("class QSS_PT_lighting")
+        panel_end = source.index("\\nclass ", panel_start + 5)
+        panel = source[panel_start:panel_end]
+        self.assertIn('context.scene, "qss_bake_bounces"', panel)
+        self.assertIn('text="Indirect Bounces"', panel)
+        self.assertIn('name=\'Cycles diffuse bounces\'', source)
+        self.assertIn('default=2, min=0, max=12', source)
+
     def test_every_registered_class_is_defined(self):
         names = [item.id for item in self.registered.elts if isinstance(item, ast.Name)]
         self.assertEqual(len(names), len(set(names)), "CLASSES contains duplicate entries")
