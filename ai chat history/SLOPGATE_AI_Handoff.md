@@ -31,48 +31,24 @@ The user has compiled E1M1 with ericw-tools qbsp -bsp2 and confirmed that the Ni
 ## Roadmap — follow this order
 
 ### PHASE 1 — Close the current 0.21.24 acceptance loop
-**Status: SOURCE FIX + CI PASSED · WAITING FOR USER BLENDER 5.3 / IRONWAIL ACCEPTANCE**
+**Status: USER-ACCEPTED FOR THE ENHANCED EXPORT / VALIDATION / IRONWAIL LOAD PATH**
 
-Source-side review completed 2026-11-19 against production source HEAD `d27e7be286829a019badb556b6c4c30c0c4c2eb4` (add-on version 0.21.24).
+The user's runtime acceptance evidence supersedes the 2026-11-19 “waiting for acceptance” status:
 
-Verified in source:
-- `_build_enhanced_lightmap_payload()` constructs `face_info` locally for each face before the world-chart sampling branch reads it. The previous reported `name 'face_info' is not defined` failure has a dedicated AST regression test in `tests/test_export_contracts.py::test_world_chart_face_context_is_defined_before_it_is_used`.
-- `_qss_prepare_companion_map_export()` checks the raw linked MAP path before calling `abspath()`. An empty path returns `None`, avoiding the erroneous `/app/blender` resolution. A missing/changed/unwritable linked MAP is caught as a sidecar warning.
-- `QSS_OT_export_bsp.execute()` runs BSP export independently of MAP preparation/commit. A companion MAP problem is reported as “BSP export succeeded” rather than aborting the BSP write.
-- Enhanced export builds `DECOUPLED_LM`, `LMSTYLE` and `RGBLIGHTING`; retains classic LIGHTING samples for engines that ignore BSPX; the audit path runs `export_validation.validate_export_pair()`.
-- `__init__.py` reports version **0.21.24**.
+- The user's E1M1 copy had no companion MAP. Production commits `7a5d92a40a19776f8affb4ad44222ed04aa2c381` and `037fb6277598e0ecbbf2b73c962ef0214e2a0c25` reject stale non-MAP metadata and cover it with a regression test. A genuine missing linked `.map` remains a warning; BSP export must continue.
+- The user ran the automatic **Validate BSP Export** workflow against an Enhanced export. The captured report returned `PASS: QSS BSP export integrity checks`, with 6,605 faces, 86 textures, 737 texinfo records, 483,816 classic lighting bytes, 233,234 RGB lighting samples, BSPX lumps `DECOUPLED_LM`, `LMSTYLE`, `RGBLIGHTING`, `SLPG_LMPAD`, and a validated external `.lit` sidecar.
+- The user opened that exact exported BSP in Ironwail and reported that it loaded without errors. This is a user runtime result, not an assistant-run engine test.
+- The separate white face-edge strip regression was fixed on the production branch by `e84a85ea899142f86768700ad4c78c3e4d13cd21`, with test commit `59570ae5e9caac4b1cc8ad75b7e1e36813c6e956`. CI run `45038971658` passed; artifact `14760841460` had SHA-256 `160fc8d3be701cde39111bbb57671034a77596a5683bba41bb214607781a3657`. The user installed it and confirmed the white edge strips were gone both immediately after import in Blender and in Ironwail.
 
-Follow-up investigation after the user clarified that this E1M1 copy never had a companion MAP:
+This closes the immediate Enhanced-export/validator/engine-load acceptance loop. It does **not** mean the current product supports BSP2: current import/export serialization remains BSP29-based, and BSP2 is still the next major format milestone. It also does not close the separate Cycles lighting-fidelity issue described in the 2026-11-22 session entry below.
 
-- The exact reported path `/app/blender` is not a MAP filename. The prior empty-string guard did not cover this case because the Blender object contained a non-empty invalid value.
-- Import discovery only assigns `qss_source_map_path` when `map_sync.find_companion_map()` finds an actual same-basename MAP, or when the user explicitly supplies a source MAP. Therefore the likely issue is stale/invalid Blender object metadata or an import path that left a non-MAP value behind; it is not evidence that E1M1 needs a MAP file.
-- Production fix committed on `fix/0.21.17-world-aligned-lightmap-charts`: `7a5d92a40a19776f8affb4ad44222ed04aa2c381`. Before resolving a linked path, export now checks that it has a `.map` extension. A non-MAP value is cleared from the object (including its stored hash), status becomes `NO_COMPANION`, and BSP export proceeds without a MAP warning. A genuine missing path ending in `.map` still warns, so real stale links are not silently discarded.
-- Regression test added: `test_non_map_directory_metadata_is_ignored_as_no_companion`; test commit `037fb6277598e0ecbbf2b73c962ef0214e2a0c25`.
-- Latest CI run `44967059712` completed successfully on test commit `037fb6277598e0ecbbf2b73c962ef0214e2a0c25`. Compilation passed; **318 standalone tests passed**; BSP export integrity checks passed; the Blender-ready package was assembled and uploaded. This is not a Blender GUI/operator or Ironwail runtime test.
-- New installer artifact: `Quake-Surface-Studio-v0.21.24-Blender-Install`, ID `14731764251`, SHA-256 `972fae0a1053f21eac166c578d554e4c040f52f4efb2d9d72d7683374a32425d`.
-- Run: https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/44967059712
-- Installer: https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/44967059712/artifacts/14731764251
-- This replaces the older 0.21.24 artifact for the next test. Version number remains 0.21.24; the new artifact contains the non-MAP metadata guard.
+The prior source audit remains relevant:
+- `_build_enhanced_lightmap_payload()` constructs its per-face world-chart context before sampling.
+- Companion MAP preparation/write failures are sidecar warnings and do not abort BSP output.
+- Enhanced export writes the supported `DECOUPLED_LM`, `LMSTYLE`, and `RGBLIGHTING` data while retaining classic LIGHTING samples for fallback engines.
+- `__init__.py` remains at add-on version **0.21.24**.
 
-Automated evidence:
-- GitHub Actions run `44232978822` completed successfully on source HEAD above. All workflow steps passed: Python compilation, standalone unittest discovery, add-on folder assembly and artifact upload.
-- Artifact: `Quake-Surface-Studio-v0.21.24-Blender-Install`, ID `14396470461`, SHA-256 `8a4c4dec82249f9382d5dddbc9bbe2b430144f39f2ecd88a80aebdb2bf30ab8b`.
-- Important caveat: this is a Python 3.12 CI run. It does not execute Blender's `bpy` export operator, validate Blender 5.3 file-dialog state, or load the result in Ironwail.
-- The workflow run's display title is stale and says 0.21.18; the actual checked-out HEAD and `__init__.py` version are the authoritative 0.21.24 values.
-
-**Runtime acceptance still outstanding.** Do not mark Phase 1 complete until the user confirms the following on Blender 5.3 and Ironwail:
-
-1. Install the 0.21.24 artifact above (ensure Blender is not loading an older duplicate add-on copy).
-2. Use a fresh import of the original, unrecompiled E1M1 BSP in a test directory. For the no-companion-MAP case, keep the BSP in a directory without a same-basename `.map`; no decompiled MAP is required.
-3. Keep the imported BSP object active and in Object Mode. Export explicitly as **Enhanced BSPX** to a new filename, e.g. `e1m1_phase1_enhanced.bsp`. Do not rely on AUTO or the BOTH option for the first test.
-4. Expected result: export operator returns FINISHED; no `/app/blender` MAP error; no `face_info` NameError; Enhanced BSP is written. If source RGB lighting is available, expect the corresponding `.lit` sidecar as well.
-5. Run **Validate BSP Export** against the original E1M1 BSP and the new Enhanced BSP (select the generated `.lit` if prompted). Require PASS.
-6. Load the exact generated Enhanced BSP in Ironwail. Confirm the map opens and inspect the player-start area / lightmap edges. Record the exact filename opened.
-7. Repeat with a linked companion MAP only if MAP synchronization itself is being tested; confirm that the output MAP is created/updated safely and that BSP export still succeeds if the MAP is absent or invalid.
-
-Report back with: Blender version; add-on version shown in Blender; export mode; exact operator message; whether BSP and `.lit` exist; validator report; Ironwail version and whether the exact file loads; any traceback. If it fails, preserve the complete traceback and do not overwrite the source BSP.
-
-**Phase 1 exit condition:** explicit Enhanced export passes in Blender 5.3, QSS structural validation passes, and that exact exported file loads in Ironwail. Only then start Phase 2 BSP2 parser/import work. If a step fails, fix that concrete defect first.
+CI and runtime evidence must remain distinct. CI runs validate Python compilation, tests and package assembly; the Enhanced export report, Blender behavior and Ironwail load above were user-performed runtime acceptance checks.
 
 ### PHASE 2 — BSP2 foundation
 **Status: NOT STARTED · largest architectural blocker**
@@ -165,19 +141,39 @@ Current intentional limitations to carry consciously or resolve:
 
 ## Immediate next action
 
-**Phase 1 source review is complete; wait for the user's Blender 5.3 / Ironwail acceptance result using the explicit test procedure in Phase 1 above.** Do not begin BSP2 implementation until Enhanced export, structural validation and target-engine loading pass. If any step fails, fix that reproducible defect first.
+**Current active investigation: Cycles bake falloff / indirect-light accumulation.** Do not reopen the resolved white edge-strip issue or attribute the current lighting result to a failed node-graph installation.
 
+The user's latest test was performed in a fresh Blender file: the map was imported, diagnostics were saved **before** baking, and the bake screenshots were captured afterwards. The diagnostics show:
+- 232 delay-0 lights with the QSS `ericw_delay0_linear` Cycles correction profile active.
+- 16 delay-5 lights with the QSS `ericw_delay5_soft_inverse_square` profile active.
+- 4 delay-3 spotlights using the documented native fallback.
+- No reported Cycles falloff graph installation errors.
+
+The earlier explanation that the corrected graphs were absent therefore does not apply to this fresh-import capture. The remaining hypothesis is excessive / spatially incorrect indirect contribution from the non-quadratic delay-0 linear profile during Cycles global illumination. It is plausible, not yet proven. Do not lower global energy, _range or apply a global multiplier.
+
+A scene-level `qss_bake_bounces` control has been added immediately above **Bake Lightmap** in the child `QSS_PT_lighting` panel. It is labelled **Indirect Bounces**, defaults to 2, and permits 0–12. Setting 0 is the direct-only comparison; setting 2 restores the current default. Keep all other settings, lights, map, camera and source lightmap constant for the comparison.
+
+Current source / CI state:
+1. Production branch head is `a99db5ce374c1522942b5aee238475c804d73e14`, add-on version 0.21.24.
+2. Latest CI run `45059371718` failed one standalone test. Python compilation passed; 329 tests ran, with one failure: `test_cycles_indirect_bounce_control_is_exposed_in_lightmap_panel`.
+3. The latest test commit changed its source extraction to inspect `QSS_PT_main`, but the control is actually drawn in the child `QSS_PT_lighting` panel. The test therefore searches the wrong class; this is a test-contract defect, not evidence that the UI control is missing. Correct the test to inspect `QSS_PT_lighting`, rerun CI, and only distribute a new installer after compilation, all tests, package assembly and artifact upload pass.
+4. No installer was produced by run `45059371718`; package and artifact steps were skipped. The most recent successful artifact for the edge-strip fix is not a build containing the newly added bounce control.
+
+After a green build, run two full-map Cycles bakes on the same freshly imported map: first **Indirect Bounces = 0**, then **Indirect Bounces = 2**. Compare the same lightmap-only view and the same surfaces. This isolates the effect of indirect bounce count. The test does not by itself prove compiler-equivalent lighting; it tells us whether the observed distribution error is introduced or materially amplified by indirect contribution.
+
+Once this controlled lighting investigation is resolved, continue with the BSP2-first 1.0 roadmap. Keep the BSP2 parser/import work on a dedicated branch and keep core BSP format selection separate from optional BSPX extensions.
 
 ## Current verified baseline
 
-- Production source: fix/0.21.17-world-aligned-lightmap-charts, commit d27e7be286829a019badb556b6c4c30c0c4c2eb4, add-on version **0.21.24**.
-- Latest CI: run 44232978822, success; Python compilation, **317 standalone tests**, package assembly and artifact upload passed. This is not a Blender GUI or engine runtime test.
-- Installer artifact: Quake-Surface-Studio-v0.21.24-Blender-Install, artifact 14396470461; SHA-256 8a4c4dec82249f9382d5dddbc9bbe2b430144f39f2ecd88a80aebdb2bf30ab8b.
-- Installer: https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/44232978822/artifacts/14396470461
-- User reports that qbsp -bsp2 E1M1 loads in the Nightdive rerelease. This verifies the core BSP2 path in that engine, not individual BSPX extensions.
-- Fourteen E1M1 comparison JPGs at info_player_start have been reviewed. Broad smooth gradients occur in both EricW and SLOPGATE Ironwail lightmaps; do not call that alone a Phong bug. A local light-distribution mismatch remains.
-- Documentation branch: fix/v0.11.1-metadata-style-order-test. Default main remains v0.11.0 and must be synchronized before 1.0.
-- No open GitHub issues; five historical PRs remain open and should be audited/closed or archived during release housekeeping.
+- **Production source branch:** `fix/0.21.17-world-aligned-lightmap-charts`.
+- **Current production branch HEAD:** `a99db5ce374c1522942b5aee238475c804d73e14` (2026-11-22), add-on version **0.21.24**.
+- **Latest CI run:** `45059371718`, conclusion **failure**. Python module compilation passed; 329 standalone tests ran and one failed: `test_cycles_indirect_bounce_control_is_exposed_in_lightmap_panel`. The test inspects `QSS_PT_main`, but the actual control is in `QSS_PT_lighting`. Package assembly and artifact upload were skipped. There is no installer from this run.
+- **Last successful edge-fix build:** run `45038971658`; artifact `14760841460`; SHA-256 `160fc8d3be701cde39111bbb57671034a77596a5683bba41bb214607781a3657`. User runtime-confirmed the white edge strips are gone in Blender and Ironwail. This artifact predates the current Indirect Bounces UI change.
+- **User-verified export state:** Enhanced export integrity report passed; external `.lit` sidecar validated; exact exported BSP loaded in Ironwail without errors.
+- **Current lighting diagnostic state:** fresh-import diagnostics show 232 delay-0 and 16 delay-5 QSS Cycles correction graphs active, plus four delay-3 native fallbacks. The latest Cycles bake distribution remains under investigation; use the 0-versus-2 indirect-bounce comparison rather than global energy changes.
+- **Documentation branch:** `fix/v0.11.1-metadata-style-order-test` (this handoff/archive branch). It is the detailed project-history record; its add-on source snapshot is not the installer source.
+- **Default `main`:** still an old 0.11.0 snapshot and is not the current production source. Do not build from it.
+- Keep CI, Blender GUI behavior, and engine runtime results explicitly distinguished. No claim of an official 1.0 release is warranted.
 
 ---
 
@@ -2276,3 +2272,19 @@ F. Run the Blender/engine regression matrix, update docs and default branch, and
 ### Overall assessment
 
 The core surface-editing product is substantial; the main 1.0 risk is not a lack of convenience features. It is the gap between an increasingly capable BSP29 prototype and a reliable BSP2-first tool with predictable Quake lighting and tested engine exports. Do not inflate the 1.0 scope into a full QBSP/VIS/map geometry editor unless that becomes an explicit product goal.
+
+## 2026-11-22 — Session orientation: current Cycles bounce diagnostic and production branch status
+
+The user asked the assistant to enter the SLOPGATE project and read the handoff. The expanded handoff and chat archive on `fix/v0.11.1-metadata-style-order-test` are the current documentation sources. The older copy of `SLOPGATE_AI_Handoff.md` on the production branch is stale (it ends at the 0.21.13 edge-padding work); do not use that old copy as the current project brief. Production code remains on `fix/0.21.17-world-aligned-lightmap-charts`.
+
+Current source branch HEAD was checked live: `a99db5ce374c1522942b5aee238475c804d73e14` (add-on version 0.21.24). The Indirect Bounces control is implemented in `QSS_PT_lighting`, backed by scene property `qss_bake_bounces`, default 2, range 0–12. The bake reads this setting.
+
+Latest workflow `45059371718` on that HEAD is completed with conclusion **failure**. Compilation passed; the standalone suite ran 329 tests and failed only `test_cycles_indirect_bounce_control_is_exposed_in_lightmap_panel`. Source inspection confirmed that the test extracts the root `QSS_PT_main` panel, whereas the control is correctly located in its child `QSS_PT_lighting` panel. This is a test selector/contract defect. Package assembly and artifact upload were skipped, so no current installer exists for the bounce-control change. The previous assistant message incorrectly described this run as still in progress; the live workflow state has now been corrected in this handoff.
+
+The user has already confirmed the independent 0.21.17 world-chart edge-support fix: white edge strips disappeared in Blender immediately after import and in Ironwail. This issue is closed on user runtime evidence; do not conflate it with the Cycles lighting distribution issue.
+
+The latest user lighting test was performed on a fresh Blender file and a fresh BSP import. Diagnostics were saved before the Cycles bake. The diagnostics report 232 delay-0 lights with active `ericw_delay0_linear` graphs, 16 delay-5 lights with active `ericw_delay5_soft_inverse_square` graphs, and four delay-3 lights on native fallback. Thus the older failure to install QSS Cycles graphs is not a viable explanation for this capture. The new concern is the spatial falloff / brightness after a Cycles bake. Linear falloff interacting with indirect contribution remains a hypothesis, not a proven cause.
+
+Next action: fix the test to inspect `QSS_PT_lighting`, rerun CI and generate a new installer only after all steps pass. Then ask the user to compare an otherwise identical full-map Cycles bake at 0 indirect bounces (direct only) and 2 indirect bounces (current default). Do not modify global brightness, light range or attenuation curves before that comparison.
+
+No add-on source code was changed during this session. No Blender bake, engine test, package build or merge was performed. The only repository changes in this session are this handoff/archive documentation update.
