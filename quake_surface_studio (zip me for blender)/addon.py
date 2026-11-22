@@ -2878,6 +2878,42 @@ def _patch_lightmap_lump(obj, parsed, enhanced=False, output_faces_lump=None, ou
     # classic readers still have valid fallback samples and face offsets work.
     if not lighting_source and source_lit_rgb is not None:
         lighting_source = bsp.rgb_lighting_to_luminance(source_lit_rgb)
+
+    # A source/realtime/cycles preview with no active painted-original override
+    # must pass the compiled samples through unchanged. Re-sampling the import
+    # atlas here used to rewrite LIGHTING, flatten style planes, and run seam
+    # stitching even when the user had not baked or painted anything.
+    mesh_for_projection = getattr(obj, "data", None)
+    materials_for_projection = getattr(mesh_for_projection, "materials", ())
+    has_face_local_projection = False
+    for polygon in getattr(mesh_for_projection, "polygons", ()):
+        material_index = int(getattr(polygon, "material_index", -1))
+        if material_index < 0 or material_index >= len(materials_for_projection):
+            continue
+        material = materials_for_projection[material_index]
+        if (
+            material is not None
+            and bool(material.get("qss_face_local_projection", False))
+            and material.get("qss_texinfo_projection") is not None
+        ):
+            has_face_local_projection = True
+            break
+    painted_override_active = bool(
+        painted_enabled and painted_name and bpy.data.images.get(painted_name)
+    )
+    if lightmap_export_utils.should_preserve_source_lightmaps(
+        preview_mode, painted_override_active, has_face_local_projection
+    ):
+        original_lit = (
+            bsp.build_lit_file(source_lit_rgb)
+            if source_lit_rgb is not None else None
+        )
+        return (
+            lighting_source,
+            original_lit,
+            {},
+            output_faces_lump or parsed.lumps[bsp.LUMP_FACES],
+        )
     if not image_name:
         if enhanced:
             raise bsp.BSPError('Enhanced lightmap export requires an imported working lightmap atlas.')
@@ -4817,13 +4853,17 @@ def _export_object(obj, output_path, lightmap_export_mode='CLASSIC'):
     export_stage_timings['lightmap_patch'] = time.perf_counter() - stage_started_at
     stage_started_at = time.perf_counter()
     new_bspx_lumps = dict(parsed.bspx_lumps)
-    if lightmap_export_mode == 'ENHANCED':
+    if lightmap_export_mode == 'ENHANCED' and 'DECOUPLED_LM' in lightmap_bspx_updates:
         for obsolete_name in ('LMSHIFT', 'LMOFFSET', 'LMSTYLE16'):
             new_bspx_lumps.pop(obsolete_name, None)
     new_bspx_lumps.update(lightmap_bspx_updates)
-    if lit_file_data is not None:
+    if lit_file_data is not None and (
+        'RGBLIGHTING' in new_bspx_lumps
+        or 'RGBLIGHTING' in lightmap_bspx_updates
+    ):
         # BSPX RGBLIGHTING is QLIT v1's RGB payload without the 8-byte header.
-        # Keep the .lit sidecar too for ports which prefer the external format.
+        # Keep an existing/generated BSPX payload in sync with its .lit sidecar,
+        # but do not invent a new BSPX lighting lump for an untouched source BSP.
         new_bspx_lumps['RGBLIGHTING'] = lit_file_data[8:]
     output_data = parsed.write(new_lumps, new_bspx_lumps)
 
