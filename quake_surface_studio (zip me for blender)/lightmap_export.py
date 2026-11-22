@@ -983,6 +983,37 @@ def point_in_polygon_2d(point, polygon, tolerance: float = 1e-7) -> bool:
     return inside
 
 
+def distance_point_to_polygon_2d(point, polygon):
+    """Return the shortest 2D distance from a point to a polygon boundary.
+
+    Points inside or on the polygon return zero. This is used to bound lightmap
+    edge support so a face can extend its own edge luxels only into the nearby
+    half-cell sampling footprint, not across a larger gap in a shared chart.
+    """
+    px, py = float(point[0]), float(point[1])
+    vertices = tuple((float(p[0]), float(p[1])) for p in polygon)
+    if len(vertices) < 3:
+        raise ValueError("A polygon requires at least three vertices.")
+    if point_in_polygon_2d((px, py), vertices):
+        return 0.0
+    minimum_sq = float("inf")
+    for index, first in enumerate(vertices):
+        second = vertices[(index + 1) % len(vertices)]
+        dx, dy = second[0] - first[0], second[1] - first[1]
+        length_sq = dx * dx + dy * dy
+        if length_sq <= 1e-20:
+            distance_sq = (px - first[0]) ** 2 + (py - first[1]) ** 2
+        else:
+            projection = max(0.0, min(1.0, (
+                (px - first[0]) * dx + (py - first[1]) * dy
+            ) / length_sq))
+            nearest_x = first[0] + projection * dx
+            nearest_y = first[1] + projection * dy
+            distance_sq = (px - nearest_x) ** 2 + (py - nearest_y) ** 2
+        minimum_sq = min(minimum_sq, distance_sq)
+    return math.sqrt(minimum_sq)
+
+
 def bilinear_sample_rgb_grid(samples, width: int, height: int, x: float, y: float):
     """Bilinearly sample a row-major RGB luxel grid, clamping to its edge."""
     w, h = int(width), int(height)
@@ -1053,14 +1084,30 @@ def resample_coplanar_chart_sources(chart, face_records, *, sample_spacing: int 
                 source_t = sum(point[i] * texinfo[i + 4] for i in range(3)) + float(texinfo[7])
                 source_x = (source_s - float(record["s_min"])) / spacing
                 source_y = (source_t - float(record["t_min"])) / spacing
-                # Populate the complete outward-rounded classic luxel grid,
-                # but never let this face extrapolate beyond its own rectangle.
-                # In particular, the +/- one-cell polygon search margin must
-                # not allow a neighbouring face to bleed into this chart area.
-                if (source_x < -1e-6 or source_y < -1e-6
-                        or source_x > int(record["width"]) - 1 + 1e-6
-                        or source_y > int(record["height"]) - 1 + 1e-6):
-                    continue
+                # The world-chart lattice and this face's classic texinfo
+                # lattice can be rotated relative to one another. Near a face
+                # edge, a chart sample can therefore fall just outside the
+                # face-local source rectangle even though it lies inside the
+                # half-cell footprint needed for texture filtering. Leaving
+                # that chart cell invalid exposes the white atlas background
+                # beside the face. Extend only this face's own edge sample into
+                # that bounded support band; never bridge a wider chart gap.
+                max_edge_support = spacing * math.sqrt(2.0) * 0.5
+                source_width = int(record["width"])
+                source_height = int(record["height"])
+                outside_source = (
+                    source_x < -1e-6 or source_y < -1e-6
+                    or source_x > source_width - 1 + 1e-6
+                    or source_y > source_height - 1 + 1e-6
+                )
+                if outside_source:
+                    edge_distance = distance_point_to_polygon_2d(
+                        (world_s, world_t), polygon
+                    )
+                    if edge_distance > max_edge_support + 1e-6:
+                        continue
+                    source_x = min(source_width - 1, max(0.0, source_x))
+                    source_y = min(source_height - 1, max(0.0, source_y))
                 rgb = bilinear_sample_rgb_grid(
                     record["samples_rgb"], record["width"], record["height"],
                     source_x, source_y,
