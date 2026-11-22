@@ -31,7 +31,7 @@ The user has compiled E1M1 with ericw-tools qbsp -bsp2 and confirmed that the Ni
 ## Roadmap — follow this order
 
 ### PHASE 1 — Close the current 0.21.24 acceptance loop
-**Status: SOURCE-SIDE REVIEW COMPLETE · WAITING FOR USER BLENDER 5.3 / IRONWAIL ACCEPTANCE**
+**Status: FOLLOW-UP FIX COMMITTED · CI AND BLENDER 5.3 / IRONWAIL ACCEPTANCE PENDING**
 
 Source-side review completed 2026-11-19 against production source HEAD `d27e7be286829a019badb556b6c4c30c0c4c2eb4` (add-on version 0.21.24).
 
@@ -41,6 +41,15 @@ Verified in source:
 - `QSS_OT_export_bsp.execute()` runs BSP export independently of MAP preparation/commit. A companion MAP problem is reported as “BSP export succeeded” rather than aborting the BSP write.
 - Enhanced export builds `DECOUPLED_LM`, `LMSTYLE` and `RGBLIGHTING`; retains classic LIGHTING samples for engines that ignore BSPX; the audit path runs `export_validation.validate_export_pair()`.
 - `__init__.py` reports version **0.21.24**.
+
+Follow-up investigation after the user clarified that this E1M1 copy never had a companion MAP:
+
+- The exact reported path `/app/blender` is not a MAP filename. The prior empty-string guard did not cover this case because the Blender object contained a non-empty invalid value.
+- Import discovery only assigns `qss_source_map_path` when `map_sync.find_companion_map()` finds an actual same-basename MAP, or when the user explicitly supplies a source MAP. Therefore the likely issue is stale/invalid Blender object metadata or an import path that left a non-MAP value behind; it is not evidence that E1M1 needs a MAP file.
+- Production fix committed on `fix/0.21.17-world-aligned-lightmap-charts`: `7a5d92a40a19776f8affb4ad44222ed04aa2c381`. Before resolving a linked path, export now checks that it has a `.map` extension. A non-MAP value is cleared from the object (including its stored hash), status becomes `NO_COMPANION`, and BSP export proceeds without a MAP warning. A genuine missing path ending in `.map` still warns, so real stale links are not silently discarded.
+- Regression test added: `test_non_map_directory_metadata_is_ignored_as_no_companion`; test commit `037fb6277598e0ecbbf2b73c962ef0214e2a0c25`.
+- CI for these new commits has not yet been confirmed. The combined commit status endpoint returned no checks; do not infer a pass.
+- The earlier 0.21.24 artifact predates this fix. A new installer must be produced from the updated source before the user retests.
 
 Automated evidence:
 - GitHub Actions run `44232978822` completed successfully on source HEAD above. All workflow steps passed: Python compilation, standalone unittest discovery, add-on folder assembly and artifact upload.
