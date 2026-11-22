@@ -72,6 +72,31 @@ class EnhancedBSPExportContractTests(unittest.TestCase):
         self.assertNotIn("self.source_bsp", context)
         self.assertNotIn("self.lit_file", context)
 
+    def test_unedited_source_lightmaps_are_passed_through_before_atlas_sampling(self):
+        function = _find_function(ADDON_TREE, "_patch_lightmap_lump")
+        context = _source_for(function)
+        guard = "lightmap_export_utils.should_preserve_source_lightmaps("
+        self.assertIn(guard, context)
+        self.assertLess(context.index(guard), context.index("image.pixels.foreach_get(px)"))
+        passthrough = context[context.index(guard):context.index("if not image_name:")]
+        self.assertIn("return (", passthrough)
+        self.assertIn("lighting_source,", passthrough)
+        self.assertIn("original_lit,", passthrough)
+        self.assertIn("output_faces_lump or parsed.lumps[bsp.LUMP_FACES]", passthrough)
+        self.assertIn("painted_override_active", passthrough)
+        self.assertIn("has_face_local_projection", passthrough)
+
+    def test_enhanced_export_does_not_strip_or_create_bspx_lightmaps_on_passthrough(self):
+        function = _find_function(ADDON_TREE, "_export_object")
+        context = _source_for(function)
+        self.assertIn(
+            "if lightmap_export_mode == 'ENHANCED' and 'DECOUPLED_LM' in lightmap_bspx_updates:",
+            context,
+        )
+        self.assertIn("'RGBLIGHTING' in new_bspx_lumps", context)
+        self.assertIn("'RGBLIGHTING' in lightmap_bspx_updates", context)
+
+
     def test_world_chart_face_context_is_defined_before_it_is_used(self):
         function = _find_function(ADDON_TREE, "_build_enhanced_lightmap_payload")
         context = _source_for(function)
