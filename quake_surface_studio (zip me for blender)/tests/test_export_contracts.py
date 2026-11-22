@@ -59,6 +59,17 @@ class EnhancedBSPExportContractTests(unittest.TestCase):
         self.assertLess(context.index("if not source_map_raw:"), context.index("os.path.abspath(source_map_raw)"))
         self.assertNotIn('os.path.abspath(str(obj.get("qss_source_map_path", "") or ""))', context)
 
+    def test_non_map_directory_metadata_is_ignored_as_no_companion(self):
+        function = _find_function(ADDON_TREE, "_qss_prepare_companion_map_export")
+        context = _source_for(function)
+        extension_guard = 'os.path.splitext(source_map_raw)[1].lower() != ".map"'
+        self.assertIn(extension_guard, context)
+        guard = context.index(extension_guard)
+        self.assertLess(guard, context.index("source_map = os.path.abspath(source_map_raw)"))
+        self.assertIn('obj["qss_map_sync_status"] = "NO_COMPANION"', context[guard:])
+        self.assertIn('obj.pop("qss_source_map_path", None)', context[guard:])
+        self.assertIn('raise map_sync.MapSyncError(f"Linked companion MAP is missing: {source_map}")', context)
+
     def test_companion_map_preparation_and_write_errors_do_not_abort_bsp_export(self):
         operator_class = next(
             node for node in ADDON_TREE.body
