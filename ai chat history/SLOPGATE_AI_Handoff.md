@@ -26,6 +26,17 @@ SLOPGATE is a Blender-based **compiled Quake map surface, texture and lighting e
 - **Extensions:** BSPX lighting and other optional lumps are independent of the core BSP version.
 - **Not the product goal:** SLOPGATE is not intended to become a complete brush-based MAP editor or an integrated QBSP/VIS/light compiler for 1.0.
 
+### Lighting direction — reconfirmed 2026-11-23
+
+The user's earlier decision from 2026-11-11 is authoritative: **Cycles is an alternative lighting model to ericw, not a renderer that must reproduce ericw.** SLOPGATE's main lighting target is new maps authored with SLOPGATE-native Blender lighting in mind. Re-lighting existing ericw maps is a secondary convenience use case; legacy delay values provide practical starting presets, with the user expected to tune them to taste.
+
+- Cycles and Eevee should use native Blender light behavior. Delay 0–5 chooses a sensible starting preset only; it must not trigger a custom shader that bends native light back into ericw equations.
+- The immediate pre-1.0 goal is to make Cycles viewport preview and Cycles bake produce similar lighting distribution by sharing their lighting world, diffuse-bounce count and imported-light settings. The baked atlas still receives its own post-bake source-mean/output normalization, and its white-diffuse bake material differs from the textured viewport material; pixel identity is not expected.
+- Expose simple global per-delay Energy, Range and Source Softness multipliers so the user can approximate the desired result manually. Do not change every light's values or alter global energy in response to local errors before using these controls and comparing controlled results.
+- Keep the Quake Direct CPU solver as a separate, optional Quake/ericw-style calculation path. Removing the experimental Cycles correction graphs must not remove or change the CPU solver.
+- The TrenchBroom extended FGD and per-light Cycles parameter keys are deferred until after 1.0, when the supported Blender light-property schema and defaults have settled. Do not create the FGD as part of the current lighting task.
+
+
 The user has compiled E1M1 with ericw-tools qbsp -bsp2 and confirmed that the Nightdive rerelease loads it. Treat BSP2 core acceptance in that engine as user-verified. Do **not** infer from that test that every BSPX lighting lump works in KEX; verify extensions individually.
 
 ## Roadmap — follow this order
@@ -88,8 +99,8 @@ Build a per-engine test matrix for Ironwail and Nightdive KEX. Verify each requi
 
 The current parser supports only some layouts. LMSTYLE16, legacy LMSHIFT/LMOFFSET without DECOUPLED_LM, and LIGHTING_E5BGR9 are documented limitations. Decide explicitly what 1.0 supports; unsupported variants must be rejected with an actionable message, not silently misread.
 
-### PHASE 5 — Lighting fidelity and map workflow quality
-**Status: PARTIALLY IMPLEMENTED · requires deliberate scope decisions**
+### PHASE 5 — Native Cycles lighting alternative and map workflow quality
+**Status: NATIVE DELAY TUNING + PREVIEW/BAKE ALIGNMENT IMPLEMENTED IN 0.21.25 · USER RUNTIME ACCEPTANCE PENDING**
 
 - Preserve the original compiler lightmap as a reference and make every export's selected lighting source (source vs baked) explicit and diagnosable.
 - Compare local/spatial luxel distributions, not only global averages. E1M1's diagnostic source mean (0.2947401) and final atlas mean (0.2950881) differ by only about 0.12%, while the maximum sampled luxel is 202.4476. A global mean match is not spatial fidelity.
@@ -141,39 +152,50 @@ Current intentional limitations to carry consciously or resolve:
 
 ## Immediate next action
 
-**Current active investigation: Cycles bake falloff / indirect-light accumulation.** Do not reopen the resolved white edge-strip issue or attribute the current lighting result to a failed node-graph installation.
+**Current action: user runtime validation of SLOPGATE 0.21.25 native Cycles lighting.** The agreed target is Cycles as a SLOPGATE-native alternative to ericw; do not judge this build by ericw pixel parity.
 
-The user's latest test was performed in a fresh Blender file: the map was imported, diagnostics were saved **before** baking, and the bake screenshots were captured afterwards. The diagnostics show:
-- 232 delay-0 lights with the QSS `ericw_delay0_linear` Cycles correction profile active.
-- 16 delay-5 lights with the QSS `ericw_delay5_soft_inverse_square` profile active.
-- 4 delay-3 spotlights using the documented native fallback.
-- No reported Cycles falloff graph installation errors.
+Production source:
+- Branch: `fix/0.21.17-world-aligned-lightmap-charts`
+- HEAD: `c3916af50eeae63ade20ec3909da31f60b0248dc`
+- Add-on version: **0.21.25**
+- CI run: [45088607276](https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45088607276), success.
+- Python compilation passed; **324 standalone tests passed**; Blender-ready package assembly and artifact upload passed.
+- Installer: [Quake-Surface-Studio-v0.21.25-Blender-Install (artifact 14780112882)](https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45088607276/artifacts/14780112882)
+- SHA-256: `f467049d2b2d9619de50cf5f7cddd0a28ae4f09aa58b237912f36637c052d9ce`
 
-The earlier explanation that the corrected graphs were absent therefore does not apply to this fresh-import capture. The remaining hypothesis is excessive / spatially incorrect indirect contribution from the non-quadratic delay-0 linear profile during Cycles global illumination. It is plausible, not yet proven. Do not lower global energy, _range or apply a global multiplier.
+Implemented:
+1. Removed the custom Cycles node graphs designed to reconstruct ericw delay-0/5 equations. Native Blender POINT/SPOT behavior is now used in Cycles and Eevee. Existing fully QSS-owned legacy correction graphs are cleared when imported-light settings are reapplied; user-authored/mixed node trees are preserved.
+2. Added per-delay Energy, Range and Source Softness multipliers for delay groups 0–5 in the QSS Settings dialog. Defaults are all 1.0 and preserve current native starting presets. These are artist-tweakable multipliers, not ericw formula controls.
+3. Cycles viewport preview now uses the same private black World and diffuse-bounce count as the Cycles bake. Changing **Indirect Bounces** while Cycles preview is active updates the preview. User Cycles settings are restored on leaving QSS Cycles preview.
+4. Quake Direct CPU lighting and its ericw-style static attenuation functions remain intact.
 
-A scene-level `qss_bake_bounces` control has been added immediately above **Bake Lightmap** in the child `QSS_PT_lighting` panel. It is labelled **Indirect Bounces**, defaults to 2, and permits 0–12. Setting 0 is the direct-only comparison; setting 2 restores the current default. Keep all other settings, lights, map, camera and source lightmap constant for the comparison.
+User validation procedure:
+1. Install the 0.21.25 artifact above. Start a fresh Blender file and freshly import the test BSP so no older light-node graphs or scene state are carried into the test.
+2. Set the desired **Indirect Bounces** value and select **Cycles** preview. Record the viewpoint and take a screenshot with textures enabled; also take a lightmap-only view if useful.
+3. Bake using the same bounce setting. Switch to **Baked** preview and capture the same viewpoint. Compare the spatial distribution on the same surfaces. Expect broadly similar pools/gradients, not pixel-identical values: the bake uses white diffuse receiver materials and applies its own post-bake atlas matching/output scaling.
+4. Open **Settings → Lighting workflow → Native light presets by legacy delay**. Initially leave the 18 multipliers at 1.0 so the baseline can be assessed. Then adjust only one delay group and one parameter at a time:
+   - Energy changes that group's overall brightness.
+   - Range changes the native cutoff distance.
+   - Source Softness changes the native point/spot source size.
+   Save settings; the new multipliers reapply to imported QSS lights.
+5. Send the before/after screenshots and, if the distributions still diverge substantially, a fresh lighting diagnostics report. Keep the original source lightmap available for rollback/reference.
 
-Current source / CI state:
-1. Production branch head is `a99db5ce374c1522942b5aee238475c804d73e14`, add-on version 0.21.24.
-2. Latest CI run `45059371718` failed one standalone test. Python compilation passed; 329 tests ran, with one failure: `test_cycles_indirect_bounce_control_is_exposed_in_lightmap_panel`.
-3. The latest test commit changed its source extraction to inspect `QSS_PT_main`, but the control is actually drawn in the child `QSS_PT_lighting` panel. The test therefore searches the wrong class; this is a test-contract defect, not evidence that the UI control is missing. Correct the test to inspect `QSS_PT_lighting`, rerun CI, and only distribute a new installer after compilation, all tests, package assembly and artifact upload pass.
-4. No installer was produced by run `45059371718`; package and artifact steps were skipped. The most recent successful artifact for the edge-strip fix is not a build containing the newly added bounce control.
-
-After a green build, run two full-map Cycles bakes on the same freshly imported map: first **Indirect Bounces = 0**, then **Indirect Bounces = 2**. Compare the same lightmap-only view and the same surfaces. This isolates the effect of indirect bounce count. The test does not by itself prove compiler-equivalent lighting; it tells us whether the observed distribution error is introduced or materially amplified by indirect contribution.
-
-Once this controlled lighting investigation is resolved, continue with the BSP2-first 1.0 roadmap. Keep the BSP2 parser/import work on a dedicated branch and keep core BSP format selection separate from optional BSPX extensions.
+Do not start extended TrenchBroom FGD / per-light SLOPGATE key work before 1.0. That is deliberately deferred until the native light workflow and Blender property schema have settled. Do not re-open the confirmed white edge-strip fix while testing lighting unless it visibly regresses.
 
 ## Current verified baseline
 
 - **Production source branch:** `fix/0.21.17-world-aligned-lightmap-charts`.
-- **Current production branch HEAD:** `a99db5ce374c1522942b5aee238475c804d73e14` (2026-11-22), add-on version **0.21.24**.
-- **Latest CI run:** `45059371718`, conclusion **failure**. Python module compilation passed; 329 standalone tests ran and one failed: `test_cycles_indirect_bounce_control_is_exposed_in_lightmap_panel`. The test inspects `QSS_PT_main`, but the actual control is in `QSS_PT_lighting`. Package assembly and artifact upload were skipped. There is no installer from this run.
-- **Last successful edge-fix build:** run `45038971658`; artifact `14760841460`; SHA-256 `160fc8d3be701cde39111bbb57671034a77596a5683bba41bb214607781a3657`. User runtime-confirmed the white edge strips are gone in Blender and Ironwail. This artifact predates the current Indirect Bounces UI change.
-- **User-verified export state:** Enhanced export integrity report passed; external `.lit` sidecar validated; exact exported BSP loaded in Ironwail without errors.
-- **Current lighting diagnostic state:** fresh-import diagnostics show 232 delay-0 and 16 delay-5 QSS Cycles correction graphs active, plus four delay-3 native fallbacks. The latest Cycles bake distribution remains under investigation; use the 0-versus-2 indirect-bounce comparison rather than global energy changes.
-- **Documentation branch:** `fix/v0.11.1-metadata-style-order-test` (this handoff/archive branch). It is the detailed project-history record; its add-on source snapshot is not the installer source.
+- **Current production branch HEAD:** `c3916af50eeae63ade20ec3909da31f60b0248dc` (2026-11-23), add-on version **0.21.25**.
+- **Latest CI:** run `45088607276`, success. Python compilation passed; **324 standalone tests passed**; Blender-ready package assembly and artifact upload passed. CI does not run a Blender GUI, Cycles preview/bake or game engine.
+- **Current installer:** `Quake-Surface-Studio-v0.21.25-Blender-Install`, artifact ID `14780112882`, SHA-256 `f467049d2b2d9619de50cf5f7cddd0a28ae4f09aa58b237912f36637c052d9ce`. [Artifact page](https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45088607276/artifacts/14780112882).
+- **Lighting strategy:** Cycles is a SLOPGATE-native alternative to ericw, not an ericw parity implementation. 0.21.25 removes custom Cycles correction graphs, adds per-delay native Energy/Range/Source Softness controls, and aligns the Cycles preview world/bounce count with bake settings. User Blender runtime acceptance is pending.
+- **Quake Direct:** its CPU solver remains separate and retains the Quake/ericw-style static delay 0–5 implementation.
+- **User-verified export state:** Enhanced BSP export integrity report passed; external `.lit` sidecar validated; exact exported BSP loaded in Ironwail without errors.
+- **User-verified lightmap edge state:** the narrow white face-edge strips are gone in Blender immediately after import and in Ironwail following the 0.21.17 world-chart edge-support fix. Keep this separate from current Cycles preview/bake tuning.
+- **Documentation branch:** `fix/v0.11.1-metadata-style-order-test`; this handoff and the conversation archive are maintained here. Its add-on source snapshot is not the installer source.
 - **Default `main`:** still an old 0.11.0 snapshot and is not the current production source. Do not build from it.
-- Keep CI, Blender GUI behavior, and engine runtime results explicitly distinguished. No claim of an official 1.0 release is warranted.
+- **TrenchBroom FGD / extended per-light Cycles properties:** post-1.0, after the native parameter schema has been validated.
+- Keep CI, Blender GUI behavior, and engine runtime results explicitly distinguished. No official 1.0 release has been made.
 
 ---
 
@@ -2219,13 +2241,14 @@ This is meaningful functionality. The 1.0 work is primarily about format moderni
 
 ### P1 — important 1.0 quality and workflow items
 
-**5. Define and improve lighting fidelity**
-- Keep three concepts clearly separated in the UI and documentation: live preview, Quake Direct Lightmap Solver, and experimental Cycles artistic/physical bake.
-- The Quake direct solver supports documented static point/spot delay 0–5 attenuation, but is not a bit-identical ericw-tools light compiler. It still lacks or approximates radiosity/bounce, dirtmapping, deviance/area sampling, surface emitters, sunlight/sky sampling, projected texture lights, compiler visibility approximations, animated lightstyle time curves and special minlight behavior.
-- Cycles currently has explicit correction node graphs only for delay 0 and delay 5. Other delay values fall back to Blender's native lamp model. This distinction needs explicit UI/documentation and targeted test fixtures.
-- Live Eevee remains an approximation; Cycles preview and bake do not currently guarantee the same result as ericw-tools.
-- Either implement the missing compiler semantics required by the chosen 1.0 fidelity target, or define a smaller, honest supported lighting subset and show warnings when source maps use unsupported features.
-- Current static preview combines style samples at full weight; export flattens them into style 0. Animated/flickering lightstyle playback and multi-style preservation need a conscious 1.0 decision.
+**5. Make Cycles a first-class native lighting alternative**
+- The acceptance target is useful SLOPGATE-native lighting, not parity with ericw-tools. Do not spend the 1.0 schedule on exact delay equations, compiler-identical falloff, dirtmapping/radiosity parity or rebuilding ericw's lighting algorithm inside Cycles.
+- Keep three separate user concepts: imported/original BSP lightmaps; native Blender live lighting (Eevee approximation and Cycles rendered preview); and the Cycles lightmap bake. The Quake Direct CPU solver remains a distinct optional path for users who want its Quake/ericw-style static calculation.
+- Cycles preview and Cycles bake should share the same black preview world, imported native light properties and diffuse-bounce count. Their outputs need similar spatial distribution, not pixel identity: preview is textured/interactive, bake uses temporary white diffuse receiver materials and then applies baked-atlas normalization/output scaling.
+- 0.21.25 adds native per-delay Energy, Range and Source Softness multipliers for delays 0–5 in QSS Settings. These are manual artist controls, not equation coefficients. Defaults are neutral multipliers over existing per-delay native starting presets.
+- Validate on real maps: compare the Cycles live preview and the resulting Baked lightmap from the same fresh import, viewpoint and bounce setting. Tune one delay group/parameter at a time; retain the original lightmap and diagnostics. Do not reduce global energy to fix local distribution.
+- The TrenchBroom extended FGD and per-light SLOPGATE Cycles property keys are explicitly post-1.0 work. Finalize a type-aware Blender-property schema only after the native light workflow and supported light types are stable.
+- The existing Quake Direct solver continues to implement its own static delay 0–5 logic; do not remove it when simplifying Cycles. Animated styles, advanced emitter types and other compiler features need separate scope decisions rather than being mistaken for Cycles parity requirements.
 
 **6. Finish advertised MAP/light entity editing or narrow its scope**
 - MAP sync currently safely updates a subset of existing lights: origin, RGB, intensity and spotlight cone angle.
@@ -2288,3 +2311,40 @@ The latest user lighting test was performed on a fresh Blender file and a fresh 
 Next action: fix the test to inspect `QSS_PT_lighting`, rerun CI and generate a new installer only after all steps pass. Then ask the user to compare an otherwise identical full-map Cycles bake at 0 indirect bounces (direct only) and 2 indirect bounces (current default). Do not modify global brightness, light range or attenuation curves before that comparison.
 
 No add-on source code was changed during this session. No Blender bake, engine test, package build or merge was performed. The only repository changes in this session are this handoff/archive documentation update.
+
+## 2026-11-23 — Lighting direction correction and SLOPGATE 0.21.25 native Cycles candidate
+
+The user reminded the assistant of the explicit 2026-11-11 decision preserved in the main archive. The exact archived user statement begins: “We wont try to perfecly imitate the ericw render for now.” The product direction was changed to SLOPGATE-native lighting for new maps, with imported legacy delay values acting only as practical native Blender starting points. ericw-style exact matching is not the objective. The user further clarified on 2026-11-23:
+- Cycles is an alternative to ericw, not a renderer that must match ericw.
+- Immediate goal: make Cycles viewport preview similar to the Cycles bake.
+- Add tweakable parameters for different delay groups so the user can approximate lighting manually.
+- TrenchBroom extended FGD / explicit per-light Cycles properties can wait until after 1.0.
+
+This overrides the 2026-11-16/17 investigation notes that treated the custom delay-0/5 Cycles correction graphs as a desired end state. Those records remain historical; do not use them as the governing design.
+
+### Implemented on production branch
+
+Production branch: `fix/0.21.17-world-aligned-lightmap-charts`  
+HEAD: `c3916af50eeae63ade20ec3909da31f60b0248dc`  
+Add-on version: **0.21.25**
+
+- Removed the Cycles-only graph builders and updater whose purpose was to transform Blender's native inverse-square lamp into ericw delay-0/5 curves. The native POINT/SPOT lamps and their delay-group starting presets are used instead.
+- Kept the Quake Direct CPU solver and the pure ericw static attenuation helpers unchanged.
+- Added persistent per-delay Energy, Range and Source Softness multipliers (delays 0–5) to the QSS Settings dialog. Neutral defaults are 1.0. They apply to imported QSS lights and are saved in QSS config; they are intended for manual approximation, not as formula parameters.
+- Existing fully QSS-owned legacy correction node trees are cleared when the native settings are reapplied. User-authored or mixed node trees remain untouched.
+- Cycles viewport preview now uses the private black World used by the bake and shares the QSS diffuse-bounce count (default 2). The bounce control updates the active Cycles preview and restores prior scene bounce settings when leaving that mode.
+- Source-level contract tests cover native per-delay settings, removal of exact Cycles correction graphs, preservation of custom light graphs, and preview/bake world+bounce alignment. The previously failed lighting panel UI test was corrected to inspect the actual child `QSS_PT_lighting` panel.
+
+### CI / installer evidence
+
+- Final CI: run `45088607276`, success; source commit `c3916af50eeae63ade20ec3909da31f60b0248dc`.
+- Python compilation passed; **324 standalone tests passed**.
+- Package assembly and artifact upload passed.
+- Installer artifact `14780112882`, SHA-256 `f467049d2b2d9619de50cf5f7cddd0a28ae4f09aa58b237912f36637c052d9ce`.
+- CI does not execute Blender 5.3, a Cycles viewport session, a real Cycles bake, or Ironwail. User runtime acceptance remains pending.
+
+### Next runtime test
+
+Install 0.21.25 and make a fresh import. Assess the Cycles preview and baked lightmap at the same viewpoint and same indirect-bounce count, without touching the 18 delay controls first. Then use the new Settings controls to adjust one delay group's Energy, Range or Source Softness multiplier at a time. Expect similar spatial distribution, not pixel-identical values: the viewport uses textured materials while the bake temporarily uses white diffuse receivers, and the bake performs post-bake source-mean/output normalization.
+
+The TrenchBroom FGD / per-light SLOPGATE Cycles property-key schema is post-1.0 and must not be pulled into this 0.21.25 task. The confirmed white edge-strip fix remains closed and must be kept separate from lighting tuning.
