@@ -152,51 +152,74 @@ Current intentional limitations to carry consciously or resolve:
 
 ## Immediate next action
 
-**Current action: user runtime validation of SLOPGATE 0.21.27 delay-group Apply and Cycles bake response.** Preview/bake parity was user-confirmed to be close on 0.21.26. User considers the absolute brightness higher than ericw acceptable under the agreed native-Cycles direction.
+**Current action: user runtime validation of SLOPGATE 0.21.28 Cycles delay controls and bake profile propagation.** Preview/bake parity was user-confirmed close on 0.21.26. Higher overall brightness than ericw is accepted under the native-Cycles strategy.
 
 Production source:
 - Branch: `fix/0.21.17-world-aligned-lightmap-charts`
-- HEAD: `14b9c2cbcfd1bff5c319f62f2589c955c53a99b5`
-- Add-on version: **0.21.27**
-- CI: run [45099923131](https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45099923131), success; Python compilation and **329 standalone tests** passed; package assembly and upload passed.
-- Installer: [Quake-Surface-Studio-v0.21.27-Blender-Install (artifact 14785205467)](https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45099923131/artifacts/14785205467)
-- SHA-256: `69a5887570d698bd8a3bee04b02a169b0b2d25b35c39ade15d0371873269ab17`
+- HEAD: `f59731f239eb3221769a1f2c42a04d7e7550b867`
+- Add-on version: **0.21.28**
+- CI run: [45107473694](https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45107473694), success; Python compilation and **330 standalone tests** passed; installer assembly/upload passed.
+- Installer: [Quake-Surface-Studio-v0.21.28-Blender-Install (artifact 14788366012)](https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45107473694/artifacts/14788366012)
+- SHA-256: `40855a7797d9209b35c9feaa626b41698f72e671d86dc279bc4ff0bb6614679f`
 
-### 0.21.27 changes
+### User's latest report
 
-1. QSS Settings now has an explicit **Apply to Lights** button. It sends the current six delay profiles to the central light-applier without closing Settings. **OK** saves the settings to config; **Cancel** restores the previously saved delay profile (including values that may have been temporarily applied).
-2. The Cycles bake now snapshots one normalized set of saved delay profiles at bake start and passes that exact snapshot to each lamp reapplication during bake setup / cleanup. It no longer depends on a fresh config read at each apply call.
-3. Bake diagnostics record the exact JSON delay profiles used and post-application per-delay counts, actual lamp-energy ranges, custom cutoff-distance ranges and shadow-radius ranges.
-4. The third control is now labelled **Shadow Radius** with a tooltip. It maps to Blender `PointLight.shadow_soft_size`, documented as light size for ray-shadow sampling. It changes ray-traced shadow/penumbra softness, not the radial attenuation or width of the light pool. [Blender 5.3 PointLight API](https://docs.blender.org/api/5.3/bpy.types.PointLight.html).
-5. Range scales Blender's custom cutoff distance, documented as the distance at which light influence reaches zero. It mainly affects surfaces near or beyond the cutoff; it should not be expected to change brightness well inside the range. [Blender 5.3 Light API](https://docs.blender.org/api/5.3/bpy.types.Light.html).
-6. Energy is the control expected to give the clear overall brightness change for a delay group.
+- Eevee Range and Source Radius are effective, but the corresponding controls seemed ineffective in Cycles.
+- The bake seemed not to pick up the delay-group settings and remained very bright.
+- User's acceptable brightness target remains Cycles-as-native-alternative, not ericw parity.
+- Do not claim a runtime fix until the user tests 0.21.28 in Blender 5.3.
 
-### Runtime check
+### Verified Blender 5.3 renderer behavior
 
-1. Install 0.21.27. Open Settings and set delay 0 Energy to a clearly different value, such as 0.25 for a test. Click **Apply to Lights** and inspect Cycles preview. The settings popup should remain available; this is a runtime UX check since CI can only assert the source contract.
-2. Click **OK** so the profile is persisted. Do not click Cancel after testing Apply unless deliberately reverting.
-3. Bake the same map. The bake must use the saved delay 0 Energy ×0.25 profile. Compare its brightness with the baseline bake.
-4. Run **Save Lighting Diagnostics**. Inspect `Last bake native delay profiles` and `Last bake native delay lamp values`. For delay 0, the diagnostic should list the 0.25 Energy multiplier and the resulting lamp energy range. If diagnostics show 1.0 or no delay-0 lights, settings did not reach bake setup. If they show 0.25 but the bake is visually unchanged, investigate Cycles light contribution / bake visibility independently.
-5. Test Range using a deliberately small multiplier only if you want to move the hard influence boundary into the visible map area. Test Shadow Radius against a shadow edge/penumbra; neither should be judged as a general light-pool width control.
+Reviewed Blender 5.3.0 `intern/cycles/blender/light.cpp` `BlenderSync::sync_light()` and Blender 5.3 API:
+- Cycles sync reads point/spot light **radius** (`b_light.radius`), spot angle, spot blend, light colour, `b_light.energy`, exposure, normalize, and shadow/cycles settings.
+- Cycles sync does **not** read per-light `cutoff_distance` / `use_custom_distance` or `diffuse_factor`.
+- Point/spot radius is exposed to Blender Python via `shadow_soft_size` and maps to the renderer's light radius. It changes the emitted source size and ray-traced shadow softness; it does not make a hard radial cutoff.
+- Therefore **Range** is now labelled **Eevee Cutoff** and must not be advertised as affecting Cycles.
+- **Source Radius** remains a valid Cycles control. Its impact is easiest to judge at cast-shadow/penumbra edges, not in an unoccluded region. Blender's Normalize option affects total output when light size changes; the diagnostic records normalize and soft-falloff flags.
 
-Do not claim runtime Apply UI success from CI. Blender 5.3 test remains required. Keep Quake Direct separate; do not reintroduce ericw Cycles graphs or modify the confirmed world-chart edge-support fix.
+References:
+- Blender 5.3 Cycles light synchronisation: https://github.com/blender/blender/blob/v5.3.0/intern/cycles/blender/light.cpp
+- Blender 5.3 Light API: https://docs.blender.org/api/5.3/bpy.types.Light.html
+- Blender 5.3 PointLight API: https://docs.blender.org/api/5.3/bpy.types.PointLight.html
+- Blender 5.3 light object manual: https://docs.blender.org/manual/en/5.3/render/lights/light_object.html
+
+### 0.21.28 changes
+
+1. Removed the unsupported **Diffuse** multiplier proposal. Although `Light.diffuse_factor` exists in the API, Blender 5.3 Cycles sync does not read it; do not re-add it as a Cycles bake control.
+2. **Apply & Save** commits the current delay profiles to the QSS config immediately and applies them to imported lights. Cancelling the remaining Settings dialog does not undo this committed profile. This removes the former ambiguity where 0.21.27 **Apply to Lights** changed preview lamps temporarily but only **OK** wrote config for a subsequent bake.
+3. Bake still takes one normalized saved profile snapshot at bake start and passes it to the light reapplication calls. Diagnostics record exact profile JSON and, for each delay, point/spot counts, actual energy range, cutoff, source radius, normalize and soft-falloff values.
+4. UI now distinguishes **Energy**, **Eevee Cutoff**, and **Source Radius**. Energy is used by Cycles sync; Source Radius is used by Cycles; Eevee Cutoff is not.
+5. Existing user light node trees are preserved; do not add a Cycles node-graph attenuation correction or an ericw equation.
+
+### Runtime test
+
+1. Install 0.21.28. In Settings, set **Delay 0 Energy = 0.25**, then click **Apply & Save**. That button commits the settings immediately; no separate OK is required for the profile to persist. Confirm Cycles preview becomes significantly darker.
+2. Bake the same map. The bake must snapshot and use delay-0 Energy ×0.25.
+3. Run **Save Lighting Diagnostics**. Inspect:
+   - `Last bake native delay profiles`: delay 0 energy must be 0.25.
+   - `Last bake native delay lamp values`: delay 0 should list about 25% of the original group energy range, with point/spot counts, source radius and normalize/soft-falloff flags.
+4. If the profile JSON is 0.25 and per-light energies are lower but the bake remains visually unchanged, investigate bake shader/light-node contribution or extra energy sources; the settings persistence path is then verified.
+5. Test Source Radius with a very large temporary multiplier (e.g. ×8) and inspect a clear cast-shadow edge. If the diagnostic radius grows by ×8 but the Cycles shadow penumbra is still unchanged, investigate Blender's radius/soft-falloff runtime behavior in the user's exact Blender 5.3 build.
+6. Treat **Eevee Cutoff** as Eevee-only; a no-change result in Cycles is expected and must not be classed as a regression.
+
+CI passes standalone tests but cannot execute Blender GUI, Cycles viewport renders, real lightmap bake or game engines. Runtime acceptance remains pending.
 
 ## Current verified baseline
 
 - **Production source branch:** `fix/0.21.17-world-aligned-lightmap-charts`.
-- **Current production branch HEAD:** `14b9c2cbcfd1bff5c319f62f2589c955c53a99b5` (2026-11-23), add-on version **0.21.27**.
-- **Latest CI:** run `45099923131`, success. Python compilation passed; **329 standalone tests passed**; Blender-ready package assembly and artifact upload passed. CI does not execute the Blender 5.3 GUI or Cycles render/bake.
-- **Current installer:** `Quake-Surface-Studio-v0.21.27-Blender-Install`, artifact ID `14785205467`, SHA-256 `69a5887570d698bd8a3bee04b02a169b0b2d25b35c39ade15d0371873269ab17`. [Artifact page](https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45099923131/artifacts/14785205467).
-- **Lighting strategy:** Cycles is a SLOPGATE-native alternative to ericw, not an ericw parity implementation. User confirmed preview and bake are now close; absolute brightness higher than ericw is acceptable.
-- **Delay preset apply:** 0.21.27 adds **Apply to Lights** in Settings; OK saves and Cancel restores saved values. Bake snapshots one normalized config profile and uses it throughout bake setup and cleanup.
-- **Bake diagnostics:** include exact delay profiles and post-application per-delay lamp energy, cutoff and shadow radius ranges. Use these to distinguish settings-application failure from Cycles bake behavior.
-- **Control semantics:** Energy scales lamp power; Range scales Blender custom cutoff distance (influence becomes zero at the cutoff); Shadow Radius scales `PointLight.shadow_soft_size`, i.e. ray-shadow sampling / penumbra softness, not radial falloff. Blender 5.3 references: [Light](https://docs.blender.org/api/5.3/bpy.types.Light.html), [PointLight](https://docs.blender.org/api/5.3/bpy.types.PointLight.html).
+- **Current production HEAD:** `f59731f239eb3221769a1f2c42a04d7e7550b867` (2026-11-23), add-on version **0.21.28**.
+- **Latest CI:** run `45107473694`, success; Python compilation passed and **330 standalone tests passed**; Blender-ready package assembly and artifact upload passed. CI does not execute Blender GUI/Cycles runtime.
+- **Current installer:** `Quake-Surface-Studio-v0.21.28-Blender-Install`, artifact ID `14788366012`, SHA-256 `40855a7797d9209b35c9feaa626b41698f72e671d86dc279bc4ff0bb6614679f`. [Artifact page](https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45107473694/artifacts/14788366012).
+- **Lighting strategy:** Cycles is a SLOPGATE-native alternative to ericw, not a parity implementation. User confirmed preview and bake are close; higher absolute brightness is acceptable.
+- **0.21.28 delay controls:** Apply & Save commits the three supported profile fields to QSS config immediately: Energy, Eevee Cutoff and Source Radius. The Cycles bake snapshots the saved delay profile and reapplies it throughout bake setup. Diagnostics expose profile JSON and effective per-delay values.
+- **Blender 5.3 renderer scope:** Cycles reads light energy and point/spot source radius, but does not sync per-light cutoff distance or `diffuse_factor`. Eevee Cutoff is Eevee-only. Source Radius controls ray-traced source size/penumbra; it is not radial falloff.
+- **Quake Direct:** CPU solver remains separate and retains its Quake/ericw-style static delay 0–5 implementation.
 - **User-verified export state:** Enhanced BSP export integrity report passed; external `.lit` sidecar validated; exact exported BSP loaded in Ironwail without errors.
 - **User-verified lightmap edge state:** narrow white face-edge strips are gone in Blender and Ironwail following the world-chart edge-support fix. Keep separate from Cycles lighting work.
-- **Quake Direct:** CPU solver remains separate and retains the Quake/ericw-style static delay 0–5 implementation.
-- **Documentation branch:** `fix/v0.11.1-metadata-style-order-test`; this handoff and conversation archive are maintained here. Its add-on source snapshot is not installer source.
-- **Default `main`:** still an old 0.11.0 snapshot and is not production source. Do not build from it.
-- **TrenchBroom FGD / extended per-light Cycles properties:** post-1.0, after native parameter schema has been validated.
+- **Documentation branch:** `fix/v0.11.1-metadata-style-order-test`; handoff and conversation archive are maintained there. Its add-on source snapshot is not installer source.
+- **Default `main`:** old 0.11.0 snapshot; do not build from it.
+- **TrenchBroom FGD / per-light Cycles properties:** post-1.0.
 - Keep CI, Blender GUI behavior and engine runtime results explicitly distinguished. No official 1.0 release has been made.
 
 ---
