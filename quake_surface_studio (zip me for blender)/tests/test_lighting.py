@@ -6,31 +6,46 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import lighting
 
 
-class CyclesFalloffPolicyTests(unittest.TestCase):
-    def test_delay_zero_uses_the_exact_ericw_correction(self):
-        self.assertTrue(lighting.cycles_uses_ericw_falloff_correction(0))
+class NativeDelayProfileTests(unittest.TestCase):
+    def test_missing_delay_profile_uses_neutral_multipliers(self):
+        self.assertEqual(
+            lighting.native_delay_profile_multipliers({}, 0),
+            {"energy": 1.0, "range": 1.0, "softness": 1.0},
+        )
 
-    def test_delay_five_uses_the_exact_ericw_correction(self):
-        self.assertTrue(lighting.cycles_uses_ericw_falloff_correction(5))
+    def test_delay_profiles_are_independent(self):
+        profiles = {
+            "0": {"energy": 1.5, "range": 0.75, "softness": 2.0},
+            "5": {"energy": 0.5, "range": 1.25, "softness": 0.25},
+        }
+        self.assertEqual(
+            lighting.native_delay_profile_multipliers(profiles, 0),
+            {"energy": 1.5, "range": 0.75, "softness": 2.0},
+        )
+        self.assertEqual(
+            lighting.native_delay_profile_multipliers(profiles, 5),
+            {"energy": 0.5, "range": 1.25, "softness": 0.25},
+        )
+        self.assertEqual(
+            lighting.native_delay_profile_multipliers(profiles, 3),
+            {"energy": 1.0, "range": 1.0, "softness": 1.0},
+        )
 
-    def test_all_other_delays_keep_the_native_fallback(self):
-        for delay in (1, 2, 3, 4, 6, -1):
-            self.assertFalse(lighting.cycles_uses_ericw_falloff_correction(delay))
+    def test_invalid_and_nonfinite_profile_values_use_neutral_defaults(self):
+        profiles = {
+            "1": {"energy": "not-a-number", "range": float("nan"), "softness": -3.0},
+        }
+        self.assertEqual(
+            lighting.native_delay_profile_multipliers(profiles, 1),
+            {"energy": 1.0, "range": 1.0, "softness": 0.0},
+        )
 
-    def test_invalid_delay_keeps_the_native_fallback(self):
-        self.assertFalse(lighting.cycles_uses_ericw_falloff_correction("invalid"))
-
-    def test_delay_zero_correction_is_finite_at_the_light_origin(self):
-        import math
-        value = lighting.ericw_cycles_light_falloff_correction(0, 0.0, 1000.0)
-        self.assertTrue(math.isfinite(value))
-        self.assertEqual(value, 0.0)
-
-    def test_delay_five_correction_is_finite_at_the_light_origin(self):
-        import math
-        value = lighting.ericw_cycles_light_falloff_correction(5, 0.0, 1000.0)
-        self.assertTrue(math.isfinite(value))
-        self.assertEqual(value, 0.0)
+    def test_profile_multipliers_are_clamped_to_safe_range(self):
+        profiles = {"2": {"energy": 1000.0, "range": 0.2, "softness": 100.0}}
+        self.assertEqual(
+            lighting.native_delay_profile_multipliers(profiles, 2),
+            {"energy": 100.0, "range": 0.2, "softness": 100.0},
+        )
 
 
 class LightingHelpersTests(unittest.TestCase):
@@ -170,7 +185,7 @@ class BlenderLivePreviewCalibrationTests(unittest.TestCase):
         )
         reference = 128 * 0.0254
         self.assertAlmostEqual(result['energy'], 300 * reference ** 2)
-        self.assertEqual(result['profile'], 'delay2_inverse_square_exact')
+        self.assertEqual(result['profile'], 'delay2_native_inverse_square')
         # At the ericw 128-unit reference distance, native E/r^2 is 300.
         self.assertAlmostEqual(result['energy'] / reference ** 2, 300)
 
@@ -187,7 +202,7 @@ class BlenderLivePreviewCalibrationTests(unittest.TestCase):
             300, 300, 0, wait=9, world_dist=2, falloff=100, unit_scale=0.01
         )
         self.assertAlmostEqual(result['cutoff_distance'], 2.0)
-        self.assertEqual(result['profile'], 'delay0_linear_midpoint_approximation')
+        self.assertEqual(result['profile'], 'delay0_native_finite_range')
 
     def test_delay_one_and_five_use_reference_calibrations(self):
         inverse = lighting.blender_live_light_preview_parameters(200, 200, 1, unit_scale=0.01)
@@ -196,71 +211,11 @@ class BlenderLivePreviewCalibrationTests(unittest.TestCase):
         self.assertAlmostEqual(soft['energy'], inverse['energy'] / 4.0)
         self.assertGreater(soft['shadow_soft_size'], inverse['shadow_soft_size'])
 
-    def test_cycles_delay_zero_correction_reconstructs_ericw_linear_curve(self):
-        raw = 300.0
-        world_range = 0.5
-        wait = 0.75
-        world_dist = 1.4
-        unit_scale = 0.0254
-
-        for falloff in (0.0, 150.0):
-            radius = (
-                falloff * world_dist
-                if falloff > 0.0
-                else raw / (wait * world_dist)
-            )
-            base_energy = raw * world_range * (radius * unit_scale) ** 2 / 8.0
-            distances = (8.0, 24.0, 64.0, 128.0, radius * 0.5, radius, radius * 1.2)
-            for distance in distances:
-                if distance <= 0.0:
-                    continue
-                native_inverse_square = base_energy / (distance * unit_scale) ** 2
-                correction = lighting.ericw_cycles_light_falloff_correction(
-                    0, distance, raw, wait, world_dist, falloff
-                )
-                reconstructed = native_inverse_square * correction
-                expected = (
-                    lighting.ericw_light_value( raw, 0, distance, wait, world_dist, falloff)
-                    * world_range
-                )
-                self.assertAlmostEqual(reconstructed, expected, places=7)
-
-    def test_cycles_delay_five_correction_reconstructs_ericw_soft_inverse_square(self):
-        raw = 300.0
-        world_range = 0.5
-        wait = 0.8
-        world_dist = 1.3
-        unit_scale = 0.0254
-        reference_quake = 128.0 / (wait * world_dist)
-        reference_blender = reference_quake * unit_scale
-        base_energy = raw * world_range * reference_blender ** 2 / 4.0
-
-        for distance in (1.0, 8.0, 24.0, 64.0, 128.0, 256.0, 512.0, 1024.0):
-            native_inverse_square = base_energy / (distance * unit_scale) ** 2
-            correction = lighting.ericw_cycles_light_falloff_correction(
-                5, distance, raw, wait, world_dist
-            )
-            reconstructed = native_inverse_square * correction
-            expected = (
-                lighting.ericw_light_value(raw, 5, distance, wait, world_dist)
-                * world_range
-            )
-            self.assertAlmostEqual(reconstructed, expected, places=7)
-
-    def test_cycles_falloff_correction_leaves_other_delays_unchanged(self):
-        for delay in (1, 2, 3, 4):
-            self.assertEqual(
-                lighting.ericw_cycles_light_falloff_correction(
-                    delay, 64.0, 300.0
-                ),
-                1.0,
-            )
-
     def test_delay_three_and_four_are_labelled_as_unmatched_fallbacks(self):
         constant = lighting.blender_live_light_preview_parameters(100, 100, 3)
         minlight = lighting.blender_live_light_preview_parameters(100, 100, 4)
-        self.assertIn('fallback', constant['profile'])
-        self.assertIn('fallback', minlight['profile'])
+        self.assertIn('native_point_approximation', constant['profile'])
+        self.assertIn('native_point_approximation', minlight['profile'])
         self.assertEqual(constant['energy'], 100)
         self.assertEqual(minlight['energy'], 100)
 
@@ -497,24 +452,17 @@ class EricwContributionGateTests(unittest.TestCase):
         )
 
 
-class CyclesNativeFallbackSourceContractTests(unittest.TestCase):
-    def test_newly_imported_delay_zero_and_five_lights_install_quake_falloff(self):
+class NativeCyclesLightingSourceContractTests(unittest.TestCase):
+    def test_import_does_not_install_ericw_cycles_falloff_graphs(self):
         addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
         with open(addon_path, "r", encoding="utf-8") as handle:
             source = handle.read()
-        import_start = source.index("def _import_bsp_entities(")
-        import_end = source.index("\ndef ", import_start + 5)
-        importer = source[import_start:import_end]
-        self.assertIn("cycles_uses_ericw_falloff_correction(delay)", importer)
-        self.assertIn("allow_initial_import_tree=True", importer)
+        self.assertNotIn("_qss_update_cycles_delay_falloff", source)
+        self.assertNotIn("_qss_build_cycles_delay_falloff_nodes", source)
+        self.assertNotIn("cycles_uses_ericw_falloff_correction", source)
+        self.assertIn("native_delay_profile_multipliers", source)
 
-        update_start = source.index("def _qss_update_cycles_delay_falloff(")
-        update_end = source.index("\ndef ", update_start + 5)
-        updater = source[update_start:update_end]
-        self.assertIn("allow_initial_import_tree=False", updater)
-        self.assertIn("is_safe_to_replace_light_node_tree", updater)
-
-    def test_blender_native_fallback_clears_only_qss_owned_light_graphs(self):
+    def test_legacy_owned_cycles_graphs_are_cleared_without_touching_custom_trees(self):
         addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
         with open(addon_path, "r", encoding="utf-8") as handle:
             source = handle.read()
@@ -525,11 +473,23 @@ class CyclesNativeFallbackSourceContractTests(unittest.TestCase):
         self.assertIn("_qss_cycles_falloff_tree_is_owned(light_data)", helper)
         self.assertIn("node_tree.nodes.clear()", helper)
         self.assertNotIn("use_nodes = False", helper)
+        apply_start = source.index("def _apply_quake_light_energy_scale(scene):")
+        apply_end = source.index("\ndef ", apply_start + 5)
+        apply_body = source[apply_start:apply_end]
+        self.assertIn("_qss_clear_owned_cycles_light_nodes(light_obj.data)", apply_body)
+        self.assertIn("user_custom_nodes_preserved", apply_body)
 
-    def test_native_fallback_records_actual_node_tree_not_use_nodes_flag(self):
+    def test_cycles_preview_uses_bake_world_and_diffuse_bounce_count(self):
         addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
         with open(addon_path, "r", encoding="utf-8") as handle:
             source = handle.read()
-        self.assertIn("def _qss_cycles_light_node_summary(light_data, limit=8):", source)
-        self.assertIn("light_node_tree_qss_owned", source)
-        self.assertIn("light_node_tree={light['light_node_tree']}", source)
+        preview_start = source.index("def _set_lighting_preview(context, obj, mode):")
+        preview_end = source.index("\ndef ", preview_start + 5)
+        preview = source[preview_start:preview_end]
+        self.assertIn("_set_black_preview_world(context.scene, obj)", preview)
+        self.assertIn("_qss_apply_cycles_preview_settings(context.scene, obj)", preview)
+        self.assertIn("_qss_restore_cycles_preview_settings(context.scene, obj)", preview)
+        self.assertIn("cycles.diffuse_bounces = bounces", source)
+        self.assertIn("scene.cycles.diffuse_bounces = bake_bounces", source)
+
+
