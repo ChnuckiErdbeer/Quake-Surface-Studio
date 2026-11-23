@@ -1,4 +1,13 @@
-# SLOPGATE 0.21.25
+# SLOPGATE 0.21.26
+
+## 0.21.26 — Align live Cycles preview with bake and make delay tuning live
+
+- Cycles/Eevee live preview now isolates exactly the active map's imported Quake lights, matching the bake's light visibility policy. Other scene lights and lights from other maps are temporarily suppressed and restored when leaving preview or switching maps.
+- Cycles bake source-lightmap mean matching is now opt-in and disabled by default. It is an atlas-only post-scale and therefore intentionally changes baked brightness relative to the live preview; the option is now visible next to Indirect Bounces with an explanation.
+- Existing scenes are migrated once away from the previous hidden default-on source-match behavior. The explicit Auto-calibrate action still uses source matching for its measurement and restores the user's toggle afterwards.
+- Delay-group Energy, Range and Source Softness controls in QSS Settings now update imported lights while the dialog is open. OK saves; Cancel restores the values that were active when the dialog opened.
+- Lighting diagnostics record how many scene lights were enabled/suppressed during live preview and whether source-match post-normalization was enabled.
+- CI validates Python compilation and standalone source/unit tests; Blender 5.3 Cycles preview/bake parity remains a runtime acceptance test.
 
 ## 0.21.25 — Native Cycles lighting alternative and delay-group tuning
 
