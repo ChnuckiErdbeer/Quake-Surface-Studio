@@ -127,7 +127,7 @@ class AddonRegistrationTests(unittest.TestCase):
         self.assertIn('light_obj.data.energy = lighting_utils.scaled_quake_light_energy(', source)
         self.assertIn("preview['shadow_soft_size'] * multipliers['softness']", source)
         settings_start = source.index("class QSS_OT_settings(Operator):")
-        settings_end = source.index("\\nclass QSS_OT_open_config_text", settings_start)
+        settings_end = source.index("\nclass QSS_OT_open_config_text", settings_start)
         settings = source[settings_start:settings_end]
         self.assertIn('header.label(text="Eevee Cutoff ×")', settings)
         self.assertIn('header.label(text="Source Radius ×")', settings)
