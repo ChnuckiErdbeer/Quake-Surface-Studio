@@ -20,7 +20,7 @@ class AddonRegistrationTests(unittest.TestCase):
         addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
         with open(addon_path, "r", encoding="utf-8") as handle:
             source = handle.read()
-        panel_start = source.index("class QSS_PT_main(Panel)")
+        panel_start = source.index("class QSS_PT_lighting(Panel)")
         panel_end = source.index("\nclass ", panel_start + 5)
         panel = source[panel_start:panel_end]
         self.assertIn('context.scene, "qss_bake_bounces"', panel)
