@@ -29,7 +29,7 @@ from . import bsp, color, lighting as lighting_utils, light_node_utils, material
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils, image_undo
 
 
-ADDON_VERSION = (0, 21, 26)
+ADDON_VERSION = (0, 21, 27)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -3578,6 +3578,32 @@ def _apply_quake_light_energy_scale(scene, delay_profiles=None):
         light_obj['qss_map_sync_energy_baseline'] = float(light_obj.data.energy)
         updated += 1
     return updated
+
+
+def _qss_native_delay_profile_summary(lights, profiles):
+    """Summarize actual Blender light energy, cutoff and source radius by delay."""
+    records = []
+    for delay in range(6):
+        group = [
+            item for item in lights
+            if item.type == "LIGHT"
+            and item.get("qss_light_role") == "quake_entity_light"
+            and int(item.get("qss_quake_light_delay", -1)) == delay
+        ]
+        if not group:
+            continue
+        profile = lighting_utils.native_delay_profile_multipliers(profiles, delay)
+        energies = [float(item.data.energy) for item in group]
+        cutoffs = [float(getattr(item.data, "cutoff_distance", 0.0)) for item in group]
+        radii = [float(getattr(item.data, "shadow_soft_size", 0.0)) for item in group]
+        records.append(
+            f"d{delay}:n={len(group)}"
+            f",mult(E/R/Radius)={profile['energy']:.4g}/{profile['range']:.4g}/{profile['softness']:.4g}"
+            f",W={min(energies):.4g}-{max(energies):.4g}"
+            f",cutoff={min(cutoffs):.4g}-{max(cutoffs):.4g}"
+            f",radius={min(radii):.4g}-{max(radii):.4g}"
+        )
+    return "; ".join(records) if records else "no delay-group lights"
 
 
 def _on_light_energy_scale_changed(self, context):
@@ -9112,6 +9138,17 @@ class QSS_OT_bake_scene_lights(Operator):
         if not imported_lights:
             self.report({'ERROR'}, "No imported Quake lights are present in this scene.")
             return {'CANCELLED'}
+        # Freeze the saved profile once. Preview preparation and every bake
+        # reapplication below must use exactly this same set of multipliers.
+        bake_native_profiles = _qss_native_delay_profiles_normalized(
+            _qss_config_settings().get("native_delay_profiles", {})
+        )
+        obj["qss_last_bake_attempt_native_delay_profiles"] = json.dumps(
+            bake_native_profiles, sort_keys=True, separators=(",", ":")
+        )
+        obj["qss_last_bake_attempt_native_delay_summary"] = (
+            _qss_native_delay_profile_summary(imported_lights, bake_native_profiles)
+        )
         current_energy_scale = max(0.0, float(scene.qss_light_energy_scale))
         if current_energy_scale <= 0.0:
             self.report({'ERROR'}, "Live light scale is 0, so a light bake must be black. Set Live light scale to 1 or higher, click Apply Light Energy Scale, verify Live Lights, then bake.")
@@ -9179,7 +9216,7 @@ class QSS_OT_bake_scene_lights(Operator):
             light_obj.name: float(light_obj.get('qss_energy_calibration', old_object_calibration))
             for light_obj in imported_lights
         }
-        updated_lights = _apply_quake_light_energy_scale(scene)
+        updated_lights = _apply_quake_light_energy_scale(scene, delay_profiles=bake_native_profiles)
         max_energy = max((float(o.data.energy) for o in imported_lights), default=0.0)
         try:
             progress_wm.progress_begin(0, 5)
@@ -9189,7 +9226,7 @@ class QSS_OT_bake_scene_lights(Operator):
             scene.render.engine = 'CYCLES'
             # Re-apply after selecting Cycles: delay 0/5 use point-sized emitters
             # here so the node correction matches the calibrated radial curves.
-            _apply_quake_light_energy_scale(scene)
+            _apply_quake_light_energy_scale(scene, delay_profiles=bake_native_profiles)
             # Blender allows baking to either image textures or the active mesh
             # colour attribute. QSS always bakes into the selected atlas image.
             # If the user's previous setting was VERTEX_COLORS, Cycles can finish
@@ -9668,7 +9705,7 @@ class QSS_OT_bake_scene_lights(Operator):
             for light_obj in imported_lights:
                 light_obj['qss_energy_calibration'] = old_light_calibrations.get(
                     light_obj.name, old_object_calibration)
-            _apply_quake_light_energy_scale(scene)
+            _apply_quake_light_energy_scale(scene, delay_profiles=bake_native_profiles)
             _qss_log('ERROR', 'bake', f"Failed; atlas and light calibration restored: {exc}")
             self.report({'ERROR'}, f"Cycles bake failed; atlas and light calibration restored: {exc}")
             return {'CANCELLED'}
@@ -9714,7 +9751,7 @@ class QSS_OT_bake_scene_lights(Operator):
                     pass
             try:
                 scene.render.engine = old_engine
-                _apply_quake_light_energy_scale(scene)
+                _apply_quake_light_energy_scale(scene, delay_profiles=bake_native_profiles)
                 scene.cycles.samples = old_cycles['samples']
                 scene.cycles.diffuse_bounces = old_cycles['diffuse_bounces']
                 scene.cycles.max_bounces = old_cycles['max_bounces']
@@ -10912,6 +10949,8 @@ def _qss_diagnostics_text(context, obj):
         f'Source-match calibration: {obj.get("qss_light_energy_calibration", 1.0)}',
         f'Cycles bake source-match normalization: {getattr(context.scene, "qss_bake_match_source", False)}',
         f'Live preview light isolation: enabled={obj.get("qss_preview_enabled_light_count", 0)} suppressed={obj.get("qss_preview_suppressed_light_count", 0)} names={obj.get("qss_preview_suppressed_light_names", "")}',
+        f'Last bake native delay profiles: {obj.get("qss_last_bake_attempt_native_delay_profiles", "n/a")}',
+        f'Last bake native delay lamp values: {obj.get("qss_last_bake_attempt_native_delay_summary", "n/a")}',
         f'Last bake: raw_mean={obj.get("qss_last_bake_raw_mean", "n/a")} source_mean={obj.get("qss_last_bake_source_mean", "n/a")} atlas_mean={obj.get("qss_last_bake_luxel_mean", "n/a")} max={obj.get("qss_last_bake_luxel_max", "n/a")} normalization={obj.get("qss_last_bake_output_scale", "n/a")}',
         f'Last successful bake timing: total={bake_stats_utils.format_duration(obj.get("qss_last_bake_duration_seconds"))}; Cycles operator={bake_stats_utils.format_duration(obj.get("qss_last_bake_cycles_seconds"))}',
         f'Inline mover shadow policy: faces={obj.get("qss_inline_model_no_shadow_face_count", 0)} classes={obj.get("qss_inline_model_no_shadow_classnames", "")}',
@@ -11280,6 +11319,55 @@ def _on_native_delay_profile_changed(self, context):
     session["last_preview_profiles"] = profiles
 
 
+class QSS_OT_apply_native_delay_profiles(Operator):
+    bl_idname = "qss.apply_native_delay_profiles"
+    bl_label = "Apply to Lights"
+    bl_description = "Apply the values currently in Settings to imported lights without closing the dialog"
+
+    profiles_json: StringProperty(
+        name="Delay group profiles",
+        default="{}",
+        options={"HIDDEN"},
+    )
+
+    def execute(self, context):
+        try:
+            profiles = _qss_native_delay_profiles_normalized(
+                json.loads(self.profiles_json or "{}")
+            )
+            updated = _apply_quake_light_energy_scale(
+                context.scene, delay_profiles=profiles
+            )
+            active_map = context.object if _qss_is_map_object(context.object) else None
+            if active_map is not None:
+                active_lights = [
+                    item for item in _qss_active_map_objects(context.scene, active_map)
+                    if item.type == "LIGHT"
+                    and item.get("qss_light_role") in {
+                        "quake_entity_light", "quake_world_sunlight"
+                    }
+                ]
+                active_map["qss_last_preview_delay_profiles"] = json.dumps(
+                    profiles, sort_keys=True, separators=(",", ":")
+                )
+                active_map["qss_last_preview_delay_summary"] = (
+                    _qss_native_delay_profile_summary(active_lights, profiles)
+                )
+            d0 = profiles.get("0", {})
+            self.report(
+                {"INFO"},
+                f"Applied presets to {updated} lights. Delay 0: "
+                f"Energy ×{d0.get('energy', 1.0):g}, "
+                f"Range ×{d0.get('range', 1.0):g}, "
+                f"Radius ×{d0.get('softness', 1.0):g}. "
+                "Press OK in Settings to save; Cancel restores saved values."
+            )
+            return {"FINISHED"}
+        except Exception as exc:
+            self.report({"ERROR"}, f"Could not apply native light presets: {exc}")
+            return {"CANCELLED"}
+
+
 class QSS_OT_settings(Operator):
     bl_idname = "qss.settings"
     bl_label = "Quake Surface Studio Settings"
@@ -11413,17 +11501,30 @@ class QSS_OT_settings(Operator):
         profile_box = layout.box()
         profile_box.label(text="Native light presets by legacy delay", icon="LIGHT")
         profile_box.label(text="Multipliers apply to imported lights in Cycles preview, Eevee preview and Cycles bake.")
+        profile_box.label(text="Range scales Blender's custom cutoff distance; Radius scales the spherical light emitter.")
         header = profile_box.row(align=True)
         header.label(text="Delay")
         header.label(text="Energy ×")
         header.label(text="Range ×")
-        header.label(text="Softness ×")
+        header.label(text="Radius ×")
         for delay in range(6):
             row = profile_box.row(align=True)
             row.label(text=f"Delay {delay}")
             row.prop(self, f"delay{delay}_energy", text="")
             row.prop(self, f"delay{delay}_range", text="")
             row.prop(self, f"delay{delay}_softness", text="")
+        apply_row = layout.row()
+        apply_op = apply_row.operator(
+            QSS_OT_apply_native_delay_profiles.bl_idname,
+            text="Apply to Lights",
+            icon="CHECKMARK",
+        )
+        apply_op.profiles_json = json.dumps(
+            _qss_native_delay_profiles_from_operator(self),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        layout.label(text="Apply updates the lamps now; OK saves the profile, Cancel restores the saved profile.", icon="INFO")
         layout.label(text="Only QSS map collections are replaced. Other scene content is preserved.", icon="INFO")
 
     def execute(self, context):
@@ -12912,6 +13013,7 @@ CLASSES = (
     QSS_OT_restore_original_lightmap, QSS_OT_refresh_lightmap_preview,
     QSS_OT_apply_light_energy_scale, QSS_OT_calibrate_lights_to_source,
     QSS_OT_write_diagnostics, QSS_OT_copy_stats, QSS_OT_run_blender_selftest, QSS_OT_export_bsp,
+    QSS_OT_apply_native_delay_profiles,
     QSS_PT_main, QSS_PT_quick_actions, QSS_PT_project, QSS_PT_lighting, QSS_PT_stats,
 )
 
