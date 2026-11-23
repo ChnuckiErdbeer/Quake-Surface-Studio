@@ -11,6 +11,7 @@ import sys
 import time
 
 import bpy
+from mathutils import Vector
 
 
 def arguments():
@@ -89,7 +90,7 @@ def main():
     light_obj = bpy.data.objects.new("QSS Probe Area", light_data)
     scene.collection.objects.link(light_obj)
     light_obj.location = (-2.5, -2.0, 4.0)
-    direction = (0.0, 0.0, 0.0) - light_obj.location
+    direction = Vector((0.0, 0.0, 0.0)) - light_obj.location
     light_obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 
     camera_data = bpy.data.cameras.new("QSS Chart Camera")
