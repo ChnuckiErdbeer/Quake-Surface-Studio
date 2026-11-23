@@ -22570,3 +22570,44 @@ Install 0.21.26. In LIGHTING, leave **Match Source Brightness** unchecked and us
 For live tuning, open Settings while in Cycles preview and change one delay group/one field. The viewport should update while the dialog remains open. OK saves; Cancel restores the previous multiplier values.
 
 If a converged preview and a fresh source-match-disabled bake remain substantially different, capture both and a fresh diagnostics report; do not infer a final fix from CI alone.
+
+## 2026-11-23 — 0.21.27 delay profile application and bake diagnostics
+
+### You
+
+Very good. Bake and preview are now pretty close to each other. They are both way brighter than ericw but thats ok. Anyways i tried to calibrate via the new settings (still no realtime changes or at least apply button) and tried another bake. The settings seem to only influence the preview. Also the range and softness multiplyers (for delay 0 which is most of the lights in e1m1) doesnt seem to have much of an effect.
+
+### Source investigation and correction
+
+Production branch: `fix/0.21.17-world-aligned-lightmap-charts`.
+
+The live and bake lamp paths both use `_apply_quake_light_energy_scale()`, but 0.21.27 tightens this contract:
+- The bake takes one normalized snapshot of saved delay profiles at bake start, then passes the same snapshot to all lamp reapplications during Cycles preparation and cleanup. It does not repeatedly read the config on each call.
+- QSS Settings has an explicit **Apply to Lights** button that applies the current values currently displayed in the open settings dialog without closing it. OK saves the current profiles to config; Cancel reapplies the previous saved profile.
+- Bake diagnostics record the exact JSON profile used and effective per-delay lamp counts, energy ranges, cutoff distances and shadow radii after the first application. This tells whether the saved profile reaches the bake.
+- The third UI setting is labelled **Shadow Radius**, not generic source radius. Its tooltip explains the actual Blender property mapping.
+
+### Control semantics
+
+These controls have different visual roles; Range and Shadow Radius should not be interpreted as general energy / light-pool-width controls:
+- **Energy:** multiplies Blender lamp power. This should have a clear and measurable effect on a full bake for delay 0.
+- **Range:** multiplies Blender's custom cutoff distance. Blender documents this as the distance where a light's influence becomes zero. It primarily affects surfaces near or beyond the cutoff, not brightness well inside the light range. API: https://docs.blender.org/api/5.3/bpy.types.Light.html
+- **Shadow Radius:** multiplies `PointLight.shadow_soft_size`. Blender documents this as light size for ray shadow sampling; it changes ray-traced shadow penumbra softness, not radial light falloff. API: https://docs.blender.org/api/5.3/bpy.types.PointLight.html
+
+### CI / installer
+
+- Current source HEAD: `14b9c2cbcfd1bff5c319f62f2589c955c53a99b5`, version 0.21.27.
+- CI run `45099923131`: successful; **329 standalone tests passed**; package assembly and artifact upload passed.
+- Installer artifact `14785205467`: https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45099923131/artifacts/14785205467
+- SHA-256: `69a5887570d698bd8a3bee04b02a169b0b2d25b35c39ade15d0371873269ab17`.
+- Blender 5.3 interactive Apply dialog behavior and actual Cycles bake response have not been runtime-tested by CI.
+
+### Runtime test
+
+1. In Settings, set delay 0 Energy ×0.25 as an unmistakable test; click **Apply to Lights**, verify preview gets darker; click **OK** to save the setting.
+2. Bake the same map. It must use the saved Energy ×0.25 profile.
+3. Save diagnostics. Check `Last bake native delay profiles` and `Last bake native delay lamp values`: delay 0 should show multiplier 0.25 and its resulting energy range.
+4. If diagnostics show ×1.0, the save/apply path is still wrong. If diagnostics show ×0.25 and the image does not change, investigate the Cycles bake's actual light contribution path, not the settings UI.
+5. Test Range only with a value small enough to pull the cutoff into the area being inspected; test Shadow Radius at cast-shadow edges, not in an unoccluded light pool.
+
+The user's explicit acceptance that Cycles preview and bake are close and higher brightness than ericw is acceptable is the current product target. Do not reopen ericw parity work.
