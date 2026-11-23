@@ -2,11 +2,11 @@
 
 ## 0.21.28 — Cycles diffuse tuning and persistent Apply & Save
 
-- Added a per-delay-group **Diffuse** multiplier mapped to Blender `Light.diffuse_factor`. It scales the diffuse light contribution used in Cycles preview and the Cycles diffuse lightmap bake.
 - **Apply & Save** now writes the current delay profile to QSS config immediately and applies it to imported lights. The profile is committed as soon as the button is clicked; cancelling the rest of Settings does not roll it back.
-- Renamed **Range** to **Eevee Cutoff** because Blender 5.3 documents custom light distance as an Eevee setting; it does not provide a per-light Cycles distance cutoff.
-- Renamed **Shadow Radius** to **Source Radius**. It maps to `shadow_soft_size`, which changes ray-traced shadow softness, not radial attenuation distance.
-- Bake diagnostics include point/spot counts and actual per-delay diffuse-factor values in addition to energy, cutoff and source radius.
+- Renamed **Range** to **Eevee Cutoff** because Blender 5.3 Cycles sync does not read per-light custom cutoff distance.
+- Renamed **Shadow Radius** to **Source Radius**. It maps to `shadow_soft_size` / the Cycles point-light radius, which changes ray-traced shadow softness, not radial attenuation distance.
+- Bake diagnostics include point/spot counts, actual per-delay energy, cutoff and source-radius values, plus native normalize and soft-falloff modes.
+- Blender 5.3 Cycles synchronisation reads light energy, source radius, spot angle and spot blend. It does not sync per-light cutoff distance or `diffuse_factor`.
 - CI checks source contracts and pure helper logic. Blender 5.3 viewport and bake runtime acceptance is still required.
 
 ## 0.21.27 — Explicit delay preset apply and bake profile snapshot
