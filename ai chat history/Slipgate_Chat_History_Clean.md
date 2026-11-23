@@ -22529,3 +22529,44 @@ Production HEAD: `c3916af50eeae63ade20ec3909da31f60b0248dc`, version 0.21.25. CI
 Runtime validation is pending. The user's next test is to install 0.21.25, freshly import a map, compare Cycles preview and Baked mode at the same viewpoint/bounce count, then adjust one delay group's Energy, Range or Softness multiplier at a time. Preview and baked atlas need similar spatial distribution, not pixel identity, because bake materials and post-normalization differ from the viewport.
 
 No official 1.0 release was made. No extended FGD or per-light MAP-key implementation is included. Both the maintained handoff and archive are updated in this session.
+
+## 2026-11-23 — 0.21.26 preview/bake brightness parity and live delay settings
+
+### You
+
+preview still way brighter than bake. That was something i remember being fixed before and it is important. The preview should represent the final bounce. Tweaking the values in settings alway needs an ok press. Can you make it realtime or at least put an apply button into settings?  
+The screenshots are here: https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/tree/fix/v0.11.1-metadata-style-order-test/screens%20and%20diagnostics/v0.21.25
+
+### Screenshot review
+
+The two v0.21.25 screenshots use the same viewpoint. The Cycles preview screenshot's overlay reports **Sample 3 / 2048**, so it was captured before the viewport had converged. The bake screenshot shows the settled Baked mode; this is not a fair final-quality preview comparison by itself.
+
+The source review also found two concrete preview/bake differences:
+- The Cycles viewport preview had all scene lights enabled unless hidden by other state. The Cycles bake explicitly disables every scene light except the active map's imported QSS lights. A user-authored scene light or another map's light could therefore make preview brighter.
+- `qss_bake_match_source` defaulted to True but only post-scaled the baked atlas to the original BSP lightmap's mean. Live lights were not changed. This normalization can change brightness in Baked mode relative to Cycles preview. It is now a visible opt-in setting and defaults off for parity comparisons.
+
+### Implemented in production 0.21.26
+
+Branch: `fix/0.21.17-world-aligned-lightmap-charts`  
+HEAD: `d873532b5a34f311e6f887d86436c20030a163f0`
+
+- Cycles/Eevee live preview now enables only imported QSS lights belonging to the active map, matching the Cycles bake's active-map light set. It snapshots and restores all scene lights' `hide_render`, `hide_viewport` and `hide_set` states when leaving live preview, switching maps or completing a successful bake. Diagnostics report active/suppressed light counts and names.
+- The hidden source-match bake normalization is now exposed as **Match Source Brightness**, default off. When enabled it intentionally applies a global scale to the baked atlas only; the UI warns that live preview will differ. Existing scenes are migrated once from the old true default to false. An old baked atlas is not altered by this migration; rebake to remove a previous source-match scale.
+- The explicit Auto-calibrate action temporarily enables source match for its measurement, then restores the original toggle.
+- The 18 delay-group Energy/Range/Source Softness properties now have live update callbacks. Each change immediately reapplies the temporary settings to imported QSS lights. OK writes the values to QSS config; Cancel restores the original saved profile to the lights.
+- The previous Cycles black World and diffuse-bounce alignment is retained.
+
+### CI and artifact
+
+- CI run `45091988584`: successful; Python compilation and **327 standalone tests** passed; installer packaging/upload completed.
+- Installer artifact `14781369284`: [Quake-Surface-Studio-v0.21.26-Blender-Install](https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45091988584/artifacts/14781369284).
+- SHA-256: `1caf73d76251c089793aa54eebe40dc0d8868ac6efb5b19d42148e91859ace89`.
+- No Blender 5.3 viewport render or Cycles bake was executed by CI. Runtime acceptance is pending.
+
+### Next user test
+
+Install 0.21.26. In LIGHTING, leave **Match Source Brightness** unchecked and use the same **Indirect Bounces** value for preview and bake. Wait for the Cycles viewport to reach its target samples; the 0.21.25 capture at sample 3/2048 is too early for a final comparison. Bake again because an existing atlas may already carry the previous source-match normalization. Compare at the same viewpoint.
+
+For live tuning, open Settings while in Cycles preview and change one delay group/one field. The viewport should update while the dialog remains open. OK saves; Cancel restores the previous multiplier values.
+
+If a converged preview and a fresh source-match-disabled bake remain substantially different, capture both and a fresh diagnostics report; do not infer a final fix from CI alone.
