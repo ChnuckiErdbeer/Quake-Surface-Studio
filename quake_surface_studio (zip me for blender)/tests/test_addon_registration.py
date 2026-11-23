@@ -92,4 +92,28 @@ class AddonRegistrationTests(unittest.TestCase):
         self.assertIn("live Cycles preview will differ", panel)
 
 
+    def test_settings_exposes_explicit_apply_to_lights_button(self):
+        addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
+        with open(addon_path, "r", encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("class QSS_OT_apply_native_delay_profiles(Operator):", source)
+        settings_start = source.index("class QSS_OT_settings(Operator):")
+        settings_end = source.index("\nclass QSS_OT_open_config_text", settings_start)
+        settings = source[settings_start:settings_end]
+        self.assertIn("QSS_OT_apply_native_delay_profiles.bl_idname", settings)
+        self.assertIn("apply_op.profiles_json = json.dumps(", settings)
+
+    def test_cycles_bake_uses_one_normalized_profile_snapshot(self):
+        addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
+        with open(addon_path, "r", encoding="utf-8") as handle:
+            source = handle.read()
+        start = source.index("class QSS_OT_bake_scene_lights(Operator):")
+        end = source.index("class QSS_OT_undo_last_bake(Operator):", start)
+        bake = source[start:end]
+        self.assertIn("bake_native_profiles = _qss_native_delay_profiles_normalized(", bake)
+        self.assertGreaterEqual(
+            bake.count("_apply_quake_light_energy_scale(scene, delay_profiles=bake_native_profiles)"),
+            2,
+        )
+        self.assertIn("qss_last_bake_attempt_native_delay_summary", bake)
 if __name__ == "__main__": unittest.main(verbosity=2)
