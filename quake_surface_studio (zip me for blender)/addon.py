@@ -29,7 +29,7 @@ from . import bsp, color, lighting as lighting_utils, light_node_utils, material
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils, image_undo
 
 
-ADDON_VERSION = (0, 21, 24)
+ADDON_VERSION = (0, 21, 25)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -1532,6 +1532,37 @@ def _qss_apply_source_lightmap_visibility(obj):
     return changed
 
 
+def _qss_apply_cycles_preview_settings(scene, obj):
+    """Make Cycles viewport preview use the same world and diffuse bounces as bake."""
+    cycles = getattr(scene, "cycles", None)
+    if cycles is None:
+        return
+    saved_diffuse_key = "qss_preview_original_cycles_diffuse_bounces"
+    saved_max_key = "qss_preview_original_cycles_max_bounces"
+    if saved_diffuse_key not in obj:
+        obj[saved_diffuse_key] = int(cycles.diffuse_bounces)
+    if saved_max_key not in obj:
+        obj[saved_max_key] = int(cycles.max_bounces)
+    bounces = max(0, min(12, int(getattr(scene, "qss_bake_bounces", 2))))
+    cycles.diffuse_bounces = bounces
+    cycles.max_bounces = max(int(cycles.max_bounces), bounces + 1)
+
+
+def _qss_restore_cycles_preview_settings(scene, obj):
+    """Restore the user's Cycles bounce settings when leaving QSS Cycles preview."""
+    cycles = getattr(scene, "cycles", None)
+    if cycles is None:
+        return
+    saved_diffuse_key = "qss_preview_original_cycles_diffuse_bounces"
+    saved_max_key = "qss_preview_original_cycles_max_bounces"
+    if saved_diffuse_key in obj:
+        cycles.diffuse_bounces = max(0, int(obj[saved_diffuse_key]))
+        del obj[saved_diffuse_key]
+    if saved_max_key in obj:
+        cycles.max_bounces = max(1, int(obj[saved_max_key]))
+        del obj[saved_max_key]
+
+
 def _set_lighting_preview(context, obj, mode):
     """Set a map-local lighting preset while keeping source and painted images separate."""
     if mode not in {"source", "realtime", "cycles", "baked"}:
@@ -1540,7 +1571,12 @@ def _set_lighting_preview(context, obj, mode):
         raise bsp.BSPError("This map has no generated lightmap yet. Bake it first.")
 
     if mode in {"realtime", "cycles"}:
-        _restore_preview_world(context.scene, obj)
+        if mode == "cycles":
+            _set_black_preview_world(context.scene, obj)
+            _qss_apply_cycles_preview_settings(context.scene, obj)
+        else:
+            _restore_preview_world(context.scene, obj)
+            _qss_restore_cycles_preview_settings(context.scene, obj)
         _store_and_enter_eevee_live_engine(context.scene, obj)
         if mode == "cycles":
             context.scene.render.engine = "CYCLES"
@@ -1567,6 +1603,7 @@ def _set_lighting_preview(context, obj, mode):
         # QSS does not change visibility on user-authored scene lights.
         # Avoid restoring state that this preview path never modified.
         _restore_preview_world(context.scene, obj)
+        _qss_restore_cycles_preview_settings(context.scene, obj)
         _restore_preview_engine(context.scene, obj)
         _apply_quake_light_energy_scale(context.scene)
         image = _qss_lightmap_preview_image(obj, mode, for_paint=False)
@@ -3321,17 +3358,6 @@ def _entity_spot_direction(entity, target_map):
     return Vector((0.0, 0.0, -1.0))
 
 
-def _qss_make_cycles_math_node(nodes, name, operation, location):
-    """Create a named math node for the QSS Cycles light shader."""
-    node = nodes.new("ShaderNodeMath")
-    node.name = name
-    node.label = name.removeprefix("QSS_")
-    node.operation = operation
-    node.location = location
-    node["qss_cycles_falloff_node"] = True
-    return node
-
-
 def _qss_cycles_falloff_tree_is_owned(light_data):
     """True only when the complete existing light node tree is tagged as QSS-owned.
 
@@ -3396,264 +3422,16 @@ def _qss_cycles_light_node_summary(light_data, limit=8):
         entries.append(f"...+{len(nodes) - len(entries)}")
     return f"{kind}[{','.join(entries)}]"
 
-def _qss_build_cycles_delay_falloff_nodes(light_data, delay, allow_initial_import_tree=False):
-    """Build a Cycles multiplier that restores ericw falloff over Blender's inverse-square lamps.
-
-    Blender 5.3 creates a simple Emission-to-Light-Output tree by default and
-    reports Light.use_nodes=True even for that untouched default. That tree is
-    safe for QSS to replace; a genuinely edited user tree is not. The distance
-    probe uses the Light Falloff node's Linear output (proportional to 1/d),
-    then takes its reciprocal. The input floor and distance caps keep the math
-    finite at the source and far outside the Quake light radius.
-    """
-    existing_tree = getattr(light_data, "node_tree", None)
-    if (existing_tree is not None and len(existing_tree.nodes) > 0
-            and not _qss_cycles_falloff_tree_is_owned(light_data)
-            and not light_node_utils.is_safe_to_replace_light_node_tree(
-                light_data, qss_created_by_current_import=allow_initial_import_tree
-            )):
-        raise RuntimeError("Existing user-authored light nodes were preserved; QSS Cycles falloff was not installed")
-
-    if hasattr(light_data, "use_nodes") and not bool(light_data.use_nodes):
-        light_data.use_nodes = True
-    node_tree = getattr(light_data, "node_tree", None)
-    if node_tree is None:
-        raise RuntimeError("Blender did not create a node tree for this light")
-
-    nodes = node_tree.nodes
-    links = node_tree.links
-    nodes.clear()
-
-    falloff = nodes.new("ShaderNodeLightFalloff")
-    falloff.name = "QSS_Ericw_LightFalloff"
-    falloff.label = "ericw distance probe"
-    falloff["qss_cycles_falloff_node"] = True
-    falloff.location = (-900, 120)
-    falloff.inputs["Strength"].default_value = 1.0
-    falloff.inputs["Smooth"].default_value = 0.0
-
-    safe_linear = _qss_make_cycles_math_node(
-        nodes, "QSS_SafeLinear", "MAXIMUM", (-680, -40)
-    )
-    safe_linear.inputs[1].default_value = 1e-20
-
-    distance_m = _qss_make_cycles_math_node(
-        nodes, "QSS_DistanceMeters", "DIVIDE", (-460, 120)
-    )
-    distance_m.inputs[0].default_value = 1.0
-    distance_quake = _qss_make_cycles_math_node(
-        nodes, "QSS_DistanceQuakeUnits", "DIVIDE", (-240, 120)
-    )
-    capped_distance_quake = _qss_make_cycles_math_node(
-        nodes, "QSS_CappedDistanceQuakeUnits", "MINIMUM", (-20, 120)
-    )
-    capped_distance_quake.inputs[1].default_value = 1e9
-
-    links.new(falloff.outputs["Linear"], safe_linear.inputs[0])
-    links.new(safe_linear.outputs[0], distance_m.inputs[1])
-    links.new(distance_m.outputs[0], distance_quake.inputs[0])
-    links.new(distance_quake.outputs[0], capped_distance_quake.inputs[0])
-
-    if int(delay) == 0:
-        normalized = _qss_make_cycles_math_node(
-            nodes, "QSS_NormalizedRadius", "DIVIDE", (0, 220)
-        )
-        nonnegative = _qss_make_cycles_math_node(
-            nodes, "QSS_NonnegativeRadius", "MAXIMUM", (220, 220)
-        )
-        nonnegative.inputs[1].default_value = 0.0
-        clamped = _qss_make_cycles_math_node(
-            nodes, "QSS_ClampedRadius", "MINIMUM", (440, 220)
-        )
-        clamped.inputs[1].default_value = 1.0
-        one_minus = _qss_make_cycles_math_node(
-            nodes, "QSS_OneMinusRadius", "SUBTRACT", (660, 220)
-        )
-        one_minus.inputs[0].default_value = 1.0
-        normalized_squared = _qss_make_cycles_math_node(
-            nodes, "QSS_NormalizedRadiusSquared", "MULTIPLY", (220, -40)
-        )
-        times_eight = _qss_make_cycles_math_node(
-            nodes, "QSS_DelayZeroScale", "MULTIPLY", (440, -40)
-        )
-        times_eight.inputs[1].default_value = 8.0
-        correction = _qss_make_cycles_math_node(
-            nodes, "QSS_EricwCorrection", "MULTIPLY", (880, 180)
-        )
-
-        links.new(capped_distance_quake.outputs[0], normalized.inputs[0])
-        links.new(normalized.outputs[0], nonnegative.inputs[0])
-        links.new(nonnegative.outputs[0], clamped.inputs[0])
-        links.new(clamped.outputs[0], one_minus.inputs[1])
-        links.new(clamped.outputs[0], normalized_squared.inputs[0])
-        links.new(clamped.outputs[0], normalized_squared.inputs[1])
-        links.new(normalized_squared.outputs[0], times_eight.inputs[0])
-        links.new(times_eight.outputs[0], correction.inputs[0])
-        links.new(one_minus.outputs[0], correction.inputs[1])
-    elif int(delay) == 5:
-        scaled_distance = _qss_make_cycles_math_node(
-            nodes, "QSS_WaitScaledDistance", "MULTIPLY", (0, 180)
-        )
-        capped_scaled_distance = _qss_make_cycles_math_node(
-            nodes, "QSS_CappedWaitScaledDistance", "MINIMUM", (220, 180)
-        )
-        capped_scaled_distance.inputs[1].default_value = 1e12
-        shifted_distance = _qss_make_cycles_math_node(
-            nodes, "QSS_ShiftedDistance", "ADD", (440, 180)
-        )
-        shifted_distance.inputs[1].default_value = lighting_utils.ERICW_LIGHT_SCALE
-        shift_ratio = _qss_make_cycles_math_node(
-            nodes, "QSS_ShiftRatio", "DIVIDE", (660, 180)
-        )
-        shift_ratio_squared = _qss_make_cycles_math_node(
-            nodes, "QSS_ShiftRatioSquared", "MULTIPLY", (880, 180)
-        )
-        times_four = _qss_make_cycles_math_node(
-            nodes, "QSS_DelayFiveScale", "MULTIPLY", (1100, 180)
-        )
-        times_four.inputs[1].default_value = 4.0
-
-        links.new(capped_distance_quake.outputs[0], scaled_distance.inputs[0])
-        links.new(scaled_distance.outputs[0], capped_scaled_distance.inputs[0])
-        links.new(capped_scaled_distance.outputs[0], shifted_distance.inputs[0])
-        links.new(capped_scaled_distance.outputs[0], shift_ratio.inputs[0])
-        links.new(shifted_distance.outputs[0], shift_ratio.inputs[1])
-        links.new(shift_ratio.outputs[0], shift_ratio_squared.inputs[0])
-        links.new(shift_ratio.outputs[0], shift_ratio_squared.inputs[1])
-        links.new(shift_ratio_squared.outputs[0], times_four.inputs[0])
-        correction = times_four
-    else:
-        raise ValueError(f"Unsupported QSS Cycles falloff delay: {delay}")
-
-    emission = nodes.new("ShaderNodeEmission")
-    emission.name = "QSS_Ericw_Emission"
-    emission.label = "inverse-square × ericw correction"
-    emission["qss_cycles_falloff_node"] = True
-    emission.location = (1120, 100)
-    # The Light datablock retains the Quake _color and calibrated energy.
-    emission.inputs["Color"].default_value = (1.0, 1.0, 1.0, 1.0)
-    links.new(correction.outputs[0], emission.inputs["Strength"])
-
-    output = nodes.new("ShaderNodeOutputLight")
-    output.name = "QSS_Ericw_LightOutput"
-    output.label = "Cycles light output"
-    output["qss_cycles_falloff_node"] = True
-    output.location = (1360, 100)
-    if hasattr(output, "target"):
-        output.target = "CYCLES"
-    links.new(emission.outputs[0], output.inputs["Surface"])
-
-    light_data["qss_cycles_delay_falloff_version"] = 1
-    light_data["qss_cycles_delay_falloff_profile"] = int(delay)
-    return node_tree
-
-
-def _qss_update_cycles_delay_falloff(light_obj, delay, raw_value, allow_initial_import_tree=False):
-    """Enable ericw-style Cycles falloff for supported delay-0 and delay-5 lights."""
-    light_data = light_obj.data
-
-    if not lighting_utils.cycles_uses_ericw_falloff_correction(delay):
-        # This diagnostic build uses Blender's native light falloff. On
-        # Blender 5.1+ use_nodes=False is ignored, so remove only a fully
-        # QSS-owned graph. Never alter a user-authored light node tree.
-        cleared = _qss_clear_owned_cycles_light_nodes(light_data)
-        light_obj["qss_cycles_falloff_nodes_cleared"] = bool(cleared)
-        light_obj["qss_cycles_falloff_active"] = False
-        light_obj["qss_cycles_falloff_profile"] = (
-            "native_fallback_delay0" if int(delay) == 0 else "native_fallback"
-        )
-        light_obj["qss_cycles_falloff_error"] = ""
-        return False
-
-    if not hasattr(light_data, "use_nodes"):
-        light_obj["qss_cycles_falloff_active"] = False
-        light_obj["qss_cycles_falloff_error"] = "Light shader nodes are unavailable in this Blender build"
-        return False
-
-    existing_tree = getattr(light_data, "node_tree", None)
-    if (existing_tree is not None and len(existing_tree.nodes) > 0
-            and not _qss_cycles_falloff_tree_is_owned(light_data)
-            and not light_node_utils.is_safe_to_replace_light_node_tree(
-                light_data, qss_created_by_current_import=allow_initial_import_tree
-            )):
-        light_obj["qss_cycles_falloff_active"] = False
-        light_obj["qss_cycles_falloff_profile"] = "user_nodes_preserved_native_fallback"
-        light_obj["qss_cycles_falloff_error"] = (
-            "User-custom light nodes were left untouched; QSS Quake falloff was not applied"
-        )
-        return False
-
-    if not bool(light_data.use_nodes):
-        light_data.use_nodes = True
-
-    world_dist = max(1e-6, float(light_obj.get("qss_quake_world_dist", 1.0)))
-    wait = max(1e-6, float(light_obj.get("qss_quake_wait", 1.0)))
-    unit_scale = max(1e-9, abs(float(light_obj.get(
-        "qss_quake_unit_scale", DEFAULT_QUAKE_UNIT_SCALE
-    ))))
-    falloff = max(0.0, float(light_obj.get("qss_quake_falloff", 0.0)))
-
-    try:
-        node_tree = getattr(light_data, "node_tree", None)
-        required = {
-            "QSS_Ericw_LightFalloff", "QSS_SafeLinear",
-            "QSS_DistanceMeters", "QSS_DistanceQuakeUnits",
-            "QSS_CappedDistanceQuakeUnits", "QSS_Ericw_Emission",
-            "QSS_Ericw_LightOutput",
-        }
-        if int(light_data.get("qss_cycles_delay_falloff_version", 0)) != 1 or int(
-            light_data.get("qss_cycles_delay_falloff_profile", -1)
-        ) != int(delay) or node_tree is None or not required.issubset(
-            {node.name for node in node_tree.nodes}
-        ):
-            node_tree = _qss_build_cycles_delay_falloff_nodes(
-                light_data, int(delay), allow_initial_import_tree=allow_initial_import_tree
-            )
-        nodes = node_tree.nodes
-        by_name = {node.name: node for node in nodes}
-        by_name["QSS_Ericw_LightFalloff"].inputs["Strength"].default_value = 1.0
-        by_name["QSS_Ericw_LightFalloff"].inputs["Smooth"].default_value = 0.0
-        by_name["QSS_DistanceQuakeUnits"].inputs[1].default_value = unit_scale
-
-        if int(delay) == 0:
-            radius = (
-                falloff * world_dist
-                if falloff > 0.0
-                else abs(float(raw_value)) / (wait * world_dist)
-            )
-            by_name["QSS_NormalizedRadius"].inputs[1].default_value = max(1e-9, radius)
-        else:
-            by_name["QSS_WaitScaledDistance"].inputs[1].default_value = wait * world_dist
-
-        emission = by_name["QSS_Ericw_Emission"]
-        emission.inputs["Color"].default_value = (1.0, 1.0, 1.0, 1.0)
-        light_obj["qss_cycles_falloff_active"] = True
-        light_obj["qss_cycles_falloff_profile"] = (
-            "ericw_delay0_linear" if int(delay) == 0
-            else "ericw_delay5_soft_inverse_square"
-        )
-        light_obj["qss_cycles_falloff_error"] = ""
-        try:
-            light_data.update_tag()
-        except Exception:
-            pass
-        return True
-    except Exception as exc:
-        # Keep the existing native lamp usable if this Blender build cannot
-        # construct the Cycles-specific node graph.
-        try:
-            _qss_clear_owned_cycles_light_nodes(light_data)
-        except Exception:
-            pass
-        light_obj["qss_cycles_falloff_active"] = False
-        light_obj["qss_cycles_falloff_error"] = str(exc)
-        print(f"SLOPGATE: Cycles falloff setup failed for {light_obj.name}: {exc}")
-        return False
-
-
 def _apply_quake_light_energy_scale(scene):
-    """Apply the user live-light slider and any explicit per-light calibration."""
+    """Apply native Blender delay presets plus the shared scene energy scale.
+
+    Any legacy QSS-owned ericw Cycles node graph is removed. User-authored
+    light node trees are preserved. The same native lamp properties are used
+    by Cycles preview, Eevee preview and the Cycles bake.
+    """
     scale = max(0.0, float(getattr(scene, 'qss_light_energy_scale', 1.0)))
+    settings = _qss_config_settings()
+    delay_profiles = settings.get("native_delay_profiles", {})
     updated = 0
     for light_obj in scene.objects:
         role = light_obj.get('qss_light_role') if light_obj.type == 'LIGHT' else None
@@ -3663,13 +3441,14 @@ def _apply_quake_light_energy_scale(scene):
         if raw_value is None:
             continue
         range_scale = float(light_obj.get('qss_quake_world_range', 1.0))
-        # Only the explicit Auto-calibrate action may change this per-light
-        # multiplier. Cycles source-match atlas normalization never writes it.
         manual_calibration = max(
             0.0, float(light_obj.get('qss_manual_energy_calibration', 1.0))
         )
         if role == 'quake_entity_light':
             delay = int(light_obj.get('qss_quake_light_delay', 0))
+            multipliers = lighting_utils.native_delay_profile_multipliers(
+                delay_profiles, delay
+            )
             preview = lighting_utils.blender_live_light_preview_parameters(
                 raw_value,
                 light_obj.get('qss_quake_raw_light_value', raw_value),
@@ -3679,34 +3458,38 @@ def _apply_quake_light_energy_scale(scene):
                 falloff=light_obj.get('qss_quake_falloff', 0.0),
                 unit_scale=light_obj.get('qss_quake_unit_scale', DEFAULT_QUAKE_UNIT_SCALE),
             )
+            native_energy = preview['energy'] * multipliers['energy']
             light_obj.data.energy = lighting_utils.scaled_quake_light_energy(
-                preview['energy'], scale * manual_calibration
+                native_energy, scale * manual_calibration
             )
-            cycles_falloff_active = _qss_update_cycles_delay_falloff(
-                light_obj, delay, light_obj.get('qss_quake_raw_light_value', raw_value)
-            )
-            cycles_exact_falloff = (
-                str(getattr(scene.render, 'engine', '')) == 'CYCLES'
-                and cycles_falloff_active
-                and delay in {0, 5}
-            )
+
+            # Migrate old QSS Cycles correction graphs safely. Never remove a
+            # mixed/user-authored tree; only a graph tagged wholly as QSS-owned
+            # is eligible for cleanup.
+            cleared = _qss_clear_owned_cycles_light_nodes(light_obj.data)
+            light_obj["qss_cycles_falloff_nodes_cleared"] = bool(cleared)
+            light_obj["qss_cycles_falloff_active"] = False
+            light_obj["qss_cycles_falloff_profile"] = f"native_blender_delay_{delay}"
+            light_obj["qss_cycles_falloff_error"] = ""
+            node_summary = _qss_cycles_light_node_summary(light_obj.data)
+            if node_summary.startswith("user-custom"):
+                light_obj["qss_cycles_falloff_profile"] = "user_custom_nodes_preserved"
+
             if hasattr(light_obj.data, 'use_custom_distance'):
-                # Delay 5 has an infinite tail. Do not truncate it in Cycles;
-                # Eevee retains its finite native-lamp range approximation.
-                light_obj.data.use_custom_distance = not (
-                    cycles_exact_falloff and delay == 5
-                )
+                light_obj.data.use_custom_distance = True
             if hasattr(light_obj.data, 'cutoff_distance'):
-                light_obj.data.cutoff_distance = preview['cutoff_distance']
+                light_obj.data.cutoff_distance = max(
+                    0.0, preview['cutoff_distance'] * multipliers['range']
+                )
             if hasattr(light_obj.data, 'shadow_soft_size'):
-                # A finite emitter radius changes the inverse-square base curve.
-                # Keep exact Cycles sources point-sized; Eevee retains the
-                # established soft-radius native-lamp approximation.
-                light_obj.data.shadow_soft_size = (
-                    0.0 if cycles_exact_falloff else preview['shadow_soft_size']
+                light_obj.data.shadow_soft_size = max(
+                    0.0, preview['shadow_soft_size'] * multipliers['softness']
                 )
             light_obj['qss_quake_live_preview_profile'] = preview['profile']
             light_obj['qss_quake_live_preview_reference_distance'] = preview['reference_distance']
+            light_obj['qss_native_delay_energy_multiplier'] = multipliers['energy']
+            light_obj['qss_native_delay_range_multiplier'] = multipliers['range']
+            light_obj['qss_native_delay_softness_multiplier'] = multipliers['softness']
         else:
             light_obj.data.energy = lighting_utils.scaled_quake_light_energy(
                 raw_value, scale * manual_calibration
@@ -3881,18 +3664,10 @@ def _import_bsp_entities(context, obj, parsed, unit_scale, flip_z=False):
         light_obj['qss_quake_world_dist'] = float(world_dist)
         light_obj['qss_quake_world_range'] = float(world_range)
         light_obj['qss_quake_delay_note'] = (
-            'Cycles applies Quake delay-0 and delay-5 falloff corrections when the '
-            'QSS light graph is active; other delays use the native fallback. '
-            'Eevee realtime preview always uses Blender-native falloff.'
+            'Delay selects a native Blender starting preset only. Tune energy, '
+            'range and source softness per delay group in QSS Settings; this is '
+            'an alternative lighting model, not an ericw falloff emulation.'
         )
-        # This light datablock was just created by this import operation. Allow
-        # QSS to replace Blender's starter Emission -> Light Output nodes once.
-        # Subsequent updates use the normal ownership/default-tree checks, so
-        # user-edited light graphs are still preserved.
-        if lighting_utils.cycles_uses_ericw_falloff_correction(delay):
-            _qss_update_cycles_delay_falloff(
-                light_obj, delay, intensity, allow_initial_import_tree=True
-            )
         light_count += 1
 
     # Worldspawn sunlight is a directional source in ericw-tools.
@@ -11432,6 +11207,24 @@ class QSS_OT_settings(Operator):
                ("8", "8×", "Eight times the pixels per axis")),
         default="1",
     )
+    delay0_energy: FloatProperty(name="Delay 0 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay0_range: FloatProperty(name="Delay 0 range multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay0_softness: FloatProperty(name="Delay 0 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay1_energy: FloatProperty(name="Delay 1 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay1_range: FloatProperty(name="Delay 1 range multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay1_softness: FloatProperty(name="Delay 1 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay2_energy: FloatProperty(name="Delay 2 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay2_range: FloatProperty(name="Delay 2 range multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay2_softness: FloatProperty(name="Delay 2 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay3_energy: FloatProperty(name="Delay 3 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay3_range: FloatProperty(name="Delay 3 range multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay3_softness: FloatProperty(name="Delay 3 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay4_energy: FloatProperty(name="Delay 4 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay4_range: FloatProperty(name="Delay 4 range multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay4_softness: FloatProperty(name="Delay 4 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay5_energy: FloatProperty(name="Delay 5 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay5_range: FloatProperty(name="Delay 5 range multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay5_softness: FloatProperty(name="Delay 5 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3)
 
     def invoke(self, context, event):
         settings = _qss_config_settings()
@@ -11444,6 +11237,21 @@ class QSS_OT_settings(Operator):
         self.lighting_mode_storage = str(settings.get("lighting_mode_storage", "PER_MAP")).upper()
         self.import_lightmap_resolution = str(settings.get("import_lightmap_resolution", "1"))
         self.viewport_fov_degrees = float(settings.get("viewport_fov_degrees", 90.0))
+        native_profiles = settings.get("native_delay_profiles", {})
+        if not isinstance(native_profiles, dict):
+            native_profiles = {}
+        for delay in range(6):
+            profile = native_profiles.get(str(delay), {})
+            if not isinstance(profile, dict):
+                profile = {}
+            for field in ("energy", "range", "softness"):
+                try:
+                    value = float(profile.get(field, 1.0))
+                except (TypeError, ValueError, OverflowError):
+                    value = 1.0
+                if not math.isfinite(value):
+                    value = 1.0
+                setattr(self, f"delay{delay}_{field}", max(0.0, min(100.0, value)))
         if self.import_behavior not in {"ASK", "ADD", "REPLACE"}:
             self.import_behavior = "ASK"
         if self.export_mode not in {"AUTO", "CLASSIC", "ENHANCED", "BOTH"}:
@@ -11472,7 +11280,22 @@ class QSS_OT_settings(Operator):
         layout.label(text="Lighting workflow", icon="LIGHT")
         layout.prop(self, "lighting_mode_storage")
         layout.prop(self, "rebake_behavior")
-        layout.label(text="Cycles is the supported bake backend; Eevee uses this same low-priority test path.", icon="INFO")
+        layout.label(text="Cycles preview shares the bake's black world and diffuse-bounce count.", icon="INFO")
+        layout.label(text="Native Blender presets are starting points; they do not emulate ericw attenuation.", icon="INFO")
+        profile_box = layout.box()
+        profile_box.label(text="Native light presets by legacy delay", icon="LIGHT")
+        profile_box.label(text="Multipliers apply to imported lights in Cycles preview, Eevee preview and Cycles bake.")
+        header = profile_box.row(align=True)
+        header.label(text="Delay")
+        header.label(text="Energy ×")
+        header.label(text="Range ×")
+        header.label(text="Softness ×")
+        for delay in range(6):
+            row = profile_box.row(align=True)
+            row.label(text=f"Delay {delay}")
+            row.prop(self, f"delay{delay}_energy", text="")
+            row.prop(self, f"delay{delay}_range", text="")
+            row.prop(self, f"delay{delay}_softness", text="")
         layout.label(text="Only QSS map collections are replaced. Other scene content is preserved.", icon="INFO")
 
     def execute(self, context):
@@ -11490,6 +11313,14 @@ class QSS_OT_settings(Operator):
             "viewport_fov_degrees": float(self.viewport_fov_degrees),
             "rebake_behavior": self.rebake_behavior,
             "lighting_mode_storage": self.lighting_mode_storage,
+            "native_delay_profiles": {
+                str(delay): {
+                    "energy": float(getattr(self, f"delay{delay}_energy")),
+                    "range": float(getattr(self, f"delay{delay}_range")),
+                    "softness": float(getattr(self, f"delay{delay}_softness")),
+                }
+                for delay in range(6)
+            },
         })
         if self.lighting_mode_storage == "GLOBAL" and previous_lighting_storage != "GLOBAL":
             active_obj = context.object
@@ -11502,6 +11333,7 @@ class QSS_OT_settings(Operator):
             settings["active_game_dir"] = _qss_abspath(context.scene.qss_game_dir or "")
             settings["active_game_id"] = str(context.scene.qss_game_folder or "")
             quake_paths.save_config(settings, _qss_config_path())
+            _apply_quake_light_energy_scale(context.scene)
             _qss_apply_viewport_fov(context, self.viewport_fov_degrees)
             context.scene.qss_import_lightmap_resolution = self.import_lightmap_resolution
             self.report({"INFO"}, "Quake Surface Studio settings saved.")
@@ -11551,7 +11383,7 @@ class QSS_OT_set_lighting_mode(Operator):
         name="Lighting mode",
         items=(("source", "Original", "Display imported BSP lightmaps"),
                ("realtime", "Eevee", "Fast live preview using Blender-native falloff (approximate)"),
-               ("cycles", "Cycles", "Preview scene lights with Quake delay-0/5 falloff corrections (slower)"),
+               ("cycles", "Cycles", "Native Blender light preview with the same world and diffuse-bounce settings as the Cycles bake (slower)"),
                ("baked", "Baked", "Display the generated lightmap")),
     )
 
@@ -12973,6 +12805,14 @@ def _remove_qss_keymaps():
                         pass
 
 
+def _on_bake_bounces_changed(self, context):
+    if not context or not context.scene:
+        return
+    obj = getattr(context, "object", None)
+    if _qss_is_map_object(obj) and obj.get("qss_preview_mode") == "cycles":
+        _qss_apply_cycles_preview_settings(context.scene, obj)
+
+
 def _remove_scene_properties():
     """Remove QSS Scene properties, including properties from an older module."""
     for name in (
@@ -13220,8 +13060,8 @@ def register():
             default=1.0, min=0.1, max=64.0, precision=3
         )
         bpy.types.Scene.qss_bake_bounces = IntProperty(
-            name='Cycles diffuse bounces', description='Indirect-light bounces for the artist bake; 0 is direct only',
-            default=2, min=0, max=12
+            name='Cycles diffuse bounces', description='Indirect-light bounces shared by the Cycles preview and artist bake; 0 is direct only',
+            default=2, min=0, max=12, update=_on_bake_bounces_changed
         )
         bpy.types.Scene.qss_bake_match_source = BoolProperty(
             name='Match source lightmap brightness',
