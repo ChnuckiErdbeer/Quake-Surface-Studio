@@ -53,4 +53,43 @@ class AddonRegistrationTests(unittest.TestCase):
                 self.assertIn(panel_ids[parent], registered, f"Parent panel {panel_ids[parent]} is not registered")
 
 
+    def test_delay_profiles_update_live_and_cancel_restores_original_values(self):
+        addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
+        with open(addon_path, "r", encoding="utf-8") as handle:
+            source = handle.read()
+        settings_start = source.index("class QSS_OT_settings(Operator):")
+        settings_end = source.index("\nclass QSS_OT_open_config_text", settings_start)
+        settings = source[settings_start:settings_end]
+        self.assertEqual(settings.count("update=_on_native_delay_profile_changed"), 18)
+        self.assertIn("def cancel(self, context):", settings)
+        self.assertIn("original_profiles", source)
+        self.assertIn("delay edits update the viewport live", settings.lower())
+
+    def test_cycles_preview_uses_same_active_map_light_set_as_bake(self):
+        addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
+        with open(addon_path, "r", encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("def _qss_set_preview_light_visibility(scene, obj, active_map_objects):", source)
+        self.assertIn("def _qss_restore_preview_light_visibility(obj):", source)
+        preview_start = source.index("def _set_lighting_preview(context, obj, mode):")
+        preview_end = source.index("\ndef ", preview_start + 5)
+        preview = source[preview_start:preview_end]
+        self.assertIn("_qss_set_preview_light_visibility(", preview)
+        self.assertIn("_qss_restore_preview_light_visibility(obj)", preview)
+        self.assertIn("light_obj.hide_render = not is_active_qss_light", source)
+        self.assertIn("light_obj.hide_set(not is_active_qss_light)", source)
+
+    def test_bake_source_match_is_opt_in_and_visible(self):
+        addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
+        with open(addon_path, "r", encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("name='Match source lightmap brightness'", source)
+        self.assertIn("default=False", source[source.index("name='Match source lightmap brightness'"):])
+        panel_start = source.index("class QSS_PT_lighting(Panel)")
+        panel_end = source.index("\nclass QSS_PT_stats", panel_start)
+        panel = source[panel_start:panel_end]
+        self.assertIn('"qss_bake_match_source"', panel)
+        self.assertIn("live Cycles preview will differ", panel)
+
+
 if __name__ == "__main__": unittest.main(verbosity=2)
