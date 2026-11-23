@@ -1,4 +1,13 @@
-# SLOPGATE 0.21.24
+# SLOPGATE 0.21.25
+
+## 0.21.25 — Native Cycles lighting alternative and delay-group tuning
+
+- Cycles no longer applies custom graphs intended to reproduce ericw delay-0/5 falloff. Imported Quake delays select native Blender POINT/SPOT starting presets only; they are not an ericw-compatible renderer.
+- QSS Settings now expose independent Energy, Range and Source Softness multipliers for delay groups 0–5. They apply to imported lights and can be tuned by hand; defaults preserve the existing starting presets.
+- Cycles viewport preview now uses the same black world and diffuse-bounce count as the Cycles bake. The bake still performs its own source-mean and output-scale post-processing, so the preview and final atlas are not guaranteed pixel-identical.
+- Existing QSS-owned legacy Cycles falloff graphs are cleared on reapplication; user-authored light node trees are preserved.
+- Quake Direct's CPU solver remains unchanged and retains its separate ericw attenuation implementation.
+- Python compilation and standalone CI tests are required for this candidate; Blender 5.3 preview/bake and Ironwail tests remain user runtime checks.
 
 ## 0.21.24 — Repair Enhanced BSPX export and make companion MAP sync optional
 
