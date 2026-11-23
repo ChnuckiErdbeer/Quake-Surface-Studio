@@ -22611,3 +22611,48 @@ These controls have different visual roles; Range and Shadow Radius should not b
 5. Test Range only with a value small enough to pull the cutoff into the area being inspected; test Shadow Radius at cast-shadow edges, not in an unoccluded light pool.
 
 The user's explicit acceptance that Cycles preview and bake are close and higher brightness than ericw is acceptable is the current product target. Do not reopen ericw parity work.
+
+## 2026-11-23 — 0.21.28 Cycles renderer-specific controls and persistent bake profiles
+
+### You
+
+“range and shadow radius still dont do anything. In cycles preview that is. In Eevee they work great. The bake doesn not seem to take any values from the settings and is very bright.”
+
+### Source investigation
+
+Reviewed the 0.21.27/0.21.28 production light application and actual Blender 5.3 source:
+- Blender 5.3.0 Cycles `BlenderSync::sync_light()` reads `b_light.energy`, point/spot `b_light.radius`, spot angle and blend, colour, exposure and normalize.
+- That function does **not** read `cutoff_distance` / `use_custom_distance` or `diffuse_factor`.
+- Python API exposes point/spot `shadow_soft_size`, backed by the Cycles radius field. This controls source-size/penumbra, not hard radial falloff.
+- Range now reads as **Eevee Cutoff** and is intentionally not represented as a Cycles feature.
+- The candidate briefly included `diffuse_factor` as a Cycles multiplier, but this was removed before packaging after source review showed Cycles sync ignores it. It is not in the delivered source or UI.
+
+Sources: Blender 5.3 Cycles light sync https://github.com/blender/blender/blob/v5.3.0/intern/cycles/blender/light.cpp ; Light API https://docs.blender.org/api/5.3/bpy.types.Light.html ; PointLight API https://docs.blender.org/api/5.3/bpy.types.PointLight.html ; light manual https://docs.blender.org/manual/en/5.3/render/lights/light_object.html .
+
+### 0.21.28 implementation
+
+- QSS Settings calls the cutoff control **Eevee Cutoff** and explicitly warns it is not used by Cycles.
+- **Source Radius** remains and maps to the light's radius property Cycles consumes.
+- **Energy** remains the primary brightness control; Cycles reads the Light datablock Energy.
+- **Apply & Save** persists the delay-group profiles to QSS config immediately. This fixes the 0.21.27 ambiguity: Apply to Lights only modified the current lamp objects temporarily, while the next bake reads saved config; 0.21.28 Apply & Save commits the profile before returning.
+- Cycles bake captures one normalized profile snapshot at entry and passes that exact snapshot through initial apply and bake reapplications.
+- Diagnostics record the saved profile JSON and per-delay point/spot counts, energy min/max, cutoff min/max, radius min/max and normalize/soft-falloff settings.
+- Unsupported `diffuse_factor` control and tests were removed.
+
+### CI / installer
+
+- Production branch: `fix/0.21.17-world-aligned-lightmap-charts`
+- HEAD: `f59731f239eb3221769a1f2c42a04d7e7550b867`, add-on 0.21.28.
+- CI run `45107473694`: successful; Python compilation and **330 tests** passed; package assembly/upload passed.
+- Artifact `14788366012`: https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45107473694/artifacts/14788366012
+- SHA-256: `40855a7797d9209b35c9feaa626b41698f72e671d86dc279bc4ff0bb6614679f`.
+- No Blender 5.3 runtime preview or bake was executed by CI.
+
+### Next user validation
+
+1. Install 0.21.28.
+2. Set delay 0 Energy to 0.25 and click **Apply & Save**; no additional Settings OK action is needed to persist the profile.
+3. Bake the map and save lighting diagnostics.
+4. Verify `Last bake native delay profiles` shows delay-0 energy 0.25 and `Last bake native delay lamp values` shows the corresponding reduced energy range.
+5. If profile/energy values are correct but the bake still remains bright, investigate the actual Cycles light node output and scene contribution; this rules out config propagation.
+6. To test Source Radius, use a strong temporary multiplier (e.g. ×8) and compare a cast-shadow edge. Check that the diagnostic radius grows by ×8. Eevee Cutoff must only be tested in Eevee.
