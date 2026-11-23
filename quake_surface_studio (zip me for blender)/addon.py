@@ -9146,9 +9146,7 @@ class QSS_OT_bake_scene_lights(Operator):
         obj["qss_last_bake_attempt_native_delay_profiles"] = json.dumps(
             bake_native_profiles, sort_keys=True, separators=(",", ":")
         )
-        obj["qss_last_bake_attempt_native_delay_summary"] = (
-            _qss_native_delay_profile_summary(imported_lights, bake_native_profiles)
-        )
+        obj["qss_last_bake_attempt_native_delay_summary"] = "pending light application"
         current_energy_scale = max(0.0, float(scene.qss_light_energy_scale))
         if current_energy_scale <= 0.0:
             self.report({'ERROR'}, "Live light scale is 0, so a light bake must be black. Set Live light scale to 1 or higher, click Apply Light Energy Scale, verify Live Lights, then bake.")
@@ -9217,6 +9215,9 @@ class QSS_OT_bake_scene_lights(Operator):
             for light_obj in imported_lights
         }
         updated_lights = _apply_quake_light_energy_scale(scene, delay_profiles=bake_native_profiles)
+        obj["qss_last_bake_attempt_native_delay_summary"] = (
+            _qss_native_delay_profile_summary(imported_lights, bake_native_profiles)
+        )
         max_energy = max((float(o.data.energy) for o in imported_lights), default=0.0)
         try:
             progress_wm.progress_begin(0, 5)
@@ -11424,24 +11425,24 @@ class QSS_OT_settings(Operator):
                ("8", "8×", "Eight times the pixels per axis")),
         default="1",
     )
-    delay0_energy: FloatProperty(name="Delay 0 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay0_range: FloatProperty(name="Delay 0 range multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay0_softness: FloatProperty(name="Delay 0 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay1_energy: FloatProperty(name="Delay 1 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay1_range: FloatProperty(name="Delay 1 range multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay1_softness: FloatProperty(name="Delay 1 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay2_energy: FloatProperty(name="Delay 2 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay2_range: FloatProperty(name="Delay 2 range multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay2_softness: FloatProperty(name="Delay 2 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay3_energy: FloatProperty(name="Delay 3 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay3_range: FloatProperty(name="Delay 3 range multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay3_softness: FloatProperty(name="Delay 3 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay4_energy: FloatProperty(name="Delay 4 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay4_range: FloatProperty(name="Delay 4 range multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay4_softness: FloatProperty(name="Delay 4 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay5_energy: FloatProperty(name="Delay 5 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay5_range: FloatProperty(name="Delay 5 range multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
-    delay5_softness: FloatProperty(name="Delay 5 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay0_energy: FloatProperty(name="Delay 0 energy multiplier", description="Scales native Blender light energy for this delay group.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay0_range: FloatProperty(name="Delay 0 range multiplier", description="Scales Blender custom cutoff distance; mostly affects surfaces near or beyond the cutoff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay0_softness: FloatProperty(name="Delay 0 shadow radius multiplier", description="Scales Blender ray-traced shadow radius. It softens shadow edges; it does not broaden radial light falloff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay1_energy: FloatProperty(name="Delay 1 energy multiplier", description="Scales native Blender light energy for this delay group.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay1_range: FloatProperty(name="Delay 1 range multiplier", description="Scales Blender custom cutoff distance; mostly affects surfaces near or beyond the cutoff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay1_softness: FloatProperty(name="Delay 1 shadow radius multiplier", description="Scales Blender ray-traced shadow radius. It softens shadow edges; it does not broaden radial light falloff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay2_energy: FloatProperty(name="Delay 2 energy multiplier", description="Scales native Blender light energy for this delay group.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay2_range: FloatProperty(name="Delay 2 range multiplier", description="Scales Blender custom cutoff distance; mostly affects surfaces near or beyond the cutoff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay2_softness: FloatProperty(name="Delay 2 shadow radius multiplier", description="Scales Blender ray-traced shadow radius. It softens shadow edges; it does not broaden radial light falloff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay3_energy: FloatProperty(name="Delay 3 energy multiplier", description="Scales native Blender light energy for this delay group.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay3_range: FloatProperty(name="Delay 3 range multiplier", description="Scales Blender custom cutoff distance; mostly affects surfaces near or beyond the cutoff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay3_softness: FloatProperty(name="Delay 3 shadow radius multiplier", description="Scales Blender ray-traced shadow radius. It softens shadow edges; it does not broaden radial light falloff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay4_energy: FloatProperty(name="Delay 4 energy multiplier", description="Scales native Blender light energy for this delay group.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay4_range: FloatProperty(name="Delay 4 range multiplier", description="Scales Blender custom cutoff distance; mostly affects surfaces near or beyond the cutoff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay4_softness: FloatProperty(name="Delay 4 shadow radius multiplier", description="Scales Blender ray-traced shadow radius. It softens shadow edges; it does not broaden radial light falloff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay5_energy: FloatProperty(name="Delay 5 energy multiplier", description="Scales native Blender light energy for this delay group.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay5_range: FloatProperty(name="Delay 5 range multiplier", description="Scales Blender custom cutoff distance; mostly affects surfaces near or beyond the cutoff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay5_softness: FloatProperty(name="Delay 5 shadow radius multiplier", description="Scales Blender ray-traced shadow radius. It softens shadow edges; it does not broaden radial light falloff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
 
     def invoke(self, context, event):
         settings = _qss_config_settings()
@@ -11501,12 +11502,12 @@ class QSS_OT_settings(Operator):
         profile_box = layout.box()
         profile_box.label(text="Native light presets by legacy delay", icon="LIGHT")
         profile_box.label(text="Multipliers apply to imported lights in Cycles preview, Eevee preview and Cycles bake.")
-        profile_box.label(text="Range scales Blender's custom cutoff distance; Radius scales the spherical light emitter.")
+        profile_box.label(text="Range controls the distance cutoff; Shadow Radius controls ray-traced shadow softness, not the light pool width.")
         header = profile_box.row(align=True)
         header.label(text="Delay")
         header.label(text="Energy ×")
         header.label(text="Range ×")
-        header.label(text="Radius ×")
+        header.label(text="Shadow Radius ×")
         for delay in range(6):
             row = profile_box.row(align=True)
             row.label(text=f"Delay {delay}")
@@ -11524,7 +11525,8 @@ class QSS_OT_settings(Operator):
             sort_keys=True,
             separators=(",", ":"),
         )
-        layout.label(text="Apply updates the lamps now; OK saves the profile, Cancel restores the saved profile.", icon="INFO")
+        layout.label(text="Energy changes brightness. Range only affects the cutoff edge; Shadow Radius only softens ray-traced shadows.", icon="INFO")
+        layout.label(text="Apply updates lamps now; OK saves the profile, Cancel restores the saved profile.", icon="INFO")
         layout.label(text="Only QSS map collections are replaced. Other scene content is preserved.", icon="INFO")
 
     def execute(self, context):
