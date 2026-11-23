@@ -473,7 +473,7 @@ class NativeCyclesLightingSourceContractTests(unittest.TestCase):
         self.assertIn("_qss_cycles_falloff_tree_is_owned(light_data)", helper)
         self.assertIn("node_tree.nodes.clear()", helper)
         self.assertNotIn("use_nodes = False", helper)
-        apply_start = source.index("def _apply_quake_light_energy_scale(scene):")
+        apply_start = source.index("def _apply_quake_light_energy_scale(scene, delay_profiles=None):")
         apply_end = source.index("\ndef ", apply_start + 5)
         apply_body = source[apply_start:apply_end]
         self.assertIn("_qss_clear_owned_cycles_light_nodes(light_obj.data)", apply_body)
