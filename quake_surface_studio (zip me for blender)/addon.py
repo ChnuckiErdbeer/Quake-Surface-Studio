@@ -29,7 +29,7 @@ from . import bsp, color, lighting as lighting_utils, light_node_utils, material
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils, image_undo
 
 
-ADDON_VERSION = (0, 21, 27)
+ADDON_VERSION = (0, 21, 28)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -3539,6 +3539,8 @@ def _apply_quake_light_energy_scale(scene, delay_profiles=None):
             light_obj.data.energy = lighting_utils.scaled_quake_light_energy(
                 native_energy, scale * manual_calibration
             )
+            if hasattr(light_obj.data, "diffuse_factor"):
+                light_obj.data.diffuse_factor = multipliers["diffuse"]
 
             # Migrate old QSS Cycles correction graphs safely. Never remove a
             # mixed/user-authored tree; only a graph tagged wholly as QSS-owned
@@ -3596,10 +3598,14 @@ def _qss_native_delay_profile_summary(lights, profiles):
         energies = [float(item.data.energy) for item in group]
         cutoffs = [float(getattr(item.data, "cutoff_distance", 0.0)) for item in group]
         radii = [float(getattr(item.data, "shadow_soft_size", 0.0)) for item in group]
+        diffuse_factors = [float(getattr(item.data, "diffuse_factor", 1.0)) for item in group]
+        point_count = sum(1 for item in group if item.data.type == "POINT")
+        spot_count = sum(1 for item in group if item.data.type == "SPOT")
         records.append(
-            f"d{delay}:n={len(group)}"
-            f",mult(E/R/Radius)={profile['energy']:.4g}/{profile['range']:.4g}/{profile['softness']:.4g}"
+            f"d{delay}:n={len(group)}(P{point_count}/S{spot_count})"
+            f",mult(E/D/Cutoff/Radius)={profile['energy']:.4g}/{profile['diffuse']:.4g}/{profile['range']:.4g}/{profile['softness']:.4g}"
             f",W={min(energies):.4g}-{max(energies):.4g}"
+            f",diffuse={min(diffuse_factors):.4g}-{max(diffuse_factors):.4g}"
             f",cutoff={min(cutoffs):.4g}-{max(cutoffs):.4g}"
             f",radius={min(radii):.4g}-{max(radii):.4g}"
         )
@@ -11278,6 +11284,7 @@ def _qss_native_delay_profiles_from_operator(operator):
     return {
         str(delay): {
             "energy": float(getattr(operator, f"delay{delay}_energy")),
+            "diffuse": float(getattr(operator, f"delay{delay}_diffuse")),
             "range": float(getattr(operator, f"delay{delay}_range")),
             "softness": float(getattr(operator, f"delay{delay}_softness")),
         }
@@ -11292,7 +11299,7 @@ def _qss_native_delay_profiles_normalized(profiles):
         source = profiles.get(str(delay), {})
         source = source if isinstance(source, dict) else {}
         profile = {}
-        for field in ("energy", "range", "softness"):
+        for field in ("energy", "diffuse", "range", "softness"):
             try:
                 value = float(source.get(field, 1.0))
             except (TypeError, ValueError, OverflowError):
@@ -11322,8 +11329,8 @@ def _on_native_delay_profile_changed(self, context):
 
 class QSS_OT_apply_native_delay_profiles(Operator):
     bl_idname = "qss.apply_native_delay_profiles"
-    bl_label = "Apply to Lights"
-    bl_description = "Apply the values currently in Settings to imported lights without closing the dialog"
+    bl_label = "Apply & Save"
+    bl_description = "Save the delay-group settings and apply them to imported lights without closing the dialog"
 
     profiles_json: StringProperty(
         name="Delay group profiles",
@@ -11336,6 +11343,13 @@ class QSS_OT_apply_native_delay_profiles(Operator):
             profiles = _qss_native_delay_profiles_normalized(
                 json.loads(self.profiles_json or "{}")
             )
+            settings = _qss_load_config()
+            settings["native_delay_profiles"] = profiles
+            quake_paths.save_config(settings, _qss_config_path())
+            # This profile is committed now; Cancel on the surrounding
+            # Settings dialog must not roll it back.
+            for session in _qss_settings_sessions.values():
+                session["original_profiles"] = profiles
             updated = _apply_quake_light_energy_scale(
                 context.scene, delay_profiles=profiles
             )
@@ -11357,11 +11371,11 @@ class QSS_OT_apply_native_delay_profiles(Operator):
             d0 = profiles.get("0", {})
             self.report(
                 {"INFO"},
-                f"Applied presets to {updated} lights. Delay 0: "
+                f"Saved and applied presets to {updated} lights. Delay 0: "
                 f"Energy ×{d0.get('energy', 1.0):g}, "
-                f"Range ×{d0.get('range', 1.0):g}, "
-                f"Radius ×{d0.get('softness', 1.0):g}. "
-                "Press OK in Settings to save; Cancel restores saved values."
+                f"Diffuse ×{d0.get('diffuse', 1.0):g}, "
+                f"Eevee cutoff ×{d0.get('range', 1.0):g}, "
+                f"Source radius ×{d0.get('softness', 1.0):g}."
             )
             return {"FINISHED"}
         except Exception as exc:
@@ -11426,21 +11440,27 @@ class QSS_OT_settings(Operator):
         default="1",
     )
     delay0_energy: FloatProperty(name="Delay 0 energy multiplier", description="Scales native Blender light energy for this delay group.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay0_diffuse: FloatProperty(name="Delay 0 diffuse multiplier", description="Scales this delay group's diffuse light contribution in Cycles and the lightmap bake.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay0_range: FloatProperty(name="Delay 0 range multiplier", description="Scales Blender custom cutoff distance; mostly affects surfaces near or beyond the cutoff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay0_softness: FloatProperty(name="Delay 0 shadow radius multiplier", description="Scales Blender ray-traced shadow radius. It softens shadow edges; it does not broaden radial light falloff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay1_energy: FloatProperty(name="Delay 1 energy multiplier", description="Scales native Blender light energy for this delay group.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay1_diffuse: FloatProperty(name="Delay 1 diffuse multiplier", description="Scales this delay group's diffuse light contribution in Cycles and the lightmap bake.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay1_range: FloatProperty(name="Delay 1 range multiplier", description="Scales Blender custom cutoff distance; mostly affects surfaces near or beyond the cutoff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay1_softness: FloatProperty(name="Delay 1 shadow radius multiplier", description="Scales Blender ray-traced shadow radius. It softens shadow edges; it does not broaden radial light falloff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay2_energy: FloatProperty(name="Delay 2 energy multiplier", description="Scales native Blender light energy for this delay group.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay2_diffuse: FloatProperty(name="Delay 2 diffuse multiplier", description="Scales this delay group's diffuse light contribution in Cycles and the lightmap bake.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay2_range: FloatProperty(name="Delay 2 range multiplier", description="Scales Blender custom cutoff distance; mostly affects surfaces near or beyond the cutoff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay2_softness: FloatProperty(name="Delay 2 shadow radius multiplier", description="Scales Blender ray-traced shadow radius. It softens shadow edges; it does not broaden radial light falloff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay3_energy: FloatProperty(name="Delay 3 energy multiplier", description="Scales native Blender light energy for this delay group.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay3_diffuse: FloatProperty(name="Delay 3 diffuse multiplier", description="Scales this delay group's diffuse light contribution in Cycles and the lightmap bake.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay3_range: FloatProperty(name="Delay 3 range multiplier", description="Scales Blender custom cutoff distance; mostly affects surfaces near or beyond the cutoff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay3_softness: FloatProperty(name="Delay 3 shadow radius multiplier", description="Scales Blender ray-traced shadow radius. It softens shadow edges; it does not broaden radial light falloff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay4_energy: FloatProperty(name="Delay 4 energy multiplier", description="Scales native Blender light energy for this delay group.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay4_diffuse: FloatProperty(name="Delay 4 diffuse multiplier", description="Scales this delay group's diffuse light contribution in Cycles and the lightmap bake.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay4_range: FloatProperty(name="Delay 4 range multiplier", description="Scales Blender custom cutoff distance; mostly affects surfaces near or beyond the cutoff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay4_softness: FloatProperty(name="Delay 4 shadow radius multiplier", description="Scales Blender ray-traced shadow radius. It softens shadow edges; it does not broaden radial light falloff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay5_energy: FloatProperty(name="Delay 5 energy multiplier", description="Scales native Blender light energy for this delay group.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay5_diffuse: FloatProperty(name="Delay 5 diffuse multiplier", description="Scales this delay group's diffuse light contribution in Cycles and the lightmap bake.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay5_range: FloatProperty(name="Delay 5 range multiplier", description="Scales Blender custom cutoff distance; mostly affects surfaces near or beyond the cutoff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
     delay5_softness: FloatProperty(name="Delay 5 shadow radius multiplier", description="Scales Blender ray-traced shadow radius. It softens shadow edges; it does not broaden radial light falloff.", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
 
@@ -11465,7 +11485,7 @@ class QSS_OT_settings(Operator):
         }
         for delay in range(6):
             profile = native_profiles.get(str(delay), {})
-            for field in ("energy", "range", "softness"):
+            for field in ("energy", "diffuse", "range", "softness"):
                 setattr(self, f"delay{delay}_{field}", float(profile[field]))
         _qss_settings_sessions[session_key]["ready"] = True
         if self.import_behavior not in {"ASK", "ADD", "REPLACE"}:
@@ -11501,23 +11521,24 @@ class QSS_OT_settings(Operator):
         layout.label(text="Delay edits update the viewport live. Cancel restores the old values; OK saves them.", icon="INFO")
         profile_box = layout.box()
         profile_box.label(text="Native light presets by legacy delay", icon="LIGHT")
-        profile_box.label(text="Multipliers apply to imported lights in Cycles preview, Eevee preview and Cycles bake.")
-        profile_box.label(text="Range controls the distance cutoff; Shadow Radius controls ray-traced shadow softness, not the light pool width.")
+        profile_box.label(text="Energy and Diffuse affect Cycles preview and bake; Diffuse directly scales diffuse lighting.")
+        profile_box.label(text="Eevee Cutoff is ignored by Cycles. Source Radius affects ray-traced shadow softness, not radial falloff.")
         header = profile_box.row(align=True)
         header.label(text="Delay")
         header.label(text="Energy ×")
-        header.label(text="Range ×")
-        header.label(text="Shadow Radius ×")
+        header.label(text="Eevee Cutoff ×")
+        header.label(text="Source Radius ×")
         for delay in range(6):
             row = profile_box.row(align=True)
             row.label(text=f"Delay {delay}")
             row.prop(self, f"delay{delay}_energy", text="")
+            row.prop(self, f"delay{delay}_diffuse", text="")
             row.prop(self, f"delay{delay}_range", text="")
             row.prop(self, f"delay{delay}_softness", text="")
         apply_row = layout.row()
         apply_op = apply_row.operator(
             QSS_OT_apply_native_delay_profiles.bl_idname,
-            text="Apply to Lights",
+            text="Apply & Save",
             icon="CHECKMARK",
         )
         apply_op.profiles_json = json.dumps(
@@ -11525,8 +11546,9 @@ class QSS_OT_settings(Operator):
             sort_keys=True,
             separators=(",", ":"),
         )
-        layout.label(text="Energy changes brightness. Range only affects the cutoff edge; Shadow Radius only softens ray-traced shadows.", icon="INFO")
-        layout.label(text="Apply updates lamps now; OK saves the profile, Cancel restores the saved profile.", icon="INFO")
+        layout.label(text="Energy changes total light power. Diffuse scales the diffuse contribution used by the bake.", icon="INFO")
+        layout.label(text="Eevee Cutoff is not used by Cycles; Source Radius changes ray-traced shadow softness.", icon="INFO")
+        layout.label(text="Apply & Save commits the lighting profile immediately; Cancel will not undo it.", icon="INFO")
         layout.label(text="Only QSS map collections are replaced. Other scene content is preserved.", icon="INFO")
 
     def execute(self, context):
