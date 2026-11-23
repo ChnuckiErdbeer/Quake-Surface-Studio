@@ -158,6 +158,34 @@ def bake_atlas_match_scale(source_luminance, baked_luminance) -> float:
         raise ValueError("Source and baked luminance must both be non-zero")
     return min(100000.0, max(1e-6, source / baked))
 
+def native_delay_profile_multipliers(profiles, delay):
+    """Return safe native-light tuning multipliers for one legacy delay group.
+
+    Each profile is an artist-adjustable starting point, not an ericw attenuation
+    equation. Missing, malformed or non-finite settings fall back to 1.0.
+    """
+    import math
+
+    try:
+        mode = int(delay)
+    except (TypeError, ValueError, OverflowError):
+        mode = -1
+    profile = profiles.get(str(mode), {}) if isinstance(profiles, dict) else {}
+    if not isinstance(profile, dict):
+        profile = {}
+
+    result = {}
+    for key in ("energy", "range", "softness"):
+        try:
+            value = float(profile.get(key, 1.0))
+        except (TypeError, ValueError, OverflowError):
+            value = 1.0
+        if not math.isfinite(value):
+            value = 1.0
+        result[key] = max(0.0, min(100.0, value))
+    return result
+
+
 # ericw-tools light attenuation. LF_SCALE is defined in ericw-tools' light
 # headers as 128; these helpers mirror GetLightValue() for static point lights.
 ERICW_LIGHT_SCALE = 128.0
@@ -204,83 +232,6 @@ def ericw_light_value(light_value: float, delay: int, distance: float,
     if light >= 0.0:
         return max(0.0, light - value)
     return min(0.0, light + value)
-
-
-def cycles_uses_ericw_falloff_correction(delay: int) -> bool:
-    """Return whether Cycles applies the exact Quake attenuation correction.
-
-    ericw delay 0 (linear) and delay 5 (soft inverse-square) have dedicated
-    Cycles node graphs. Other Quake delay types retain their native fallback.
-    """
-    try:
-        return int(delay) in {0, 5}
-    except (TypeError, ValueError, OverflowError):
-        return False
-
-
-def ericw_cycles_light_falloff_correction(
-    delay: int,
-    distance: float,
-    raw_light_value: float,
-    wait: float = 1.0,
-    world_dist: float = 1.0,
-    falloff: float = 0.0,
-) -> float:
-    """Correct a calibrated inverse-square Cycles lamp to ericw delay 0 or 5.
-
-    The existing Blender lamp-energy calibration deliberately matches each
-    profile at one reference distance:
-      * delay 0: the midpoint of its finite linear radius (energy = I*R^2/8)
-      * delay 5: the ericw 128/(wait*world_dist) reference distance (energy = I*R^2/4)
-
-    Cycles' Light Falloff node exposes a Linear (1/d) output. The node graph
-    takes its reciprocal with a safe floor, avoiding an Inf/Inf distance
-    calculation at the light origin. Distances and radius are in Quake map units.
-    The return value is a dimensionless multiplier; other delays are unchanged.
-    """
-    import math
-
-    try:
-        mode = int(delay)
-        dist = max(0.0, float(distance))
-        wait_value = max(1e-6, float(wait))
-        dist_scale = max(1e-6, float(world_dist))
-        raw_intensity = abs(float(raw_light_value))
-        falloff_radius = max(0.0, float(falloff))
-    except (TypeError, ValueError, OverflowError):
-        return 1.0
-
-    if not all(math.isfinite(value) for value in (
-        dist, wait_value, dist_scale, raw_intensity, falloff_radius
-    )):
-        return 1.0
-
-    if mode == 0:
-        radius = (
-            falloff_radius * dist_scale
-            if falloff_radius > 0.0
-            else raw_intensity / (wait_value * dist_scale)
-        )
-        if radius <= 1e-12:
-            return 0.0
-        normalized_distance = dist / radius
-        # Exact ratio between ericw's max(0, 1-d/R) and the existing
-        # inverse-square lamp whose energy is calibrated at d=R/2.
-        return 8.0 * normalized_distance * normalized_distance * max(
-            0.0, 1.0 - normalized_distance
-        )
-
-    if mode == 5:
-        scaled_distance = wait_value * dist_scale * dist
-        denominator = scaled_distance + ERICW_LIGHT_SCALE
-        if denominator <= 1e-12:
-            return 0.0
-        # Exact ratio between ericw's shifted inverse-square curve and the
-        # existing lamp calibrated to L/4 at d=128/(wait*world_dist).
-        ratio = scaled_distance / denominator
-        return 4.0 * ratio * ratio
-
-    return 1.0
 
 
 def ericw_surface_angle(normal_dot_to_light: float, anglescale: float = 0.5,
@@ -533,18 +484,13 @@ def blender_live_light_preview_parameters(
     falloff: float = 0.0,
     unit_scale: float = 0.0254,
 ):
-    """Return a delay-aware native Blender lamp approximation.
+    """Return a native Blender POINT/SPOT starting preset for a Quake delay.
 
-    Blender's standard point/spot lights use inverse-square attenuation. Quake
-    delay 2 is therefore representable by the same curve after converting the
-    Quake 128-unit reference distance to Blender units. Other profiles are
-    calibrated at a documented reference point and/or softened/cut off; delays
-    3 and 4 remain explicit native-light fallbacks because a constant point
-    field and a local-minlight max-clamp are not expressible by a standard lamp.
-
-    Returned profile labels are intended for diagnostics, not as claims of
-    pixel-identical ericw-tools output. Quake's exact equations remain in the
-    Quake Direct CPU solver.
+    Delay numbers only choose a practical starting energy, cutoff and source
+    softness. They do not select a Cycles shader correction and do not attempt
+    to reproduce ericw's attenuation curve. The user can tune each delay group
+    through the persistent QSS Settings multipliers. Quake's exact equations
+    remain isolated in the Quake Direct CPU solver.
     """
     import math
 
@@ -576,19 +522,19 @@ def blender_live_light_preview_parameters(
         energy = intensity * (radius_blender ** 2) / 8.0
         cutoff = max(min_cutoff, radius_blender)
         soft_size = max(2.0 * scale, radius_blender * 0.02)
-        profile = "delay0_linear_midpoint_approximation"
+        profile = "delay0_native_finite_range"
     elif mode == 1:
         energy = intensity * (reference_blender ** 2)
         cutoff = max(min_cutoff, reference_blender * 16.0)
         soft_size = max(scale, reference_blender * 0.01)
-        profile = "delay1_inverse_reference_calibration"
+        profile = "delay1_native_inverse_reference"
     elif mode == 2:
         # Exact radial curve match: E / d_blender^2 equals
         # I * (128 / (wait * world_dist * d_quake))^2.
         energy = intensity * (reference_blender ** 2)
         cutoff = max(min_cutoff, reference_blender * 16.0)
         soft_size = max(scale * 0.5, reference_blender * 0.002)
-        profile = "delay2_inverse_square_exact"
+        profile = "delay2_native_inverse_square"
     elif mode == 5:
         # The ericw soft inverse-square reaches one quarter of source value at
         # 128/(wait*world_dist) Quake units. Match there and use the same scale
@@ -596,7 +542,7 @@ def blender_live_light_preview_parameters(
         energy = intensity * (reference_blender ** 2) / 4.0
         cutoff = max(min_cutoff, reference_blender * 16.0)
         soft_size = max(scale, reference_blender)
-        profile = "delay5_soft_inverse_square_approximation"
+        profile = "delay5_native_soft_source"
     else:
         # Native point lights cannot express constant delay 3 or delay 4's
         # per-channel local-minlight clamp. Preserve the familiar prior energy
@@ -606,8 +552,8 @@ def blender_live_light_preview_parameters(
         cutoff = legacy_radius
         soft_size = 0.0
         profile = (
-            "delay3_native_inverse_square_fallback" if mode == 3 else
-            "delay4_native_local_minlight_fallback" if mode == 4 else
+            "delay3_native_point_approximation" if mode == 3 else
+            "delay4_native_point_approximation" if mode == 4 else
             "unknown_delay_native_fallback"
         )
 
