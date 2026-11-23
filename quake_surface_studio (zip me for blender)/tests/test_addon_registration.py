@@ -116,18 +116,19 @@ class AddonRegistrationTests(unittest.TestCase):
             2,
         )
         self.assertIn("qss_last_bake_attempt_native_delay_summary", bake)
-    def test_apply_and_save_persists_diffuse_profiles_and_applies_light_factor(self):
+    def test_apply_and_save_persists_delay_profiles_and_applies_supported_properties(self):
         addon_path = os.path.join(os.path.dirname(__file__), "..", "addon.py")
         with open(addon_path, "r", encoding="utf-8") as handle:
             source = handle.read()
         self.assertIn('bl_label = "Apply & Save"', source)
         self.assertIn('settings["native_delay_profiles"] = profiles', source)
-        self.assertIn('light_obj.data.diffuse_factor = multipliers["diffuse"]', source)
-        self.assertIn('for field in ("energy", "diffuse", "range", "softness")', source)
+        self.assertNotIn('light_obj.data.diffuse_factor = multipliers["diffuse"]', source)
+        self.assertIn('for field in ("energy", "range", "softness")', source)
+        self.assertIn('light_obj.data.energy = lighting_utils.scaled_quake_light_energy(', source)
+        self.assertIn("preview['shadow_soft_size'] * multipliers['softness']", source)
         settings_start = source.index("class QSS_OT_settings(Operator):")
         settings_end = source.index("\\nclass QSS_OT_open_config_text", settings_start)
         settings = source[settings_start:settings_end]
-        self.assertEqual(settings.count("delay0_diffuse"), 1)
         self.assertIn('header.label(text="Eevee Cutoff ×")', settings)
         self.assertIn('header.label(text="Source Radius ×")', settings)
 
