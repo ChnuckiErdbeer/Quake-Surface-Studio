@@ -175,7 +175,7 @@ def native_delay_profile_multipliers(profiles, delay):
         profile = {}
 
     result = {}
-    for key in ("energy", "diffuse", "range", "softness"):
+    for key in ("energy", "range", "softness"):
         try:
             value = float(profile.get(key, 1.0))
         except (TypeError, ValueError, OverflowError):
