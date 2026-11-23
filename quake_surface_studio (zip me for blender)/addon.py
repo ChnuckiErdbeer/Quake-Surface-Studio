@@ -29,7 +29,7 @@ from . import bsp, color, lighting as lighting_utils, light_node_utils, material
 from . import export_validation, quake_paths, external_tools, texture_export, navigation_utils, toolbar_utils, visibility_utils, viewport_utils, palette_utils, bake_scope as bake_scope_utils, bake_stats as bake_stats_utils, image_undo
 
 
-ADDON_VERSION = (0, 21, 25)
+ADDON_VERSION = (0, 21, 26)
 
 # Quake mapping convention: one map unit is conventionally treated as one inch.
 # Blender scene units are metres, so this keeps movement and light distances intuitive.
@@ -42,6 +42,7 @@ _qss_focus_cycle_state = {}
 _qss_focus_transition_sessions = {}
 _qss_camera_transition_sessions = {}
 _qss_edit_overlay_sessions = {}
+_qss_settings_sessions = {}
 
 
 
@@ -1563,6 +1564,89 @@ def _qss_restore_cycles_preview_settings(scene, obj):
         del obj[saved_max_key]
 
 
+def _qss_set_preview_light_visibility(scene, obj, active_map_objects):
+    """Make live preview use exactly the same imported lights as the Cycles bake.
+
+    The bake excludes user-authored lights and lights belonging to other maps.
+    Preview must do the same or its result can be much brighter than the baked
+    atlas. Original visibility is stored on the map object and restored later.
+    """
+    key = "qss_preview_light_visibility_snapshot"
+    active = {
+        int(item.as_pointer())
+        for item in active_map_objects
+        if getattr(item, "type", "") == "LIGHT"
+        and item.get("qss_light_role") in {"quake_entity_light", "quake_world_sunlight"}
+    }
+    if key not in obj:
+        snapshot = []
+        for light_obj in scene.objects:
+            if light_obj.type != "LIGHT":
+                continue
+            try:
+                hidden = bool(light_obj.hide_get())
+            except Exception:
+                hidden = False
+            snapshot.append({
+                "name": light_obj.name,
+                "hide_render": bool(light_obj.hide_render),
+                "hide_viewport": bool(light_obj.hide_viewport),
+                "hide_set": hidden,
+            })
+        obj[key] = json.dumps(snapshot, separators=(",", ":"))
+
+    suppressed = []
+    enabled = 0
+    for light_obj in scene.objects:
+        if light_obj.type != "LIGHT":
+            continue
+        is_active_qss_light = int(light_obj.as_pointer()) in active
+        light_obj.hide_render = not is_active_qss_light
+        try:
+            light_obj.hide_set(not is_active_qss_light)
+        except Exception:
+            pass
+        if is_active_qss_light:
+            light_obj.hide_viewport = False
+            enabled += 1
+        else:
+            suppressed.append(light_obj.name)
+    obj["qss_preview_enabled_light_count"] = int(enabled)
+    obj["qss_preview_suppressed_light_count"] = int(len(suppressed))
+    obj["qss_preview_suppressed_light_names"] = ", ".join(suppressed[:64])
+    return enabled, len(suppressed)
+
+
+def _qss_restore_preview_light_visibility(obj):
+    """Restore every scene light to the state recorded before QSS live preview."""
+    key = "qss_preview_light_visibility_snapshot"
+    if key not in obj:
+        return 0
+    try:
+        records = json.loads(str(obj.get(key, "[]")))
+    except (TypeError, ValueError):
+        records = []
+    restored = 0
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        light_obj = bpy.data.objects.get(str(record.get("name", "")))
+        if light_obj is None or light_obj.type != "LIGHT":
+            continue
+        try:
+            light_obj.hide_render = bool(record.get("hide_render", False))
+            light_obj.hide_viewport = bool(record.get("hide_viewport", False))
+            light_obj.hide_set(bool(record.get("hide_set", False)))
+            restored += 1
+        except (AttributeError, ReferenceError, RuntimeError):
+            pass
+    del obj[key]
+    obj["qss_preview_enabled_light_count"] = 0
+    obj["qss_preview_suppressed_light_count"] = 0
+    obj["qss_preview_suppressed_light_names"] = ""
+    return restored
+
+
 def _set_lighting_preview(context, obj, mode):
     """Set a map-local lighting preset while keeping source and painted images separate."""
     if mode not in {"source", "realtime", "cycles", "baked"}:
@@ -1588,20 +1672,12 @@ def _set_lighting_preview(context, obj, mode):
         for mat in obj.data.materials:
             if mat is not None:
                 _install_realtime_light_nodes(mat)
-        for light_obj in _qss_active_map_objects(context.scene, obj):
-            if light_obj.type == "LIGHT" and light_obj.get("qss_light_role") in {
-                "quake_entity_light", "quake_world_sunlight"
-            }:
-                light_obj.hide_viewport = False
-                light_obj.hide_render = False
-                try:
-                    light_obj.hide_set(False)
-                except Exception:
-                    pass
+        _qss_set_preview_light_visibility(
+            context.scene, obj, _qss_active_map_objects(context.scene, obj)
+        )
         _apply_quake_light_energy_scale(context.scene)
     else:
-        # QSS does not change visibility on user-authored scene lights.
-        # Avoid restoring state that this preview path never modified.
+        _qss_restore_preview_light_visibility(obj)
         _restore_preview_world(context.scene, obj)
         _qss_restore_cycles_preview_settings(context.scene, obj)
         _restore_preview_engine(context.scene, obj)
@@ -3422,7 +3498,7 @@ def _qss_cycles_light_node_summary(light_data, limit=8):
         entries.append(f"...+{len(nodes) - len(entries)}")
     return f"{kind}[{','.join(entries)}]"
 
-def _apply_quake_light_energy_scale(scene):
+def _apply_quake_light_energy_scale(scene, delay_profiles=None):
     """Apply native Blender delay presets plus the shared scene energy scale.
 
     Any legacy QSS-owned ericw Cycles node graph is removed. User-authored
@@ -3431,7 +3507,8 @@ def _apply_quake_light_energy_scale(scene):
     """
     scale = max(0.0, float(getattr(scene, 'qss_light_energy_scale', 1.0)))
     settings = _qss_config_settings()
-    delay_profiles = settings.get("native_delay_profiles", {})
+    if delay_profiles is None:
+        delay_profiles = settings.get("native_delay_profiles", {})
     updated = 0
     for light_obj in scene.objects:
         role = light_obj.get('qss_light_role') if light_obj.type == 'LIGHT' else None
@@ -9844,6 +9921,7 @@ class QSS_OT_calibrate_lights_to_source(Operator):
         old_preview_mode = str(obj.get('qss_preview_mode', 'source'))
         old_source = obj.get('qss_lightmap_source', 'original_bsp_lightmaps')
         old_scale = float(scene.qss_light_energy_scale)
+        old_match_source = bool(scene.qss_bake_match_source)
         old_manual = max(0.0, float(obj.get('qss_manual_light_energy_calibration', 1.0)))
         old_legacy_calibration = float(obj.get('qss_light_energy_calibration', old_manual))
         old_light_manual = {
@@ -9861,6 +9939,7 @@ class QSS_OT_calibrate_lights_to_source(Operator):
         result = bpy.ops.qss.bake_scene_lights()
         if 'FINISHED' not in result:
             scene.qss_light_energy_scale = old_scale
+            scene.qss_bake_match_source = old_match_source
             obj['qss_lightmap_source'] = old_source
             return {'CANCELLED'}
 
@@ -9905,6 +9984,7 @@ class QSS_OT_calibrate_lights_to_source(Operator):
             obj['qss_lightmap_gradient_baked'] = False
             scene.qss_light_energy_scale = 1.0
             _apply_quake_light_energy_scale(scene)
+            scene.qss_bake_match_source = old_match_source
             _set_lighting_preview(context, obj, 'realtime')
             self.report(
                 {'INFO'},
@@ -9922,6 +10002,7 @@ class QSS_OT_calibrate_lights_to_source(Operator):
             except Exception:
                 pass
             scene.qss_light_energy_scale = old_scale
+            scene.qss_bake_match_source = old_match_source
             obj['qss_manual_light_energy_calibration'] = old_manual
             obj['qss_light_energy_calibration'] = old_legacy_calibration
             for light_obj in imported_lights:
@@ -10829,6 +10910,8 @@ def _qss_diagnostics_text(context, obj):
         f'BSPX lumps: {obj.get("qss_bspx_lump_names", "")}',
         f'Light energy scale: {getattr(context.scene, "qss_light_energy_scale", -1)}',
         f'Source-match calibration: {obj.get("qss_light_energy_calibration", 1.0)}',
+        f'Cycles bake source-match normalization: {getattr(context.scene, "qss_bake_match_source", False)}',
+        f'Live preview light isolation: enabled={obj.get("qss_preview_enabled_light_count", 0)} suppressed={obj.get("qss_preview_suppressed_light_count", 0)} names={obj.get("qss_preview_suppressed_light_names", "")}',
         f'Last bake: raw_mean={obj.get("qss_last_bake_raw_mean", "n/a")} source_mean={obj.get("qss_last_bake_source_mean", "n/a")} atlas_mean={obj.get("qss_last_bake_luxel_mean", "n/a")} max={obj.get("qss_last_bake_luxel_max", "n/a")} normalization={obj.get("qss_last_bake_output_scale", "n/a")}',
         f'Last successful bake timing: total={bake_stats_utils.format_duration(obj.get("qss_last_bake_duration_seconds"))}; Cycles operator={bake_stats_utils.format_duration(obj.get("qss_last_bake_cycles_seconds"))}',
         f'Inline mover shadow policy: faces={obj.get("qss_inline_model_no_shadow_face_count", 0)} classes={obj.get("qss_inline_model_no_shadow_classnames", "")}',
@@ -11151,6 +11234,52 @@ def _qss_is_map_object(obj):
 
 
 
+def _qss_native_delay_profiles_from_operator(operator):
+    return {
+        str(delay): {
+            "energy": float(getattr(operator, f"delay{delay}_energy")),
+            "range": float(getattr(operator, f"delay{delay}_range")),
+            "softness": float(getattr(operator, f"delay{delay}_softness")),
+        }
+        for delay in range(6)
+    }
+
+
+def _qss_native_delay_profiles_normalized(profiles):
+    result = {}
+    profiles = profiles if isinstance(profiles, dict) else {}
+    for delay in range(6):
+        source = profiles.get(str(delay), {})
+        source = source if isinstance(source, dict) else {}
+        profile = {}
+        for field in ("energy", "range", "softness"):
+            try:
+                value = float(source.get(field, 1.0))
+            except (TypeError, ValueError, OverflowError):
+                value = 1.0
+            if not math.isfinite(value):
+                value = 1.0
+            profile[field] = max(0.0, min(100.0, value))
+        result[str(delay)] = profile
+    return result
+
+
+def _qss_settings_session_key(operator):
+    try:
+        return int(operator.as_pointer())
+    except (AttributeError, ReferenceError, RuntimeError):
+        return id(operator)
+
+
+def _on_native_delay_profile_changed(self, context):
+    session = _qss_settings_sessions.get(_qss_settings_session_key(self))
+    if not session or not session.get("ready") or not context or not context.scene:
+        return
+    profiles = _qss_native_delay_profiles_from_operator(self)
+    _apply_quake_light_energy_scale(context.scene, delay_profiles=profiles)
+    session["last_preview_profiles"] = profiles
+
+
 class QSS_OT_settings(Operator):
     bl_idname = "qss.settings"
     bl_label = "Quake Surface Studio Settings"
@@ -11207,24 +11336,24 @@ class QSS_OT_settings(Operator):
                ("8", "8×", "Eight times the pixels per axis")),
         default="1",
     )
-    delay0_energy: FloatProperty(name="Delay 0 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay0_range: FloatProperty(name="Delay 0 range multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay0_softness: FloatProperty(name="Delay 0 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay1_energy: FloatProperty(name="Delay 1 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay1_range: FloatProperty(name="Delay 1 range multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay1_softness: FloatProperty(name="Delay 1 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay2_energy: FloatProperty(name="Delay 2 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay2_range: FloatProperty(name="Delay 2 range multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay2_softness: FloatProperty(name="Delay 2 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay3_energy: FloatProperty(name="Delay 3 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay3_range: FloatProperty(name="Delay 3 range multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay3_softness: FloatProperty(name="Delay 3 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay4_energy: FloatProperty(name="Delay 4 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay4_range: FloatProperty(name="Delay 4 range multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay4_softness: FloatProperty(name="Delay 4 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay5_energy: FloatProperty(name="Delay 5 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay5_range: FloatProperty(name="Delay 5 range multiplier", default=1.0, min=0.0, max=100.0, precision=3)
-    delay5_softness: FloatProperty(name="Delay 5 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3)
+    delay0_energy: FloatProperty(name="Delay 0 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay0_range: FloatProperty(name="Delay 0 range multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay0_softness: FloatProperty(name="Delay 0 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay1_energy: FloatProperty(name="Delay 1 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay1_range: FloatProperty(name="Delay 1 range multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay1_softness: FloatProperty(name="Delay 1 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay2_energy: FloatProperty(name="Delay 2 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay2_range: FloatProperty(name="Delay 2 range multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay2_softness: FloatProperty(name="Delay 2 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay3_energy: FloatProperty(name="Delay 3 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay3_range: FloatProperty(name="Delay 3 range multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay3_softness: FloatProperty(name="Delay 3 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay4_energy: FloatProperty(name="Delay 4 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay4_range: FloatProperty(name="Delay 4 range multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay4_softness: FloatProperty(name="Delay 4 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay5_energy: FloatProperty(name="Delay 5 energy multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay5_range: FloatProperty(name="Delay 5 range multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
+    delay5_softness: FloatProperty(name="Delay 5 source softness multiplier", default=1.0, min=0.0, max=100.0, precision=3, update=_on_native_delay_profile_changed)
 
     def invoke(self, context, event):
         settings = _qss_config_settings()
@@ -11237,21 +11366,19 @@ class QSS_OT_settings(Operator):
         self.lighting_mode_storage = str(settings.get("lighting_mode_storage", "PER_MAP")).upper()
         self.import_lightmap_resolution = str(settings.get("import_lightmap_resolution", "1"))
         self.viewport_fov_degrees = float(settings.get("viewport_fov_degrees", 90.0))
-        native_profiles = settings.get("native_delay_profiles", {})
-        if not isinstance(native_profiles, dict):
-            native_profiles = {}
+        native_profiles = _qss_native_delay_profiles_normalized(
+            settings.get("native_delay_profiles", {})
+        )
+        session_key = _qss_settings_session_key(self)
+        _qss_settings_sessions[session_key] = {
+            "original_profiles": native_profiles,
+            "ready": False,
+        }
         for delay in range(6):
             profile = native_profiles.get(str(delay), {})
-            if not isinstance(profile, dict):
-                profile = {}
             for field in ("energy", "range", "softness"):
-                try:
-                    value = float(profile.get(field, 1.0))
-                except (TypeError, ValueError, OverflowError):
-                    value = 1.0
-                if not math.isfinite(value):
-                    value = 1.0
-                setattr(self, f"delay{delay}_{field}", max(0.0, min(100.0, value)))
+                setattr(self, f"delay{delay}_{field}", float(profile[field]))
+        _qss_settings_sessions[session_key]["ready"] = True
         if self.import_behavior not in {"ASK", "ADD", "REPLACE"}:
             self.import_behavior = "ASK"
         if self.export_mode not in {"AUTO", "CLASSIC", "ENHANCED", "BOTH"}:
@@ -11282,6 +11409,7 @@ class QSS_OT_settings(Operator):
         layout.prop(self, "rebake_behavior")
         layout.label(text="Cycles preview shares the bake's black world and diffuse-bounce count.", icon="INFO")
         layout.label(text="Native Blender presets are starting points; they do not emulate ericw attenuation.", icon="INFO")
+        layout.label(text="Delay edits update the viewport live. Cancel restores the old values; OK saves them.", icon="INFO")
         profile_box = layout.box()
         profile_box.label(text="Native light presets by legacy delay", icon="LIGHT")
         profile_box.label(text="Multipliers apply to imported lights in Cycles preview, Eevee preview and Cycles bake.")
@@ -11300,6 +11428,7 @@ class QSS_OT_settings(Operator):
 
     def execute(self, context):
         settings = _qss_load_config()
+        profiles = _qss_native_delay_profiles_from_operator(self)
         previous_lighting_storage = str(settings.get("lighting_mode_storage", "PER_MAP")).upper()
         normalized_root = quake_paths.normalize_quake_root(_qss_abspath(self.quake_root or ""))
         ironwail_path = _qss_abspath(self.ironwail_executable or "")
@@ -11313,14 +11442,7 @@ class QSS_OT_settings(Operator):
             "viewport_fov_degrees": float(self.viewport_fov_degrees),
             "rebake_behavior": self.rebake_behavior,
             "lighting_mode_storage": self.lighting_mode_storage,
-            "native_delay_profiles": {
-                str(delay): {
-                    "energy": float(getattr(self, f"delay{delay}_energy")),
-                    "range": float(getattr(self, f"delay{delay}_range")),
-                    "softness": float(getattr(self, f"delay{delay}_softness")),
-                }
-                for delay in range(6)
-            },
+            "native_delay_profiles": profiles,
         })
         if self.lighting_mode_storage == "GLOBAL" and previous_lighting_storage != "GLOBAL":
             active_obj = context.object
@@ -11333,7 +11455,8 @@ class QSS_OT_settings(Operator):
             settings["active_game_dir"] = _qss_abspath(context.scene.qss_game_dir or "")
             settings["active_game_id"] = str(context.scene.qss_game_folder or "")
             quake_paths.save_config(settings, _qss_config_path())
-            _apply_quake_light_energy_scale(context.scene)
+            _apply_quake_light_energy_scale(context.scene, delay_profiles=profiles)
+            _qss_settings_sessions.pop(_qss_settings_session_key(self), None)
             _qss_apply_viewport_fov(context, self.viewport_fov_degrees)
             context.scene.qss_import_lightmap_resolution = self.import_lightmap_resolution
             self.report({"INFO"}, "Quake Surface Studio settings saved.")
@@ -11341,6 +11464,17 @@ class QSS_OT_settings(Operator):
         except Exception as exc:
             self.report({"ERROR"}, f"Could not save QSS settings: {exc}")
             return {"CANCELLED"}
+
+    def cancel(self, context):
+        session = _qss_settings_sessions.pop(_qss_settings_session_key(self), None)
+        if session and context and context.scene:
+            try:
+                _apply_quake_light_energy_scale(
+                    context.scene,
+                    delay_profiles=session.get("original_profiles", {}),
+                )
+            except Exception as exc:
+                print(f"SLOPGATE: could not restore light settings after cancelling dialog: {exc}")
 
 
 class QSS_OT_open_config_text(Operator):
@@ -12638,6 +12772,15 @@ class QSS_PT_lighting(Panel):
             context.scene, "qss_bake_bounces",
             text="Indirect Bounces",
         )
+        bake.prop(
+            context.scene, "qss_bake_match_source",
+            text="Match Source Brightness",
+        )
+        if context.scene.qss_bake_match_source:
+            bake.label(
+                text="Post-scales only the baked atlas; live Cycles preview will differ.",
+                icon="INFO",
+            )
         bake.operator(QSS_OT_bake_scene_lights.bl_idname, text="Bake Lightmap", icon="RENDER_STILL")
         if mode == "realtime":
             layout.label(text="Eevee preview selected; baking currently uses the Cycles backend.", icon="INFO")
@@ -13065,8 +13208,8 @@ def register():
         )
         bpy.types.Scene.qss_bake_match_source = BoolProperty(
             name='Match source lightmap brightness',
-            description='Automatically calibrate Quake lamp energy so the baked mean luxel brightness matches the imported source lightmap',
-            default=True
+            description='Post-scale the baked atlas to the imported BSP lightmap mean; this deliberately changes bake brightness and is off by default so Cycles preview and bake stay aligned',
+            default=False
         )
         bpy.types.Scene.qss_quake_bake_shadows = BoolProperty(
             name='Ray-traced visibility',
@@ -13082,6 +13225,9 @@ def register():
         # its item callback are registered and a real Scene is available.
         scene = getattr(bpy.context, 'scene', None)
         if scene is not None:
+            if not bool(scene.get("qss_source_match_default_migrated_02126", False)):
+                scene.qss_bake_match_source = False
+                scene["qss_source_match_default_migrated_02126"] = True
             global _qss_config_update_depth
             _qss_config_update_depth = True
             try:
