@@ -48,6 +48,21 @@ class NativeDelayProfileTests(unittest.TestCase):
         )
 
 
+class NativeDelayDiffuseMultiplierTests(unittest.TestCase):
+    def test_delay_profile_returns_independent_diffuse_multiplier(self):
+        profiles = {"0": {"energy": 1.5, "diffuse": 0.25, "range": 0.5, "softness": 2.0}}
+        self.assertEqual(
+            lighting.native_delay_profile_multipliers(profiles, 0),
+            {"energy": 1.5, "diffuse": 0.25, "range": 0.5, "softness": 2.0},
+        )
+
+    def test_missing_diffuse_multiplier_defaults_to_one(self):
+        self.assertEqual(
+            lighting.native_delay_profile_multipliers({}, 0),
+            {"energy": 1.0, "diffuse": 1.0, "range": 1.0, "softness": 1.0},
+        )
+
+
 class LightingHelpersTests(unittest.TestCase):
     def test_energy_scale_is_applied_as_a_live_multiplier(self):
         self.assertAlmostEqual(lighting.scaled_quake_light_energy(300, 0.01), 3.0)
