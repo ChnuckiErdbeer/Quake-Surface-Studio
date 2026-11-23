@@ -1,4 +1,88 @@
-# SLOPGATE 0.21.16
+# SLOPGATE 0.21.28
+
+## 0.21.28 — Cycles diffuse tuning and persistent Apply & Save
+
+- **Apply & Save** now writes the current delay profile to QSS config immediately and applies it to imported lights. The profile is committed as soon as the button is clicked; cancelling the rest of Settings does not roll it back.
+- Renamed **Range** to **Eevee Cutoff** because Blender 5.3 Cycles sync does not read per-light custom cutoff distance.
+- Renamed **Shadow Radius** to **Source Radius**. It maps to `shadow_soft_size` / the Cycles point-light radius, which changes ray-traced shadow softness, not radial attenuation distance.
+- Bake diagnostics include point/spot counts, actual per-delay energy, cutoff and source-radius values, plus native normalize and soft-falloff modes.
+- Blender 5.3 Cycles synchronisation reads light energy, source radius, spot angle and spot blend. It does not sync per-light cutoff distance or `diffuse_factor`.
+- CI checks source contracts and pure helper logic. Blender 5.3 viewport and bake runtime acceptance is still required.
+
+## 0.21.27 — Explicit delay preset apply and bake profile snapshot
+
+- QSS Settings includes **Apply to Lights**. It applies the values currently in the dialog immediately without closing it. OK persists the profile; Cancel restores the last saved profile.
+- The Cycles bake snapshots the saved native delay profiles once and passes that same snapshot to every light reapplication during bake setup and cleanup.
+- Diagnostics include the exact delay profile used for the last bake plus per-delay lamp counts, actual energy range, custom cutoff distance range and source-radius range.
+- **Range** scales Blender's custom cutoff distance and mainly affects surfaces near or beyond the cutoff. **Shadow Radius** scales Blender's `PointLight.shadow_soft_size`, documented as a ray-shadow sampling radius; it softens shadow edges rather than widening the radial light pool.
+- The third control is labelled **Radius** to clarify it changes the spherical Blender light emitter size, not spotlight cone blend. Range maps to Blender's custom cutoff distance.
+- CI covers source contracts; Blender runtime validation is still required to verify interactive dialog behavior and bake response.
+
+## 0.21.26 — Align live Cycles preview with bake and make delay tuning live
+
+- Cycles/Eevee live preview now isolates exactly the active map's imported Quake lights, matching the bake's light visibility policy. Other scene lights and lights from other maps are temporarily suppressed and restored when leaving preview or switching maps.
+- Cycles bake source-lightmap mean matching is now opt-in and disabled by default. It is an atlas-only post-scale and therefore intentionally changes baked brightness relative to the live preview; the option is now visible next to Indirect Bounces with an explanation.
+- Existing scenes are migrated once away from the previous hidden default-on source-match behavior. The explicit Auto-calibrate action still uses source matching for its measurement and restores the user's toggle afterwards.
+- Delay-group Energy, Range and Source Softness controls in QSS Settings now update imported lights while the dialog is open. OK saves; Cancel restores the values that were active when the dialog opened.
+- Lighting diagnostics record how many scene lights were enabled/suppressed during live preview and whether source-match post-normalization was enabled.
+- CI validates Python compilation and standalone source/unit tests; Blender 5.3 Cycles preview/bake parity remains a runtime acceptance test.
+
+## 0.21.25 — Native Cycles lighting alternative and delay-group tuning
+
+- Cycles no longer applies custom graphs intended to reproduce ericw delay-0/5 falloff. Imported Quake delays select native Blender POINT/SPOT starting presets only; they are not an ericw-compatible renderer.
+- QSS Settings now expose independent Energy, Range and Source Softness multipliers for delay groups 0–5. They apply to imported lights and can be tuned by hand; defaults preserve the existing starting presets.
+- Cycles viewport preview now uses the same black world and diffuse-bounce count as the Cycles bake. The bake still performs its own source-mean and output-scale post-processing, so the preview and final atlas are not guaranteed pixel-identical.
+- Existing QSS-owned legacy Cycles falloff graphs are cleared on reapplication; user-authored light node trees are preserved.
+- Quake Direct's CPU solver remains unchanged and retains its separate ericw attenuation implementation.
+- Python compilation and standalone CI tests are required for this candidate; Blender 5.3 preview/bake and Ironwail tests remain user runtime checks.
+
+## 0.21.24 — Repair Enhanced BSPX export and make companion MAP sync optional
+
+- Enhanced BSPX export now builds the world-chart sampling context from the current face's QSS attributes and original BSP plane/texinfo. This removes the undefined `face_info` reference that stopped Enhanced exports on world-chart faces.
+- A missing, changed, ambiguous or unwritable companion MAP is now reported as a sidecar warning. Classic/Enhanced BSP export continues; SLOPGATE still refuses to overwrite an unverified MAP.
+- Added standalone export-contract tests for world-chart metadata and non-blocking companion MAP handling.
+- CI validates Python compilation and the standalone suite. A real Blender export and Ironwail comparison are still required.
+
+# SLOPGATE 0.21.23
+
+## 0.21.23 — Install Quake falloff correction on newly imported lights
+
+- Freshly imported QSS light datablocks now receive the Cycles Quake falloff graph for ericw delay 0 (linear) and delay 5 (soft inverse-square), even when Blender's generated starter node tree does not match the strict existing default-tree classifier.
+- The one-time permission to replace Blender's starter nodes applies only during the import operation that created the light. Later updates still require a QSS-owned graph or a recognized untouched Blender default, preserving genuinely user-edited light-node trees.
+- Diagnostics now report the reason a Quake falloff graph could not be installed.
+- The lighting-mode descriptions distinguish the fast Eevee approximation from the slower Cycles preview, which can use the Quake delay-0/5 corrections.
+- Fresh import, full-map Cycles bake and brightness comparison on the original rerelease E1M1 are still required before declaring falloff fidelity fixed.
+
+# SLOPGATE 0.21.22
+
+## 0.21.22 — Cycles-safe Quake spotlight edges
+
+- Quake spotlights with a zero `_softangle` now use a 0.01 Blender Spot Blend floor instead of an exact zero. This keeps Cycles' spotlight preparation finite while confining the fade to a very narrow edge band.
+- Explicit positive `_softangle` values retain their proportional mapping, subject only to the same non-zero safety floor.
+- The Quake reference cone calculation remains hard-edged; the floor is only the narrow Blender/Cycles representation used for imported spotlights.
+- This is a source-level correction with unit-test coverage. A fresh-import, full-map Blender 5.3 bake and in-game comparison are still required before calling the regression closed.
+
+# SLOPGATE 0.21.21
+
+## 0.21.18 — large-map chart sampling performance
+
+- Cache source BSP face, plane, edge, vertex, texinfo and resolved light-style metadata once per bake/diagnostic pass. Avoids rebuilding full-map arrays and resolving all face styles for every single face, which caused near-quadratic work on large maps.
+- Reuse the same parsed source cache for post-Cycles luxel statistics, face-coverage validation and source-lightmap comparison.
+- Reuse the same precomputed face metadata in the Quake direct-light bake path.
+- Add an affine world-chart sampling fast path: solve a face's texinfo/plane mapping once, then step pixel coordinates across its classic luxel grid without allocating an XYZ tuple for every sample.
+- Add regression coverage comparing the affine sampler with the previous XYZ reference sampler.
+- This is a performance correction; Blender 5.3 and Ironwail runtime validation remain required. The residual edge artefact is not yet claimed fixed.
+
+## 0.21.17 — world-aligned coplanar lightmap charts
+
+- Connected coplanar BSP29 faces with matching model ownership and resolved light styles share a deterministic world-plane luxel lattice for the Blender lightmap atlas.
+- Cycles UV assignment now maps face vertices into shared chart coordinates rather than restarting the texinfo-derived lightmap grid independently on each face.
+- Original per-face BSP29 texture projections and sample extents are retained; classic export samples those required face-local grids from the shared chart, so no nonstandard BSP29 fields are introduced.
+- Quake direct-light baking and Enhanced BSPX export read chart-space pixels. Partial bake scopes expand to all faces belonging to a shared chart.
+- Faces that are not eligible for a shared classic chart retain the existing independent atlas path.
+- Automated tests and Blender 5.3 / Ironwail runtime validation are required before the edge artefact can be declared fixed.
+
+## 0.21.16 — coplanar BSP lightmap edge reconciliation
 
 ## 0.21.16 — coplanar BSP lightmap edge reconciliation
 

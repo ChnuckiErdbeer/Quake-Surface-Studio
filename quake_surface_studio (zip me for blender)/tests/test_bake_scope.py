@@ -1,5 +1,7 @@
 import array
+import ast
 import os
+from pathlib import Path
 import sys
 import unittest
 
@@ -9,6 +11,40 @@ import bake_scope
 
 
 class SelectiveBakeScopeTests(unittest.TestCase):
+    def test_bake_luxel_values_are_assigned_before_nonfinite_validation(self):
+        addon_path = Path(__file__).resolve().parent.parent / "addon.py"
+        tree = ast.parse(addon_path.read_text(encoding="utf-8"))
+        bake_functions = []
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            has_cycles_bake = any(
+                isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Attribute)
+                and child.func.attr == "bake"
+                for child in ast.walk(node)
+            )
+            names = [
+                child for child in ast.walk(node)
+                if isinstance(child, ast.Name) and child.id == "bake_values"
+            ]
+            if has_cycles_bake and names:
+                bake_functions.append(names)
+        self.assertEqual(len(bake_functions), 1)
+        names = bake_functions[0]
+        assignments = [
+            node.lineno for node in names if isinstance(node.ctx, ast.Store)
+        ]
+        reads = [
+            node.lineno for node in names if isinstance(node.ctx, ast.Load)
+        ]
+        self.assertEqual(len(assignments), 1)
+        self.assertTrue(reads, "Bake luxel data must be validated after sampling")
+        self.assertLess(
+            assignments[0], min(reads),
+            "bake_values must be assigned before any non-finite check or other read",
+        )
+
     def test_full_scope_targets_every_face(self):
         self.assertEqual(
             bake_scope.resolve_target_faces(5),
