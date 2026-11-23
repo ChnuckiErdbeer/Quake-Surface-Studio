@@ -5,6 +5,7 @@
 - QSS Settings includes **Apply to Lights**. It applies the values currently in the dialog immediately without closing it. OK persists the profile; Cancel restores the last saved profile.
 - The Cycles bake snapshots the saved native delay profiles once and passes that same snapshot to every light reapplication during bake setup and cleanup.
 - Diagnostics include the exact delay profile used for the last bake plus per-delay lamp counts, actual energy range, custom cutoff distance range and source-radius range.
+- **Range** scales Blender's custom cutoff distance and mainly affects surfaces near or beyond the cutoff. **Shadow Radius** scales Blender's `PointLight.shadow_soft_size`, documented as a ray-shadow sampling radius; it softens shadow edges rather than widening the radial light pool.
 - The third control is labelled **Radius** to clarify it changes the spherical Blender light emitter size, not spotlight cone blend. Range maps to Blender's custom cutoff distance.
 - CI covers source contracts; Blender runtime validation is still required to verify interactive dialog behavior and bake response.
 
