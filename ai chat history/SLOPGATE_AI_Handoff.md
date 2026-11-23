@@ -152,50 +152,53 @@ Current intentional limitations to carry consciously or resolve:
 
 ## Immediate next action
 
-**Current action: user runtime validation of SLOPGATE 0.21.25 native Cycles lighting.** The agreed target is Cycles as a SLOPGATE-native alternative to ericw; do not judge this build by ericw pixel parity.
+**Current action: user runtime validation of SLOPGATE 0.21.26 Cycles preview/bake parity and live delay tuning.** The agreed target remains Cycles as a SLOPGATE-native alternative to ericw; do not judge this build by ericw pixel parity.
 
 Production source:
 - Branch: `fix/0.21.17-world-aligned-lightmap-charts`
-- HEAD: `c3916af50eeae63ade20ec3909da31f60b0248dc`
-- Add-on version: **0.21.25**
-- CI run: [45088607276](https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45088607276), success.
-- Python compilation passed; **324 standalone tests passed**; Blender-ready package assembly and artifact upload passed.
-- Installer: [Quake-Surface-Studio-v0.21.25-Blender-Install (artifact 14780112882)](https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45088607276/artifacts/14780112882)
-- SHA-256: `f467049d2b2d9619de50cf5f7cddd0a28ae4f09aa58b237912f36637c052d9ce`
+- HEAD: `d873532b5a34f311e6f887d86436c20030a163f0`
+- Add-on version: **0.21.26**
+- CI run: [45091988584](https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45091988584), success.
+- Python compilation passed; **327 standalone tests passed**; Blender-ready package assembly and artifact upload passed.
+- Installer: [Quake-Surface-Studio-v0.21.26-Blender-Install (artifact 14781369284)](https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45091988584/artifacts/14781369284)
+- SHA-256: `1caf73d76251c089793aa54eebe40dc0d8868ac6efb5b19d42148e91859ace89`
 
-Implemented:
-1. Removed the custom Cycles node graphs designed to reconstruct ericw delay-0/5 equations. Native Blender POINT/SPOT behavior is now used in Cycles and Eevee. Existing fully QSS-owned legacy correction graphs are cleared when imported-light settings are reapplied; user-authored/mixed node trees are preserved.
-2. Added per-delay Energy, Range and Source Softness multipliers for delay groups 0–5 in the QSS Settings dialog. Defaults are all 1.0 and preserve current native starting presets. These are artist-tweakable multipliers, not ericw formula controls.
-3. Cycles viewport preview now uses the same private black World and diffuse-bounce count as the Cycles bake. Changing **Indirect Bounces** while Cycles preview is active updates the preview. User Cycles settings are restored on leaving QSS Cycles preview.
-4. Quake Direct CPU lighting and its ericw-style static attenuation functions remain intact.
+### What changed since 0.21.25
 
-User validation procedure:
-1. Install the 0.21.25 artifact above. Start a fresh Blender file and freshly import the test BSP so no older light-node graphs or scene state are carried into the test.
-2. Set the desired **Indirect Bounces** value and select **Cycles** preview. Record the viewpoint and take a screenshot with textures enabled; also take a lightmap-only view if useful.
-3. Bake using the same bounce setting. Switch to **Baked** preview and capture the same viewpoint. Compare the spatial distribution on the same surfaces. Expect broadly similar pools/gradients, not pixel-identical values: the bake uses white diffuse receiver materials and applies its own post-bake atlas matching/output scaling.
-4. Open **Settings → Lighting workflow → Native light presets by legacy delay**. Initially leave the 18 multipliers at 1.0 so the baseline can be assessed. Then adjust only one delay group and one parameter at a time:
-   - Energy changes that group's overall brightness.
-   - Range changes the native cutoff distance.
-   - Source Softness changes the native point/spot source size.
-   Save settings; the new multipliers reapply to imported QSS lights.
-5. Send the before/after screenshots and, if the distributions still diverge substantially, a fresh lighting diagnostics report. Keep the original source lightmap available for rollback/reference.
+1. **Live preview now uses the same light visibility set as the bake.** The active map's imported QSS lights are enabled; user-authored lights and lights from other maps are temporarily hidden from live rendering. Their previous `hide_render`, `hide_viewport` and `hide_set` states are restored when leaving live preview, switching maps, or completing a successful bake. Diagnostics report enabled/suppressed light counts and names.
+2. **Source-mean bake normalization is opt-in and off by default.** The previous hidden default was on. It globally post-scaled only the baked atlas to the original BSP lightmap mean; it does not change the live lamps. This can make Baked mode darker or brighter than live preview. It is now exposed as **Match Source Brightness** beside **Indirect Bounces**, with a warning that enabling it intentionally changes baked brightness relative to Cycles preview.
+3. Existing scenes are migrated once to the new off-by-default source-match setting. An existing baked atlas is not rewritten by that migration; it must be rebaked to remove an earlier source-match multiplier. The explicit **Auto-calibrate Live Lights to Source** action still temporarily enables source matching for its measurement and restores the user's toggle.
+4. **Delay-group settings now update live inside the Settings dialog.** Energy, Range and Source Softness changes immediately reapply to imported lights while the dialog is open. **OK** saves; **Cancel** reapplies the values that were active when the dialog opened.
+5. The 0.21.25 behavior remains: Cycles preview shares the bake's private black World and diffuse-bounce count; Quake Direct remains a separate CPU solver.
 
-Do not start extended TrenchBroom FGD / per-light SLOPGATE key work before 1.0. That is deliberately deferred until the native light workflow and Blender property schema have settled. Do not re-open the confirmed white edge-strip fix while testing lighting unless it visibly regresses.
+### User runtime comparison procedure
+
+1. Install 0.21.26. A freshly imported map is preferred for the first comparison. If continuing in an existing .blend, the 0.21.26 migration turns **Match Source Brightness** off once.
+2. In the LIGHTING panel, leave **Match Source Brightness** unchecked and set the desired **Indirect Bounces** value. Keep delay multipliers at 1.0 for the baseline.
+3. Select Cycles preview and wait until the viewport reaches its target sample count before taking a screenshot. The submitted 0.21.25 preview screenshot showed **Sample 3 / 2048**, so it was captured before convergence and is not a final-quality comparison.
+4. Bake once with the same bounce count and source-match disabled. Existing baked atlases are not retroactively recalculated by the default migration. Compare the same viewpoint after the bake.
+5. Open Settings and adjust one delay group/one Energy, Range or Source Softness value at a time. Changes should be visible immediately. Press OK to persist, or Cancel to restore the previous profile.
+6. If preview and bake still differ substantially after a converged preview and a fresh source-match-disabled bake, provide both screenshots plus a fresh **Save Lighting Diagnostics** report. The report now records preview-light isolation and source-match state.
+
+Do not interpret this as proof of Blender runtime parity: CI does not execute a Blender 5.3 viewport render or bake. The user's Blender test remains the acceptance step. Keep the confirmed white edge-strip fix separate and closed. Do not begin extended TrenchBroom FGD / per-light keys before 1.0.
 
 ## Current verified baseline
 
 - **Production source branch:** `fix/0.21.17-world-aligned-lightmap-charts`.
-- **Current production branch HEAD:** `c3916af50eeae63ade20ec3909da31f60b0248dc` (2026-11-23), add-on version **0.21.25**.
-- **Latest CI:** run `45088607276`, success. Python compilation passed; **324 standalone tests passed**; Blender-ready package assembly and artifact upload passed. CI does not run a Blender GUI, Cycles preview/bake or game engine.
-- **Current installer:** `Quake-Surface-Studio-v0.21.25-Blender-Install`, artifact ID `14780112882`, SHA-256 `f467049d2b2d9619de50cf5f7cddd0a28ae4f09aa58b237912f36637c052d9ce`. [Artifact page](https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45088607276/artifacts/14780112882).
-- **Lighting strategy:** Cycles is a SLOPGATE-native alternative to ericw, not an ericw parity implementation. 0.21.25 removes custom Cycles correction graphs, adds per-delay native Energy/Range/Source Softness controls, and aligns the Cycles preview world/bounce count with bake settings. User Blender runtime acceptance is pending.
-- **Quake Direct:** its CPU solver remains separate and retains the Quake/ericw-style static delay 0–5 implementation.
+- **Current production branch HEAD:** `d873532b5a34f311e6f887d86436c20030a163f0` (2026-11-23), add-on version **0.21.26**.
+- **Latest CI:** run `45091988584`, success. Python compilation passed; **327 standalone tests passed**; Blender-ready package assembly and artifact upload passed. CI does not run Blender GUI or Cycles preview/bake.
+- **Current installer:** `Quake-Surface-Studio-v0.21.26-Blender-Install`, artifact ID `14781369284`, SHA-256 `1caf73d76251c089793aa54eebe40dc0d8868ac6efb5b19d42148e91859ace89`. [Artifact page](https://github.com/ChnuckiErdBeer/Quake-Surface-Studio/actions/runs/45091988584/artifacts/14781369284).
+- **Lighting strategy:** Cycles is a SLOPGATE-native alternative to ericw, not an ericw parity implementation. 0.21.26 further aligns preview/bake light visibility, disables hidden source-match normalization by default and makes delay-group settings live with Cancel rollback. Blender runtime acceptance is pending.
+- **Bake normalization:** `qss_bake_match_source` is now opt-in/off by default because it post-scales only the baked atlas. Existing .blend scenes are migrated once; old lightmaps must be rebaked to remove prior normalization. Auto-calibrate still intentionally opts in during its measurement.
+- **Cycles preview:** uses the bake's private black World, imported active-map lights only and the QSS diffuse-bounce count. Converged viewport sample count must be reached before making visual comparisons.
+- **Native delay tuning:** QSS Settings Energy, Range and Source Softness multipliers apply live to imported delay groups 0–5; OK saves and Cancel restores the original values.
+- **Quake Direct:** CPU solver remains separate and retains the Quake/ericw-style static delay 0–5 implementation.
 - **User-verified export state:** Enhanced BSP export integrity report passed; external `.lit` sidecar validated; exact exported BSP loaded in Ironwail without errors.
-- **User-verified lightmap edge state:** the narrow white face-edge strips are gone in Blender immediately after import and in Ironwail following the 0.21.17 world-chart edge-support fix. Keep this separate from current Cycles preview/bake tuning.
-- **Documentation branch:** `fix/v0.11.1-metadata-style-order-test`; this handoff and the conversation archive are maintained here. Its add-on source snapshot is not the installer source.
-- **Default `main`:** still an old 0.11.0 snapshot and is not the current production source. Do not build from it.
+- **User-verified lightmap edge state:** narrow white face-edge strips are gone in Blender and Ironwail following the 0.21.17 world-chart edge-support fix. Keep separate from Cycles lighting work.
+- **Documentation branch:** `fix/v0.11.1-metadata-style-order-test`; this handoff and the conversation archive are maintained here. Its add-on source snapshot is not installer source.
+- **Default `main`:** still an old 0.11.0 snapshot and is not production source. Do not build from it.
 - **TrenchBroom FGD / extended per-light Cycles properties:** post-1.0, after the native parameter schema has been validated.
-- Keep CI, Blender GUI behavior, and engine runtime results explicitly distinguished. No official 1.0 release has been made.
+- Keep CI, Blender GUI behavior and engine runtime results explicitly distinguished. No official 1.0 release has been made.
 
 ---
 
