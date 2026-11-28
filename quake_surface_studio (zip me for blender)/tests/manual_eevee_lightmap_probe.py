@@ -90,7 +90,22 @@ def cleanup_probe_scene(scene, meshes, materials, lights, cameras, world):
 
 
 def configure_scene(scene, resolution, output_path):
-    scene.render.engine = "BLENDER_EEVEE_NEXT"
+    # Blender 5.0 renamed EEVEE's identifier from BLENDER_EEVEE_NEXT
+    # back to BLENDER_EEVEE. Detect the identifiers offered by this build
+    # instead of relying on a version-string guess.
+    engine_items = scene.render.bl_rna.properties["engine"].enum_items
+    engine_ids = {item.identifier for item in engine_items}
+    if "BLENDER_EEVEE" in engine_ids:
+        eevee_engine = "BLENDER_EEVEE"
+    elif "BLENDER_EEVEE_NEXT" in engine_ids:
+        eevee_engine = "BLENDER_EEVEE_NEXT"
+    else:
+        raise RuntimeError(
+            "No supported Eevee render engine is available. "
+            f"Detected render engines: {', '.join(sorted(engine_ids))}"
+        )
+
+    scene.render.engine = eevee_engine
     scene.render.resolution_x = resolution
     scene.render.resolution_y = resolution
     scene.render.resolution_percentage = 100
@@ -279,7 +294,7 @@ def main():
         print(
             "QSS_EEVEE_PROBE "
             f"blender={bpy.app.version_string} "
-            f"engine=BLENDER_EEVEE_NEXT "
+            f"engine={probe_scene.render.engine} "
             f"resolution={args.resolution}x{args.resolution} "
             f"render_seconds={elapsed:.4f} "
             f"sampled_pixels={metrics['sample_count']} "
