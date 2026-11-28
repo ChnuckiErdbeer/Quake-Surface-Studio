@@ -270,10 +270,8 @@ def main():
         bpy.ops.render.render(write_still=True, scene=probe_scene.name)
         elapsed = time.perf_counter() - started
 
-        old_image = bpy.data.images.get(RESULT_IMAGE_NAME)
-        if old_image is not None:
-            bpy.data.images.remove(old_image, do_unlink=True)
-
+        # Never delete or overwrite a pre-existing Blender image datablock.
+        # Blender will add a numeric suffix if this name is already in use.
         image = bpy.data.images.load(output_path, check_existing=False)
         image.name = RESULT_IMAGE_NAME
         metrics = inspect_render(image)
