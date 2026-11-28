@@ -12,13 +12,24 @@ Eevee irradiance volumes are not UV lightmap atlases. This spike tests a differe
 
 ## Stage 0: renderer/camera feasibility
 
-Run the manual probe in Blender 5.3:
+### Run from Blender's UI (recommended)
+
+1. Check out the `experiment/eevee-lightmap-capture-spike` branch, or obtain `manual_eevee_lightmap_probe.py` from that branch.
+2. In Blender 5.3, open the **Scripting** workspace.
+3. In the Text Editor, choose **Open** and select `manual_eevee_lightmap_probe.py`.
+4. Press **Run Script**.
+
+The probe creates a separate temporary scene, renders it with Eevee Next, checks the rendered pixels, loads the PNG into Blender, then removes only the temporary scene and its datablocks. Your current scene, objects, lights, and render settings are left unchanged. When launched from the Text Editor or Python Console, the editor area switches to an Image Editor showing the result.
+
+The default output is `qss_eevee_probe.png` in Blender's temporary directory. The system console / Blender console prints a line beginning with `QSS_EEVEE_PROBE` containing Blender version, render duration, sampled-pixel statistics, and output path.
+
+### Optional: run in background mode
 
 ```sh
 blender --background --python tests/manual_eevee_lightmap_probe.py -- --output /tmp/qss_eevee_probe.png
 ```
 
-It creates a lit receiver plane, an occluding cube, an orthographic camera aligned to the receiver plane, and renders with Eevee Next. It reports render duration, engine, resolution, and output path.
+This creates a lit receiver plane, an occluding cube, an orthographic camera aligned to the receiver plane, and renders with Eevee Next.
 
 This verifies the Blender 5.3 Eevee render API, orthographic chart projection, pixel readback, and shadow rendering. It does **not** yet prove per-face isolation or match Cycles output.
 
